@@ -1,0 +1,82 @@
+# ===== Dependencies =====
+/node_modules
+/.pnp
+.pnp.*
+.yarn/install-state.gz
+
+# ===== Build output =====
+/dist
+/build
+*.tsbuildinfo
+
+# ===== Logs =====
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+logs
+
+# ===== Environment & secrets =====
+# Real env files are local-only; commit `.env.example` instead.
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.test
+# Stray copies that have shown up in this repo before.
+.env copy*
+.env.bak
+
+# TLS / certificate material (Aiven CA, signing keys, etc.)
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+/certs
+
+# ===== User-generated uploads (matches APP_UPLOAD_DIR in .env) =====
+/uploads
+
+# ===== Tests / coverage =====
+/coverage
+/.nyc_output
+/test-results
+
+# ===== Editor / IDE =====
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+.idea
+*.iml
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*~
+
+# ===== OS files =====
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ===== Misc / temp =====
+*.tmp
+*.bak
+*.backup
+*.orig
+.cache
+.eslintcache
+.stylelintcache
+
+# ===== One-off / debug scripts =====
+# Remove this line if you actually want to track fix_shipping.js
+fix_shipping.js

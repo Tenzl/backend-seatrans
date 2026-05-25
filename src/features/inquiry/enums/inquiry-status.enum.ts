@@ -1,0 +1,7 @@
+export enum InquiryStatus {
+  PENDING = 'PENDING',
+  PROCESSING = 'PROCESSING',
+  QUOTED = 'QUOTED',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED',
+}
