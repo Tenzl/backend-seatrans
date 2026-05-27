@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, NotFoundException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -8,6 +8,7 @@ import { Role } from './entities/role.entity';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ConfigService } from '@nestjs/config';
+import { UpdateMeDto } from './dto/update-me.dto';
 
 @Injectable()
 export class AuthService {
@@ -29,10 +30,23 @@ export class AuthService {
       throw new ConflictException('Email already exists');
     }
 
+    const usernameRaw = registerDto.username?.trim();
+    const username = usernameRaw ? usernameRaw.toLowerCase() : null;
+    if (username) {
+      const existingUsername = await this.userRepository
+        .createQueryBuilder('user')
+        .where('LOWER(COALESCE(user.username, \'\')) = :username', { username })
+        .getOne();
+      if (existingUsername) {
+        throw new ConflictException('Username already exists');
+      }
+    }
+
     const hashedPassword = await bcrypt.hash(registerDto.password, 10);
 
     const newUser = this.userRepository.create({
       ...registerDto,
+      username,
       password: hashedPassword,
     });
 
@@ -46,16 +60,21 @@ export class AuthService {
     await this.userRepository.save(newUser);
 
     return this.login({
-      email: registerDto.email,
+      identifier: registerDto.email,
       password: registerDto.password, // Raw password needed here to get the token
     });
   }
 
   async login(loginDto: LoginDto) {
-    const user = await this.userRepository.findOne({
-      where: { email: loginDto.email },
-      relations: ['role'],
-    });
+    const raw = loginDto.identifier.trim();
+    const identifier = raw.toLowerCase();
+
+    const user = await this.userRepository
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.role', 'role')
+      .where('LOWER(user.email) = :identifier', { identifier })
+      .orWhere('LOWER(COALESCE(user.username, \'\')) = :identifier', { identifier })
+      .getOne();
 
     if (!user || !user.password) {
       throw new UnauthorizedException('Invalid credentials');
@@ -87,6 +106,7 @@ export class AuthService {
       user: {
         id: user.id,
         email: user.email,
+        username: user.username,
         fullName: user.fullName,
         phone: user.phone,
         company: user.company,
@@ -98,5 +118,38 @@ export class AuthService {
 
   async validateUserContext(userId: number) {
      return this.userRepository.findOne({ where: { id: userId }, relations: ['role'] });
+  }
+
+  async updateMe(userId: number, dto: UpdateMeDto) {
+    const user = await this.userRepository.findOne({ where: { id: userId }, relations: ['role'] });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (typeof dto.fullName === 'string') {
+      user.fullName = dto.fullName.trim();
+    }
+    if (typeof dto.phone === 'string') {
+      user.phone = dto.phone.trim();
+    }
+    if (typeof dto.company === 'string') {
+      user.company = dto.company.trim();
+    }
+
+    await this.userRepository.save(user);
+    const saved = await this.userRepository.findOne({ where: { id: userId }, relations: ['role'] });
+    if (!saved) throw new NotFoundException('User not found');
+
+    // Return plain user payload; global ResponseInterceptor wraps it once.
+    return {
+      id: saved.id,
+      email: saved.email,
+      username: saved.username ?? null,
+      fullName: saved.fullName,
+      phone: saved.phone,
+      company: saved.company,
+      role: saved.role?.name,
+      roleGroup: saved.role?.roleGroup,
+    };
   }
 }

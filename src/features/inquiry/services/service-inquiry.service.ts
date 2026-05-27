@@ -16,6 +16,11 @@ import { UpdateInquiryStatusDto } from '../dto/update-inquiry-status.dto';
 import { UpdateInquiryFormDto } from '../dto/update-inquiry-form.dto';
 import { UpdateInquiryHoursDto } from '../dto/update-inquiry-hours.dto';
 import { InquiryDocumentService } from './inquiry-document.service';
+import { InquiryCreatedSource } from '../enums/inquiry-created-source.enum';
+import {
+  InquiryResponseAudience,
+  mapShippingAgencyInquiryFields,
+} from '../mappers/shipping-agency-inquiry.mapper';
 
 @Injectable()
 export class ServiceInquiryService {
@@ -63,6 +68,7 @@ export class ServiceInquiryService {
       company: this.trimToNull(dto.company) ?? currentUser.company,
       status: InquiryStatus.PENDING,
       notes: this.trimToNull(dto.notes),
+      createdSource: InquiryCreatedSource.CUSTOMER_PORTAL,
       quoteForm: this.isShippingAgency(serviceType.name) ? 'HCM' : null,
       berthHours: null,
       anchorageHours: null,
@@ -130,6 +136,7 @@ export class ServiceInquiryService {
         serviceTypeId: serviceType?.id,
       },
       query,
+      'user',
     );
   }
 
@@ -145,6 +152,7 @@ export class ServiceInquiryService {
         serviceTypeId: serviceType?.id,
       },
       query,
+      'admin',
     );
   }
 
@@ -165,7 +173,7 @@ export class ServiceInquiryService {
       throw new NotFoundException('Inquiry not found');
     }
 
-    return this.toResponse(row);
+    return this.toResponse(row, 'admin');
   }
 
   async updateStatus(
@@ -177,7 +185,7 @@ export class ServiceInquiryService {
     row.status = dto.status;
 
     const saved = await this.inquiryRepository.save(row);
-    return this.toResponse(saved);
+    return this.toResponse(saved, 'admin');
   }
 
   async updateForm(
@@ -192,7 +200,7 @@ export class ServiceInquiryService {
 
     row.quoteForm = dto.form.trim().toUpperCase();
     const saved = await this.inquiryRepository.save(row);
-    return this.toResponse(saved);
+    return this.toResponse(saved, 'admin');
   }
 
   async updateHours(
@@ -216,7 +224,7 @@ export class ServiceInquiryService {
     }
 
     const saved = await this.inquiryRepository.save(row);
-    return this.toResponse(saved);
+    return this.toResponse(saved, 'admin');
   }
 
   async deleteByServiceAndId(serviceTypeName: string, id: number): Promise<void> {
@@ -269,6 +277,7 @@ export class ServiceInquiryService {
       serviceTypeId?: number;
     },
     query: ListInquiriesQueryDto,
+    audience: InquiryResponseAudience = 'admin',
   ): Promise<{ content: unknown[]; totalElements: number; totalPages: number; size: number; number: number }> {
     const page = this.sanitizePage(query.page);
     const size = this.sanitizePageSize(query.size);
@@ -297,7 +306,7 @@ export class ServiceInquiryService {
     });
 
     return {
-      content: rows.map((row) => this.toResponse(row)),
+      content: rows.map((row) => this.toResponse(row, audience)),
       totalElements,
       totalPages: totalElements === 0 ? 0 : Math.ceil(totalElements / size),
       size,
@@ -305,9 +314,13 @@ export class ServiceInquiryService {
     };
   }
 
-  private toResponse(row: ServiceInquiry): Record<string, unknown> {
+  private toResponse(
+    row: ServiceInquiry,
+    audience: InquiryResponseAudience = 'admin',
+  ): Record<string, unknown> {
     const base = {
       id: row.id,
+      userId: row.userId,
       fullName: row.fullName,
       email: row.email,
       phone: row.phone,
@@ -328,29 +341,7 @@ export class ServiceInquiryService {
     if (serviceSlug === 'shipping-agency') {
       return {
         ...base,
-        toName: row.toName,
-        mv: row.mv,
-        eta: row.eta,
-        dwt: row.dwt,
-        grt: row.grt,
-        loa: row.loa,
-        cargoType: row.cargoType,
-        cargoName: row.cargoName,
-        cargoNameOther: row.cargoNameOther,
-        cargoQuantity: row.cargoQuantity,
-        portOfCall: row.portOfCall,
-        dischargeLoadingLocation: row.dischargeLoadingLocation,
-        otherInfo: row.otherInfo,
-        transportLs: row.transportLs,
-        transportQuarantine: row.transportQuarantine,
-        frtTaxType: row.frtTaxType,
-        purposeOfCalling: row.purposeOfCalling,
-        boatHireAmount: row.boatHireAmount,
-        tallyFeeAmount: row.tallyFeeAmount,
-        quoteForm: row.quoteForm,
-        berthHours: row.berthHours,
-        anchorageHours: row.anchorageHours,
-        pilotage3rdMiles: row.pilotage3rdMiles,
+        ...mapShippingAgencyInquiryFields(row, audience),
       };
     }
 

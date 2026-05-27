@@ -12,6 +12,7 @@ import { LogisticsModule } from './features/logistics/logistics.module';
 import { PostModule } from './features/post/post.module';
 import { BookingModule } from './features/booking/booking.module';
 import { InquiryModule } from './features/inquiry/inquiry.module';
+import { UsersModule } from './features/users/users.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { InquiryModule } from './features/inquiry/inquiry.module';
     PostModule,
     BookingModule,
     InquiryModule,
+    UsersModule,
   ],
   controllers: [AppController],
   providers: [AppService],

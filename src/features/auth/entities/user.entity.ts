@@ -17,6 +17,9 @@ export class User {
   @Column({ unique: true, length: 100 })
   email!: string;
 
+  @Column({ type: 'varchar', unique: true, length: 50, nullable: true })
+  username!: string | null;
+
   @Column({ length: 255 })
   password?: string;
 
@@ -53,6 +56,13 @@ export class User {
   @ManyToOne(() => Role, (role) => role.users, { eager: true, nullable: true })
   @JoinColumn({ name: 'role_id' })
   role!: Role;
+
+  @Column({ name: 'created_by_user_id', type: 'int', nullable: true })
+  createdByUserId!: number | null;
+
+  @ManyToOne(() => User, { nullable: true })
+  @JoinColumn({ name: 'created_by_user_id' })
+  createdByUser!: User | null;
 
   hasRole(roleName: string): boolean {
     return this.role?.name === roleName;

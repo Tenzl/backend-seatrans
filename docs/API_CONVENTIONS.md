@@ -42,6 +42,11 @@ Use query param `q` on collection GET routes (not `/search` path segments).
 
 `@ApiAdmin()` = JWT + `ROLE_ADMIN` | `ROLE_EMPLOYEE` | `ROLE_INTERNAL`.
 
+## Shipping EPDA field visibility
+
+- Customer list/detail (`GET /v1/inquiries/user/:userId`): no internal EPDA columns; `quoteAvailable` when `QUOTED`.
+- Admin list/detail: full EPDA fields. See `docs/SHIPPING_AGENCY_EPDA.md`.
+
 ## Canonical routes
 
 | Area | Endpoints |
@@ -54,6 +59,9 @@ Use query param `q` on collection GET routes (not `/search` path segments).
 | Inquiry submit | `POST /v1/inquiries` — requires `serviceTypeId` **or** `serviceTypeSlug` |
 | Inquiry admin list | `GET /v1/admin/inquiries?serviceSlug=&status=&page=&size=` |
 | Inquiry admin detail | `GET /v1/admin/inquiries/:serviceType/:id` |
+| Shipping EPDA (internal) | `POST /v1/admin/inquiries/shipping-agency` (create with EPDA draft) |
+| Shipping EPDA draft | `PATCH /v1/admin/inquiries/shipping-agency/:id/epda` |
+| Shipping EPDA issue | `POST /v1/admin/inquiries/shipping-agency/:id/epda/issue` → status `QUOTED` |
 | Inquiry documents admin | `POST|DELETE /v1/admin/inquiries/:slug/:id/documents` |
 | Inquiry document file | `GET /v1/inquiries/:slug/:id/documents/:docId/content?disposition=inline\|attachment` |
 

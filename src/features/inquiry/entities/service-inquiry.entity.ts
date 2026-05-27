@@ -9,6 +9,7 @@ import {
 } from 'typeorm';
 import { ServiceType } from '../../logistics/entities/service-type.entity';
 import { User } from '../../auth/entities/user.entity';
+import { InquiryCreatedSource } from '../enums/inquiry-created-source.enum';
 
 @Entity('service_inquiries')
 export class ServiceInquiry {
@@ -129,6 +130,70 @@ export class ServiceInquiry {
 
   @Column({ name: 'pilotage_3rd_miles', type: 'decimal', precision: 10, scale: 2, nullable: true })
   pilotage3rdMiles!: string | null;
+
+  /** Internal-only EPDA pricing / template inputs (never returned on customer APIs). */
+  @Column({ name: 'epda_document_date', type: 'date', nullable: true })
+  epdaDocumentDate!: string | null;
+
+  @Column({ name: 'ship_type', type: 'varchar', length: 64, nullable: true })
+  shipType!: string | null;
+
+  @Column({
+    name: 'ocean_frt_rate_usd_per_mt',
+    type: 'decimal',
+    precision: 15,
+    scale: 4,
+    nullable: true,
+  })
+  oceanFrtRateUsdPerMt!: string | null;
+
+  @Column({ name: 'garbage_cbm_amount', type: 'decimal', precision: 15, scale: 4, nullable: true })
+  garbageCbmAmount!: string | null;
+
+  @Column({ name: 'quarantine_cargo_mode', type: 'varchar', length: 32, nullable: true })
+  quarantineCargoMode!: string | null;
+
+  @Column({ name: 'agency_fee_mode', type: 'varchar', length: 64, nullable: true })
+  agencyFeeMode!: string | null;
+
+  @Column({
+    name: 'agency_discount_percent',
+    type: 'decimal',
+    precision: 8,
+    scale: 2,
+    nullable: true,
+  })
+  agencyDiscountPercent!: string | null;
+
+  @Column({
+    name: 'agency_lumpsum_amount',
+    type: 'decimal',
+    precision: 15,
+    scale: 2,
+    nullable: true,
+  })
+  agencyLumpsumAmount!: string | null;
+
+  @Column({ name: 'epda_snapshot', type: 'jsonb', nullable: true })
+  epdaSnapshot!: Record<string, unknown> | null;
+
+  @Column({ name: 'quoted_at', type: 'timestamptz', nullable: true })
+  quotedAt!: Date | null;
+
+  @ManyToOne(() => User, { nullable: true })
+  @JoinColumn({ name: 'quoted_by_user_id' })
+  quotedBy!: User | null;
+
+  @Column({ name: 'quoted_by_user_id', type: 'bigint', nullable: true })
+  quotedByUserId!: number | null;
+
+  @Column({
+    name: 'created_source',
+    type: 'varchar',
+    length: 32,
+    default: InquiryCreatedSource.CUSTOMER_PORTAL,
+  })
+  createdSource!: InquiryCreatedSource;
 
   // Chartering fields
   @Column({ name: 'loading_port', type: 'varchar', length: 255, nullable: true })
