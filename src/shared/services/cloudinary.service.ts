@@ -17,6 +17,34 @@ export class CloudinaryService {
     });
   }
 
+  /**
+   * Generate a signed Cloudinary URL for raw assets (e.g. PDFs) to prevent
+   * long-lived public links from being shared.
+   *
+   * Note: This requires Cloudinary "Authenticated" delivery to be configured.
+   * If not configured, fall back to the stored URL.
+   */
+  buildSignedRawUrl(publicId: string, expiresInSeconds = 60): string {
+    if (!publicId?.trim()) return publicId;
+    const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
+    const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
+    if (!cloudName || !apiSecret) return publicId;
+
+    const expiresAt = Math.floor(Date.now() / 1000) + expiresInSeconds;
+    try {
+      // cloudinary.url signs using configured credentials (api_secret)
+      return cloudinary.url(publicId, {
+        resource_type: 'raw',
+        type: 'authenticated',
+        sign_url: true,
+        expires_at: expiresAt,
+        secure: true,
+      });
+    } catch {
+      return publicId;
+    }
+  }
+
   async uploadBuffer(buffer: Buffer, folder = 'gallery'): Promise<CloudinaryUploadResult> {
     const result = await new Promise<UploadApiResponse>((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(

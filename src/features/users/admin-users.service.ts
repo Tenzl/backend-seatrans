@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
@@ -16,6 +17,7 @@ export class AdminUsersService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(Role)
     private readonly roleRepository: Repository<Role>,
+    private readonly configService: ConfigService,
   ) {}
 
   async listRoles(roleGroup?: RoleGroup): Promise<AdminRoleOptionDto[]> {
@@ -106,7 +108,11 @@ export class AdminUsersService {
       throw new BadRequestException('Only INTERNAL roles can be created here');
     }
 
-    const hashed = await bcrypt.hash(dto.password, 10);
+    const saltRounds = Number(this.configService.get<string>('BCRYPT_SALT_ROUNDS', '12'));
+    const hashed = await bcrypt.hash(
+      dto.password,
+      Number.isFinite(saltRounds) && saltRounds >= 10 ? saltRounds : 12,
+    );
     const row: User = this.userRepository.create({
       email,
       username,

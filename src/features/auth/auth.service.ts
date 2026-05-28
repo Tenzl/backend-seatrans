@@ -42,7 +42,11 @@ export class AuthService {
       }
     }
 
-    const hashedPassword = await bcrypt.hash(registerDto.password, 10);
+    const saltRounds = Number(this.configService.get<string>('BCRYPT_SALT_ROUNDS', '12'));
+    const hashedPassword = await bcrypt.hash(
+      registerDto.password,
+      Number.isFinite(saltRounds) && saltRounds >= 10 ? saltRounds : 12,
+    );
 
     const newUser = this.userRepository.create({
       ...registerDto,
@@ -116,8 +120,54 @@ export class AuthService {
     };
   }
 
+  /**
+   * Transitional: validate an already-issued JWT and re-issue a cookie session.
+   * This supports legacy OAuth flows that delivered a token in the redirect URL.
+   */
+  async issueSessionFromToken(token: string) {
+    try {
+      const payload = this.jwtService.verify(token) as any;
+      const userId = Number(payload?.sub);
+      if (!Number.isFinite(userId)) return null;
+
+      const user = await this.userRepository.findOne({
+        where: { id: userId },
+        relations: ['role'],
+      });
+      if (!user || !user.isActive) return null;
+
+      const sessionPayload = {
+        sub: user.id,
+        email: user.email,
+        roleGroup: user.role?.roleGroup,
+        roles: [user.role?.name].filter(Boolean),
+      };
+
+      return {
+        token: this.jwtService.sign(sessionPayload),
+        type: 'Bearer',
+        user: {
+          id: user.id,
+          email: user.email,
+          username: user.username,
+          fullName: user.fullName,
+          phone: user.phone,
+          company: user.company,
+          role: user.role?.name,
+          roleGroup: user.role?.roleGroup,
+        },
+      };
+    } catch {
+      return null;
+    }
+  }
+
   async validateUserContext(userId: number) {
-     return this.userRepository.findOne({ where: { id: userId }, relations: ['role'] });
+     const user = await this.userRepository.findOne({ where: { id: userId }, relations: ['role'] });
+     if (!user) return null;
+     // Never attach password hash to req.user (defense in depth)
+     delete (user as any).password;
+     return user;
   }
 
   async updateMe(userId: number, dto: UpdateMeDto) {

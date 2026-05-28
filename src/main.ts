@@ -3,6 +3,8 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { GlobalExceptionFilter } from './shared/filters/global-exception.filter';
 import { ResponseInterceptor } from './shared/interceptors/response.interceptor';
+import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -23,6 +25,16 @@ async function bootstrap() {
 
   // Set global prefix mapping to existing Java routes
   app.setGlobalPrefix('api');
+
+  // Enable cookie parsing for HttpOnly auth cookies
+  app.use(cookieParser());
+
+  // Security headers (CSP is typically handled at the edge / Next.js)
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' }, // Cloudinary, etc.
+    }),
+  );
 
   // Automatically validate Data Transfer Objects
   app.useGlobalPipes(new ValidationPipe({

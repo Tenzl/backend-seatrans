@@ -111,6 +111,16 @@ export class InquiryDocumentService {
     return rows.map((row) => this.toDto(row));
   }
 
+  /**
+   * Returns inquiry owner id after validating the serviceSlug matches the inquiry service type.
+   * Used to enforce ownership checks on customer-facing document routes.
+   */
+  async getInquiryOwnerId(serviceSlug: string, targetId: number): Promise<number> {
+    const inquiry = await this.requireInquiry(targetId);
+    this.ensureServiceSlugMatches(serviceSlug, inquiry);
+    return inquiry.userId;
+  }
+
   async getDocumentsByType(
     serviceSlug: string,
     targetId: number,

@@ -72,7 +72,11 @@ export class ExternalCustomersService {
     const role = await this.resolveExternalCustomerRole();
     const fullName = dto.fullName.trim();
     const email = await this.allocatePlaceholderEmail(fullName);
-    const password = await bcrypt.hash(randomBytes(32).toString('hex'), 10);
+    const saltRounds = Number(this.configService.get<string>('BCRYPT_SALT_ROUNDS', '12'));
+    const password = await bcrypt.hash(
+      randomBytes(32).toString('hex'),
+      Number.isFinite(saltRounds) && saltRounds >= 10 ? saltRounds : 12,
+    );
 
     const row = this.userRepository.create({
       email,

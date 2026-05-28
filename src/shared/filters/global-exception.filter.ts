@@ -67,26 +67,10 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         message = exception.message;
       }
     } else if (exception instanceof Error) {
-      const msg = exception.message.toLowerCase();
-      if (msg.includes('already exists')) {
-        status = HttpStatus.CONFLICT;
-        message = exception.message;
-      } else if (msg.includes('not found')) {
-        status = HttpStatus.NOT_FOUND;
-        message = exception.message;
-      } else if (
-        msg.includes('cannot read properties') ||
-        msg.includes('query failed') ||
-        msg.includes('connection') ||
-        msg.includes('typeorm') ||
-        msg.includes('database')
-      ) {
-        status = HttpStatus.INTERNAL_SERVER_ERROR;
-        message = 'A database error occurred. Please try again.';
-      } else {
-        status = HttpStatus.BAD_REQUEST;
-        message = exception.message || 'Request failed';
-      }
+      // Never expose raw error messages from unexpected exceptions.
+      // Reserve detailed context for server logs only.
+      status = HttpStatus.INTERNAL_SERVER_ERROR;
+      message = 'Internal server error';
     }
 
     if (status === HttpStatus.INTERNAL_SERVER_ERROR) {

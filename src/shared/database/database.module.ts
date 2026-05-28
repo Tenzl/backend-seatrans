@@ -44,7 +44,9 @@ function buildSsl(
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
         const entities = [__dirname + '/../../**/*.entity{.ts,.js}'];
-        const synchronize = true; // Use with caution. Do not use in production.
+        const synchronize = configService.get<string>('DB_SYNCHRONIZE', 'false').toLowerCase() === 'true';
+        const migrationsRun = configService.get<string>('DB_MIGRATIONS_RUN', 'false').toLowerCase() === 'true';
+        const migrations = [__dirname + '/../../migrations/*{.ts,.js}'];
 
         const dbUrl = configService.get<string>('DB_URL')?.trim();
         if (dbUrl) {
@@ -64,6 +66,8 @@ function buildSsl(
             database: parsedUrl.pathname.replace('/', ''),
             entities,
             synchronize,
+            migrations,
+            migrationsRun,
             ssl,
             extra: ssl ? { ssl } : undefined,
           };
@@ -88,6 +92,8 @@ function buildSsl(
           database,
           entities,
           synchronize,
+          migrations,
+          migrationsRun,
           ssl,
           extra: ssl ? { ssl } : undefined,
         };

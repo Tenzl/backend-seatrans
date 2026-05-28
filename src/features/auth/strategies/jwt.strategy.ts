@@ -4,6 +4,11 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from '../auth.service';
 
+function cookieJwtExtractor(req: any): string | null {
+  const token = req?.cookies?.auth_token;
+  return typeof token === 'string' && token.trim() ? token : null;
+}
+
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
@@ -11,9 +16,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private readonly authService: AuthService,
   ) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        cookieJwtExtractor,
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ]),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('APP_JWT_SECRET', 'super-secret'),
+      secretOrKey: configService.getOrThrow<string>('APP_JWT_SECRET'),
     });
   }
 

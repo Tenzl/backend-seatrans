@@ -9,6 +9,8 @@ import {
   ParseIntPipe,
   Post,
   Req,
+  ParseFilePipe,
+  MaxFileSizeValidator,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -31,7 +33,12 @@ export class AdminInquiryDocumentController {
     @Param('serviceSlug') serviceSlug: string,
     @Param('targetId', ParseIntPipe) targetId: number,
     @Body() body: UploadInquiryDocumentDto,
-    @UploadedFile() file: Express.Multer.File,
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [new MaxFileSizeValidator({ maxSize: 12 * 1024 * 1024 })],
+      }),
+    )
+    file: Express.Multer.File,
     @Req() req: Request & { user?: { id?: number } },
   ) {
     const dto = await validateDto(UploadInquiryDocumentDto, body);

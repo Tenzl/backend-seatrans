@@ -227,10 +227,10 @@ export class PostsService {
         ...sanitizeHtml.defaults.allowedAttributes,
         img: ['src', 'alt', 'title', 'width', 'height'],
         a: ['href', 'name', 'target', 'rel'],
-        span: ['style'],
-        '*': ['style'],
+        // Disallow inline styles to reduce XSS gadget surface.
       },
-      allowedSchemes: ['http', 'https', 'mailto', 'data'],
+      // Disallow `data:` URLs — they are a common XSS / content-smuggling vector.
+      allowedSchemes: ['http', 'https', 'mailto'],
     });
   }
 

@@ -5,9 +5,11 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  MaxFileSizeValidator,
   Param,
   ParseIntPipe,
   Post,
+  ParseFilePipe,
   Query,
   Req,
   UploadedFiles,
@@ -53,7 +55,9 @@ export class PublicInquiryController {
     FileFieldsInterceptor([
       { name: 'inquiry', maxCount: 1 },
       { name: 'files', maxCount: 10 },
-    ]),
+    ], {
+      limits: { fileSize: 12 * 1024 * 1024, files: 11 },
+    }),
   )
   @Post()
   async submitInquiry(
