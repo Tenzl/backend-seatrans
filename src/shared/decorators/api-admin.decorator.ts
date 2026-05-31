@@ -7,6 +7,6 @@ import { Roles } from '../../features/auth/decorators/roles.decorator';
 export function ApiAdmin() {
   return applyDecorators(
     UseGuards(AuthGuard('jwt'), RolesGuard),
-    Roles('ROLE_ADMIN', 'ROLE_EMPLOYEE', 'ROLE_INTERNAL'),
+    Roles('ROLE_ADMIN', 'ADMIN', 'ROLE_EMPLOYEE', 'EMPLOYEE', 'ROLE_INTERNAL', 'INTERNAL'),
   );
 }

@@ -11,10 +11,13 @@ import { ServiceType } from '../../logistics/entities/service-type.entity';
 import { User } from '../../auth/entities/user.entity';
 import { InquiryCreatedSource } from '../enums/inquiry-created-source.enum';
 
-@Entity('service_inquiries')
+@Entity('shipping_agency_inquiries')
 export class ServiceInquiry {
   @PrimaryGeneratedColumn('increment', { type: 'bigint' })
   id!: number;
+
+  @Column({ type: 'varchar', length: 20, unique: true, nullable: true })
+  code!: string | null;
 
   @ManyToOne(() => ServiceType, { nullable: false })
   @JoinColumn({ name: 'service_type_id' })
@@ -150,6 +153,9 @@ export class ServiceInquiry {
   @Column({ name: 'garbage_cbm_amount', type: 'decimal', precision: 15, scale: 4, nullable: true })
   garbageCbmAmount!: string | null;
 
+  @Column({ name: 'garbage_usd_rate', type: 'decimal', precision: 15, scale: 4, nullable: true })
+  garbageUsdRate!: string | null;
+
   @Column({ name: 'quarantine_cargo_mode', type: 'varchar', length: 32, nullable: true })
   quarantineCargoMode!: string | null;
 
@@ -176,6 +182,10 @@ export class ServiceInquiry {
 
   @Column({ name: 'epda_snapshot', type: 'jsonb', nullable: true })
   epdaSnapshot!: Record<string, unknown> | null;
+
+  /** Immutable copy of customer-portal field values at submit time. */
+  @Column({ name: 'customer_submitted_snapshot', type: 'jsonb', nullable: true })
+  customerSubmittedSnapshot!: Record<string, string> | null;
 
   @Column({ name: 'quoted_at', type: 'timestamptz', nullable: true })
   quotedAt!: Date | null;

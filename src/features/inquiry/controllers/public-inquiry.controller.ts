@@ -62,10 +62,12 @@ export class PublicInquiryController {
   @Post()
   async submitInquiry(
     @UploadedFiles()
-    filesByField: {
-      inquiry?: Express.Multer.File[];
-      files?: Express.Multer.File[];
-    },
+    filesByField:
+      | {
+          inquiry?: Express.Multer.File[];
+          files?: Express.Multer.File[];
+        }
+      | undefined,
     @Body() body: Record<string, unknown>,
     @Req() req: AuthenticatedRequest,
   ) {
@@ -74,10 +76,11 @@ export class PublicInquiryController {
       throw new ForbiddenException('Please log in to submit an inquiry.');
     }
 
-    const parsedInquiry = this.parseInquiryPayload(body, filesByField.inquiry?.[0]);
+    const uploads = filesByField ?? {};
+    const parsedInquiry = this.parseInquiryPayload(body, uploads.inquiry?.[0]);
     const payload = await validateDto(PublicInquiryRequestDto, parsedInquiry);
 
-    return this.inquiryService.submitInquiry(payload, filesByField.files ?? [], currentUserId);
+    return this.inquiryService.submitInquiry(payload, uploads.files ?? [], currentUserId);
   }
 
   @UseGuards(AuthGuard('jwt'))

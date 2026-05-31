@@ -94,6 +94,18 @@ export class PostsService {
   }
 
   async getPublicById(id: number): Promise<PostResponseDto> {
+    const row = await this.findPublishedPost(id);
+    return this.toDto(row);
+  }
+
+  async recordView(id: number): Promise<{ viewCount: number }> {
+    const row = await this.findPublishedPost(id);
+    row.viewCount = (row.viewCount ?? 0) + 1;
+    const saved = await this.postRepository.save(row);
+    return { viewCount: saved.viewCount ?? 0 };
+  }
+
+  private async findPublishedPost(id: number): Promise<PostEntity> {
     const row = await this.postRepository.findOne({
       where: { id, isPublished: true },
       relations: { categories: true, author: true },
@@ -103,9 +115,7 @@ export class PostsService {
       throw new NotFoundException('Post not found');
     }
 
-    row.viewCount = (row.viewCount ?? 0) + 1;
-    const saved = await this.postRepository.save(row);
-    return this.toDto(saved);
+    return row;
   }
 
   async getAdminList(limit = PostsService.DEFAULT_LIMIT): Promise<PostResponseDto[]> {
@@ -154,7 +164,7 @@ export class PostsService {
       thumbnailPublicId: dto.thumbnailPublicId?.trim() || null,
       isPublished,
       publishedAt: isPublished ? new Date() : null,
-      viewCount: 0,
+      viewCount: isPublished ? this.generateInitialViewCount() : 0,
     });
 
     const saved = await this.postRepository.save(row);
@@ -186,6 +196,9 @@ export class PostsService {
     const nextPublished = dto.isPublished ?? false;
     if (!row.isPublished && nextPublished) {
       row.publishedAt = new Date();
+      if ((row.viewCount ?? 0) <= 0) {
+        row.viewCount = this.generateInitialViewCount();
+      }
     }
     if (row.isPublished && !nextPublished) {
       row.publishedAt = null;
@@ -281,5 +294,10 @@ export class PostsService {
       return PostsService.DEFAULT_LIMIT;
     }
     return Math.min(limit, PostsService.DEFAULT_LIMIT);
+  }
+
+  /** Seeded display views when a post is first published (8000–12000). */
+  private generateInitialViewCount(): number {
+    return 8000 + Math.floor(Math.random() * 4001);
   }
 }

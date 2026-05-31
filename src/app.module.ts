@@ -15,6 +15,7 @@ import { PostModule } from './features/post/post.module';
 import { BookingModule } from './features/booking/booking.module';
 import { InquiryModule } from './features/inquiry/inquiry.module';
 import { UsersModule } from './features/users/users.module';
+import { NotificationModule } from './features/notification/notification.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { UsersModule } from './features/users/users.module';
     BookingModule,
     InquiryModule,
     UsersModule,
+    NotificationModule,
   ],
   controllers: [AppController],
   providers: [

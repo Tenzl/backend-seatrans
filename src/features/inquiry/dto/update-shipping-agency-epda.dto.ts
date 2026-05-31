@@ -8,7 +8,9 @@ import {
   IsString,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { ConfirmedCustomerFieldChangeDto } from './confirmed-customer-field-change.dto';
 
 const QUOTE_FORMS = ['HCM', 'QN'] as const;
 const QUARANTINE_MODES = [
@@ -155,6 +157,12 @@ export class UpdateShippingAgencyEpdaDto {
   garbageCbmAmount?: number;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  garbageUsdRate?: number;
+
+  @IsOptional()
   @IsIn(QUARANTINE_MODES)
   quarantineCargoMode?: (typeof QUARANTINE_MODES)[number];
 
@@ -178,4 +186,10 @@ export class UpdateShippingAgencyEpdaDto {
   @IsOptional()
   @IsObject()
   epdaSnapshot?: Record<string, unknown>;
+
+  /** Staff-confirmed overrides of customer-submitted values (audit log). */
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => ConfirmedCustomerFieldChangeDto)
+  confirmedCustomerFieldChanges?: ConfirmedCustomerFieldChangeDto[];
 }

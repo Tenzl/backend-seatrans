@@ -25,6 +25,7 @@ import { DeleteInquiriesDto } from '../dto/delete-inquiries.dto';
 import { UpdateShippingAgencyEpdaDto } from '../dto/update-shipping-agency-epda.dto';
 import { IssueShippingAgencyEpdaDto } from '../dto/issue-shipping-agency-epda.dto';
 import { CreateInternalShippingAgencyInquiryDto } from '../dto/create-internal-shipping-agency-inquiry.dto';
+import { ListInquiryFieldChangesQueryDto } from '../dto/list-inquiry-field-changes-query.dto';
 import { validateDto } from '../../../shared/utils/validate-dto.util';
 
 /**
@@ -105,6 +106,23 @@ export class AdminInquiryController {
       throw new BadRequestException('User not authenticated');
     }
     return this.shippingAgencyEpdaService.issueEpdaToCustomer(id, dto, actorUserId);
+  }
+
+  @Get('shipping-agency/:id/epda/field-changes')
+  listShippingAgencyFieldChanges(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: ListInquiryFieldChangesQueryDto,
+  ) {
+    return this.shippingAgencyEpdaService.listFieldChangeLogs(
+      id,
+      query.page ?? 0,
+      query.size ?? 6,
+    );
+  }
+
+  @Get('shipping-agency/:id/epda/customer-field-changes')
+  listLatestCustomerFieldChanges(@Param('id', ParseIntPipe) id: number) {
+    return this.shippingAgencyEpdaService.listLatestCustomerFieldChanges(id);
   }
 
   @Get(':serviceType/:id')

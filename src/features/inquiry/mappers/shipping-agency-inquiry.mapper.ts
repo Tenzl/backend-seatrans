@@ -1,4 +1,8 @@
 import { ServiceInquiry } from '../entities/service-inquiry.entity';
+import {
+  resolveGarbageCbmAmount,
+  resolveGarbageUsdRate,
+} from '../constants/epda-garbage.defaults';
 
 export type InquiryResponseAudience = 'user' | 'admin';
 
@@ -32,7 +36,8 @@ function shippingAgencyInternalEpdaFields(row: ServiceInquiry): Record<string, u
     epdaDocumentDate: row.epdaDocumentDate,
     shipType: row.shipType,
     oceanFrtRateUsdPerMt: row.oceanFrtRateUsdPerMt,
-    garbageCbmAmount: row.garbageCbmAmount,
+    garbageCbmAmount: resolveGarbageCbmAmount(row.garbageCbmAmount),
+    garbageUsdRate: resolveGarbageUsdRate(row.quoteForm, row.garbageUsdRate),
     quarantineCargoMode: row.quarantineCargoMode,
     agencyFeeMode: row.agencyFeeMode,
     agencyDiscountPercent: row.agencyDiscountPercent,
@@ -44,6 +49,7 @@ function shippingAgencyInternalEpdaFields(row: ServiceInquiry): Record<string, u
     quotedAt: row.quotedAt,
     quotedByUserId: row.quotedByUserId,
     createdSource: row.createdSource,
+    customerSubmittedSnapshot: row.customerSubmittedSnapshot,
     processedById: row.processedById,
   };
 }

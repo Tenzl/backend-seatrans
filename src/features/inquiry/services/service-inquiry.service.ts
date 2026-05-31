@@ -21,6 +21,8 @@ import {
   InquiryResponseAudience,
   mapShippingAgencyInquiryFields,
 } from '../mappers/shipping-agency-inquiry.mapper';
+import { NotificationService } from '../../notification/notification.service';
+import { buildCustomerSubmittedSnapshot } from '../utils/customer-submitted-snapshot.util';
 
 @Injectable()
 export class ServiceInquiryService {
@@ -41,6 +43,7 @@ export class ServiceInquiryService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly inquiryDocumentService: InquiryDocumentService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   async submitInquiry(
@@ -105,7 +108,15 @@ export class ServiceInquiryService {
       details: dto.details ?? null,
     });
 
+    row.code = await this.generateCodeForService(serviceType.name);
+
+    if (this.isShippingAgency(serviceType.name)) {
+      row.customerSubmittedSnapshot = buildCustomerSubmittedSnapshot(row);
+    }
+
     const saved = await this.inquiryRepository.save(row);
+
+    await this.notificationService.notifyInternalNewInquiry(saved);
 
     if (files.length) {
       try {
@@ -182,9 +193,12 @@ export class ServiceInquiryService {
     dto: UpdateInquiryStatusDto,
   ): Promise<unknown> {
     const row = await this.requireByServiceAndId(serviceTypeName, id);
+    const previousStatus = row.status;
     row.status = dto.status;
 
     const saved = await this.inquiryRepository.save(row);
+    await this.notificationService.notifyStatusChanged(saved, previousStatus);
+    await this.notificationService.notifyInquiryQuotedIfNeeded(saved, previousStatus);
     return this.toResponse(saved, 'admin');
   }
 
@@ -320,6 +334,7 @@ export class ServiceInquiryService {
   ): Record<string, unknown> {
     const base = {
       id: row.id,
+      code: row.code,
       userId: row.userId,
       fullName: row.fullName,
       email: row.email,
@@ -543,5 +558,53 @@ export class ServiceInquiryService {
     }
 
     return String(value);
+  }
+
+  async generateCode(): Promise<string> {
+    const year = new Date().getFullYear();
+    const prefix = `SA-${year}-`;
+
+    const last = await this.inquiryRepository
+      .createQueryBuilder('inquiry')
+      .select('inquiry.code', 'code')
+      .where('inquiry.code LIKE :prefix', { prefix: `${prefix}%` })
+      .orderBy('inquiry.code', 'DESC')
+      .limit(1)
+      .getRawOne<{ code: string }>();
+
+    const nextNumber = last?.code
+      ? parseInt(last.code.slice(prefix.length), 10) + 1
+      : 1;
+
+    return `${prefix}${String(nextNumber).padStart(4, '0')}`;
+  }
+
+  private async generateCodeForService(serviceName: string): Promise<string> {
+    const prefixes: Record<string, string> = {
+      [ServiceInquiryService.SERVICE_SHIPPING_AGENCY]: 'SA',
+      [ServiceInquiryService.SERVICE_CHARTERING]: 'CH',
+      [ServiceInquiryService.SERVICE_FREIGHT_FORWARDING]: 'FF',
+      [ServiceInquiryService.SERVICE_LOGISTICS]: 'TL',
+      [ServiceInquiryService.SERVICE_SPECIAL_REQUEST]: 'SR',
+    };
+
+    const serviceKey = this.toServiceName(serviceName);
+    const prefixCode = prefixes[serviceKey] ?? 'IN';
+    const year = new Date().getFullYear();
+    const prefix = `${prefixCode}-${year}-`;
+
+    const last = await this.inquiryRepository
+      .createQueryBuilder('inquiry')
+      .select('inquiry.code', 'code')
+      .where('inquiry.code LIKE :prefix', { prefix: `${prefix}%` })
+      .orderBy('inquiry.code', 'DESC')
+      .limit(1)
+      .getRawOne<{ code: string }>();
+
+    const nextNumber = last?.code
+      ? parseInt(last.code.slice(prefix.length), 10) + 1
+      : 1;
+
+    return `${prefix}${String(nextNumber).padStart(4, '0')}`;
   }
 }

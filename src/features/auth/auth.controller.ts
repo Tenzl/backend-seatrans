@@ -55,17 +55,7 @@ export class AuthController {
   @UseGuards(AuthGuard('jwt'))
   @Get(['me', 'current-user'])
   getProfile(@Request() req: any) {
-    const user = req.user;
-    return {
-       id: user.id,
-       email: user.email,
-       username: user.username ?? null,
-       fullName: user.fullName,
-       phone: user.phone,
-       role: user.role?.name,
-       roleGroup: user.role?.roleGroup,
-       company: user.company
-    };
+    return this.authService.toPublicUser(req.user);
   }
 
   @UseGuards(AuthGuard('jwt'))

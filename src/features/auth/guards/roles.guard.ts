@@ -2,6 +2,10 @@ import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 
+function normalizeRoleName(role: string): string {
+  return role.trim().toUpperCase().replace(/^ROLE_/, '');
+}
+
 @Injectable()
 export class RolesGuard implements CanActivate {
   constructor(private reflector: Reflector) {}
@@ -17,13 +21,23 @@ export class RolesGuard implements CanActivate {
     }
 
     const { user } = context.switchToHttp().getRequest();
-    // Assuming user.roles was populated correctly during authentication strategy step
-    if (!user || (!user.roles && !user.role)) {
-       return false;
+    if (!user) {
+      return false;
     }
 
-    const unrolledRoles = user.roles || [user.role?.name];
+    const userRoleNames: string[] = Array.isArray(user.roles)
+      ? user.roles.filter(Boolean)
+      : user.role?.name
+        ? [user.role.name]
+        : [];
 
-    return requiredRoles.some((role) => unrolledRoles?.includes(role));
+    if (userRoleNames.length === 0) {
+      return false;
+    }
+
+    const normalizedUserRoles = userRoleNames.map(normalizeRoleName);
+    const normalizedRequired = requiredRoles.map(normalizeRoleName);
+
+    return normalizedRequired.some((required) => normalizedUserRoles.includes(required));
   }
 }

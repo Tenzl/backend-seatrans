@@ -2,7 +2,7 @@
 
 ## Data model
 
-All inquiries use `service_inquiries`. Internal EPDA fields are **columns on the same row** (not a separate table). Customer APIs never return internal pricing fields.
+All inquiries use `shipping_agency_inquiries`. Internal EPDA fields are **columns on the same row** (not a separate table). Customer APIs never return internal pricing fields.
 
 | Column | Visibility |
 |--------|------------|
@@ -10,7 +10,7 @@ All inquiries use `service_inquiries`. Internal EPDA fields are **columns on the
 | `epda_document_date`, `agency_fee_mode`, `epda_snapshot`, … | Admin only |
 | `quoted_at`, `quoted_by_user_id` | Admin only; customers see `quoteAvailable: true` |
 
-Run migration: `docs/sql/2026-05-27_service_inquiries_epda_internal_fields_postgres.sql`
+Run migration: `docs/sql/2026-05-27_shipping_agency_inquiries_epda_internal_fields_postgres.sql`
 
 ## Workflow
 

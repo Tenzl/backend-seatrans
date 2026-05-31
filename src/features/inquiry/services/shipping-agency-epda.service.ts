@@ -14,9 +14,18 @@ import { UpdateShippingAgencyEpdaDto } from '../dto/update-shipping-agency-epda.
 import { IssueShippingAgencyEpdaDto } from '../dto/issue-shipping-agency-epda.dto';
 import { CreateInternalShippingAgencyInquiryDto } from '../dto/create-internal-shipping-agency-inquiry.dto';
 import {
+  DEFAULT_GARBAGE_CBM_AMOUNT,
+  getDefaultGarbageUsdRate,
+} from '../constants/epda-garbage.defaults';
+import {
   InquiryResponseAudience,
   mapShippingAgencyInquiryFields,
 } from '../mappers/shipping-agency-inquiry.mapper';
+import { NotificationService } from '../../notification/notification.service';
+import {
+  InquiryFieldChangeAction,
+} from '../entities/inquiry-field-change-log.entity';
+import { InquiryFieldChangeService } from './inquiry-field-change.service';
 
 const MAX_SNAPSHOT_BYTES = 256 * 1024;
 const SERVICE_SHIPPING_AGENCY = 'SHIPPING AGENCY';
@@ -30,6 +39,8 @@ export class ShippingAgencyEpdaService {
     private readonly serviceTypeRepository: Repository<ServiceType>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    private readonly notificationService: NotificationService,
+    private readonly fieldChangeService: InquiryFieldChangeService,
   ) {}
 
   async createInternalInquiry(
@@ -49,6 +60,8 @@ export class ShippingAgencyEpdaService {
       throw new BadRequestException('Authenticated staff user not found');
     }
 
+    const code = await this.generateCode();
+
     const row = this.inquiryRepository.create({
       serviceType,
       user: customer,
@@ -61,6 +74,7 @@ export class ShippingAgencyEpdaService {
       createdSource: InquiryCreatedSource.INTERNAL_EPDA,
       processedBy: actor,
       processedById: actor.id,
+      code,
       quoteForm: dto.quoteForm,
       toName: dto.shipownerTo.trim(),
       mv: dto.vesselName.trim(),
@@ -82,7 +96,10 @@ export class ShippingAgencyEpdaService {
         dto.pilotage3rdMiles ?? (dto.quoteForm === 'QN' ? 5 : 17),
       ),
       oceanFrtRateUsdPerMt: this.toNumericString(dto.oceanFrtRateUsdPerMt),
-      garbageCbmAmount: this.toNumericString(dto.garbageCbmAmount ?? 1),
+      garbageCbmAmount: this.toNumericString(dto.garbageCbmAmount ?? DEFAULT_GARBAGE_CBM_AMOUNT),
+      garbageUsdRate: this.toNumericString(
+        dto.garbageUsdRate ?? getDefaultGarbageUsdRate(dto.quoteForm),
+      ),
       quarantineCargoMode: this.trimToNull(dto.quarantineCargoMode),
       agencyFeeMode: this.trimToNull(dto.agencyFeeMode),
       agencyDiscountPercent: this.toNumericString(dto.agencyDiscountPercent),
@@ -104,6 +121,9 @@ export class ShippingAgencyEpdaService {
 
     if (dto.quoteForm != null) {
       row.quoteForm = dto.quoteForm;
+      if (dto.garbageUsdRate === undefined && (row.garbageUsdRate == null || row.garbageUsdRate === '')) {
+        row.garbageUsdRate = this.toNumericString(getDefaultGarbageUsdRate(dto.quoteForm));
+      }
     }
     if (dto.berthHours != null) {
       row.berthHours = this.toNumericString(dto.berthHours);
@@ -126,6 +146,9 @@ export class ShippingAgencyEpdaService {
     if (dto.garbageCbmAmount !== undefined) {
       row.garbageCbmAmount = this.toNumericString(dto.garbageCbmAmount);
     }
+    if (dto.garbageUsdRate !== undefined) {
+      row.garbageUsdRate = this.toNumericString(dto.garbageUsdRate);
+    }
     if (dto.quarantineCargoMode !== undefined) {
       row.quarantineCargoMode = this.trimToNull(dto.quarantineCargoMode);
     }
@@ -144,6 +167,19 @@ export class ShippingAgencyEpdaService {
 
     await this.touchProcessedBy(row, actorUserId);
     const saved = await this.inquiryRepository.save(row);
+    await this.fieldChangeService.logConfirmedChanges(
+      saved.id,
+      actorUserId,
+      InquiryFieldChangeAction.EPDA_SAVE_DRAFT,
+      dto.confirmedCustomerFieldChanges,
+      saved.customerSubmittedSnapshot,
+    );
+
+    const changedFields = (dto.confirmedCustomerFieldChanges ?? [])
+      .filter((c) => c.previousValue !== c.newValue)
+      .map((c) => c.field);
+    await this.notificationService.notifyCustomerFieldChanges(saved, changedFields);
+
     return this.toAdminInquiryPayload(saved);
   }
 
@@ -153,6 +189,7 @@ export class ShippingAgencyEpdaService {
     actorUserId: number,
   ): Promise<Record<string, unknown>> {
     const row = await this.requireShippingAgencyInquiry(inquiryId);
+    const previousStatus = row.status;
     row.epdaSnapshot = this.validateSnapshot(dto.epdaSnapshot);
     row.status = InquiryStatus.QUOTED;
     row.quotedAt = new Date();
@@ -160,7 +197,37 @@ export class ShippingAgencyEpdaService {
 
     await this.touchProcessedBy(row, actorUserId);
     const saved = await this.inquiryRepository.save(row);
+    await this.fieldChangeService.logConfirmedChanges(
+      saved.id,
+      actorUserId,
+      InquiryFieldChangeAction.EPDA_ISSUE,
+      dto.confirmedCustomerFieldChanges,
+      saved.customerSubmittedSnapshot,
+    );
+    await this.notificationService.notifyStatusChanged(saved, previousStatus);
+    await this.notificationService.notifyInquiryQuotedIfNeeded(saved, previousStatus);
     return this.toAdminInquiryPayload(saved);
+  }
+
+  async listFieldChangeLogs(inquiryId: number, page = 0, size = 6) {
+    const row = await this.requireShippingAgencyInquiry(inquiryId);
+    return this.fieldChangeService.listForInquiry(
+      inquiryId,
+      page,
+      size,
+      row.customerSubmittedSnapshot,
+    );
+  }
+
+  async listLatestCustomerFieldChanges(inquiryId: number) {
+    const row = await this.requireShippingAgencyInquiry(inquiryId);
+    const mainFields = ['loa', 'dwt', 'grt', 'cargoQty', 'cargoType', 'cargoName', 'port'];
+    const entries = await this.fieldChangeService.listLatestForFields(
+      inquiryId,
+      mainFields,
+      row.customerSubmittedSnapshot,
+    );
+    return entries.filter((e) => e.previousValue !== e.newValue);
   }
 
   private applyCustomerVisibleUpdates(
@@ -289,9 +356,29 @@ export class ShippingAgencyEpdaService {
     return snapshot;
   }
 
+  private async generateCode(): Promise<string> {
+    const year = new Date().getFullYear();
+    const prefix = `SA-${year}-`;
+
+    const last = await this.inquiryRepository
+      .createQueryBuilder('inquiry')
+      .select('inquiry.code', 'code')
+      .where('inquiry.code LIKE :prefix', { prefix: `${prefix}%` })
+      .orderBy('inquiry.code', 'DESC')
+      .limit(1)
+      .getRawOne<{ code: string }>();
+
+    const nextNumber = last?.code
+      ? parseInt(last.code.slice(prefix.length), 10) + 1
+      : 1;
+
+    return `${prefix}${String(nextNumber).padStart(4, '0')}`;
+  }
+
   private toAdminInquiryPayload(row: ServiceInquiry): Record<string, unknown> {
     return {
       id: row.id,
+      code: row.code,
       userId: row.userId,
       fullName: row.fullName,
       email: row.email,

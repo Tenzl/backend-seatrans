@@ -121,6 +121,12 @@ export class CreateInternalShippingAgencyInquiryDto {
   garbageCbmAmount?: number;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  garbageUsdRate?: number;
+
+  @IsOptional()
   @IsString()
   quarantineCargoMode?: string;
 
