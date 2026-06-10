@@ -108,6 +108,17 @@ export class ShippingAgencyEpdaService {
     });
 
     const saved = await this.inquiryRepository.save(row);
+    // Audit: record the initial EPDA values (previous = empty) on creation.
+    await this.fieldChangeService.logFieldChanges(
+      saved.id,
+      actorUserId,
+      InquiryFieldChangeAction.EPDA_CREATE,
+      Object.entries(this.epdaFieldSnapshot(saved)).map(([field, newValue]) => ({
+        field,
+        previousValue: null,
+        newValue,
+      })),
+    );
     return this.toAdminInquiryPayload(saved);
   }
 
@@ -117,6 +128,7 @@ export class ShippingAgencyEpdaService {
     actorUserId: number,
   ): Promise<Record<string, unknown>> {
     const row = await this.requireShippingAgencyInquiry(inquiryId);
+    const before = this.epdaFieldSnapshot(row);
     this.applyCustomerVisibleUpdates(row, dto);
 
     if (dto.quoteForm != null) {
@@ -167,12 +179,12 @@ export class ShippingAgencyEpdaService {
 
     await this.touchProcessedBy(row, actorUserId);
     const saved = await this.inquiryRepository.save(row);
-    await this.fieldChangeService.logConfirmedChanges(
+    // Audit: log every changed EPDA field (full diff, all records).
+    await this.fieldChangeService.logFieldChanges(
       saved.id,
       actorUserId,
       InquiryFieldChangeAction.EPDA_SAVE_DRAFT,
-      dto.confirmedCustomerFieldChanges,
-      saved.customerSubmittedSnapshot,
+      this.diffSnapshots(before, this.epdaFieldSnapshot(saved)),
     );
 
     const changedFields = (dto.confirmedCustomerFieldChanges ?? [])
@@ -197,12 +209,12 @@ export class ShippingAgencyEpdaService {
 
     await this.touchProcessedBy(row, actorUserId);
     const saved = await this.inquiryRepository.save(row);
-    await this.fieldChangeService.logConfirmedChanges(
+    // Audit: record the issue action (status transition).
+    await this.fieldChangeService.logFieldChanges(
       saved.id,
       actorUserId,
       InquiryFieldChangeAction.EPDA_ISSUE,
-      dto.confirmedCustomerFieldChanges,
-      saved.customerSubmittedSnapshot,
+      [{ field: 'Status', previousValue: String(previousStatus ?? ''), newValue: String(saved.status ?? '') }],
     );
     await this.notificationService.notifyStatusChanged(saved, previousStatus);
     await this.notificationService.notifyInquiryQuotedIfNeeded(saved, previousStatus);
@@ -417,5 +429,61 @@ export class ShippingAgencyEpdaService {
       return null;
     }
     return String(value);
+  }
+
+  /** All audited EPDA fields of a row as readable label → string value. */
+  private epdaFieldSnapshot(row: ServiceInquiry): Record<string, string | null> {
+    const s = (v: unknown): string | null => {
+      if (v === null || v === undefined) return null;
+      if (v instanceof Date) return v.toISOString().slice(0, 10);
+      const str = String(v).trim();
+      return str.length ? str : null;
+    };
+    return {
+      'Ship owner': s(row.toName),
+      Vessel: s(row.mv),
+      GRT: s(row.grt),
+      DWT: s(row.dwt),
+      LOA: s(row.loa),
+      ETA: s(row.eta),
+      'Cargo type': s(row.cargoType),
+      'Cargo name': s(row.cargoName),
+      'Cargo name (other)': s(row.cargoNameOther),
+      Quantity: s(row.cargoQuantity),
+      'Freight tax type': s(row.frtTaxType),
+      'Purpose of calling': s(row.purposeOfCalling),
+      'Port of call': s(row.portOfCall),
+      'Discharge/loading at': s(row.dischargeLoadingLocation),
+      'Quote form': s(row.quoteForm),
+      'Berth hours': s(row.berthHours),
+      'Anchorage hours': s(row.anchorageHours),
+      'Pilotage miles': s(row.pilotage3rdMiles),
+      'Document date': s(row.epdaDocumentDate),
+      'Ship type': s(row.shipType),
+      'Ocean freight rate': s(row.oceanFrtRateUsdPerMt),
+      'Garbage cbm': s(row.garbageCbmAmount),
+      'Garbage USD rate': s(row.garbageUsdRate),
+      'Quarantine cargo mode': s(row.quarantineCargoMode),
+      'Agency fee mode': s(row.agencyFeeMode),
+      'Agency discount %': s(row.agencyDiscountPercent),
+      'Agency lumpsum': s(row.agencyLumpsumAmount),
+      'Boat hire (agency)': s(row.boatHireAmount),
+      'Tally fee': s(row.tallyFeeAmount),
+      'Transport (taxi/courier)': s(row.transportLs),
+      'Boat hire (quarantine)': s(row.transportQuarantine),
+    };
+  }
+
+  private diffSnapshots(
+    before: Record<string, string | null>,
+    after: Record<string, string | null>,
+  ): Array<{ field: string; previousValue: string | null; newValue: string | null }> {
+    const changes: Array<{ field: string; previousValue: string | null; newValue: string | null }> = [];
+    for (const field of Object.keys(after)) {
+      const prev = before[field] ?? null;
+      const next = after[field] ?? null;
+      if (prev !== next) changes.push({ field, previousValue: prev, newValue: next });
+    }
+    return changes;
   }
 }

@@ -38,6 +38,32 @@ export class InquiryFieldChangeService {
     private readonly logRepo: Repository<InquiryFieldChangeLog>,
   ) {}
 
+  /**
+   * Log every changed field (full audit). `changes` are already diffed pairs;
+   * entries with equal previous/new values are skipped.
+   */
+  async logFieldChanges(
+    inquiryId: number,
+    actorUserId: number,
+    action: InquiryFieldChangeAction,
+    changes: Array<{ field: string; previousValue: string | null; newValue: string | null }>,
+  ): Promise<void> {
+    const rows = changes
+      .filter((c) => (c.previousValue ?? null) !== (c.newValue ?? null))
+      .map((c) =>
+        this.logRepo.create({
+          inquiryId,
+          fieldName: c.field,
+          previousValue: c.previousValue ?? null,
+          newValue: c.newValue ?? null,
+          changedByUserId: actorUserId,
+          action,
+        }),
+      );
+    if (!rows.length) return;
+    await this.logRepo.save(rows);
+  }
+
   async logConfirmedChanges(
     inquiryId: number,
     actorUserId: number,

@@ -14,6 +14,7 @@ import { LogisticsModule } from './features/logistics/logistics.module';
 import { PostModule } from './features/post/post.module';
 import { BookingModule } from './features/booking/booking.module';
 import { InquiryModule } from './features/inquiry/inquiry.module';
+import { EpdaParametersModule } from './features/epda-parameters/epda-parameters.module';
 import { UsersModule } from './features/users/users.module';
 import { NotificationModule } from './features/notification/notification.module';
 
@@ -41,6 +42,7 @@ import { NotificationModule } from './features/notification/notification.module'
     PostModule,
     BookingModule,
     InquiryModule,
+    EpdaParametersModule,
     UsersModule,
     NotificationModule,
   ],

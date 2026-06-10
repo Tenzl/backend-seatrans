@@ -10,6 +10,7 @@ import { ServiceInquiry } from './service-inquiry.entity';
 import { User } from '../../auth/entities/user.entity';
 
 export enum InquiryFieldChangeAction {
+  EPDA_CREATE = 'EPDA_CREATE',
   EPDA_SAVE_DRAFT = 'EPDA_SAVE_DRAFT',
   EPDA_ISSUE = 'EPDA_ISSUE',
 }
