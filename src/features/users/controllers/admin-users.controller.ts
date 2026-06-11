@@ -2,9 +2,12 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
+  Param,
+  ParseIntPipe,
   Post,
   Query,
   Req,
@@ -16,6 +19,7 @@ import { validateDto } from '../../../shared/utils/validate-dto.util';
 import { AdminUsersService } from '../admin-users.service';
 import { AdminListUsersQueryDto } from '../dto/admin-list-users-query.dto';
 import { CreateInternalUserDto } from '../dto/create-internal-user.dto';
+import { ResetUserPasswordDto } from '../dto/reset-user-password.dto';
 import { RoleGroup } from '../../auth/enums/role-group.enum';
 
 type StaffRequest = Request & { user?: { id?: number } };
@@ -50,6 +54,26 @@ export class AdminUsersController {
       throw new BadRequestException('User not authenticated');
     }
     return this.adminUsersService.createInternalUser(dto, staffUserId);
+  }
+
+  @Post(':id/reset-password')
+  @HttpCode(HttpStatus.OK)
+  async resetPassword(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: ResetUserPasswordDto,
+  ) {
+    const dto = await validateDto(ResetUserPasswordDto, body);
+    return this.adminUsersService.resetPassword(id, dto.newPassword);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  async remove(@Param('id', ParseIntPipe) id: number, @Req() req: StaffRequest) {
+    const staffUserId = req.user?.id;
+    if (!staffUserId) {
+      throw new BadRequestException('User not authenticated');
+    }
+    return this.adminUsersService.deleteUser(id, staffUserId);
   }
 }
 

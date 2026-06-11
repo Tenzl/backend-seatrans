@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
@@ -138,6 +143,40 @@ export class AdminUsersService {
       createdAt: saved.createdAt,
       role: saved.role ? { id: saved.role.id, name: saved.role.name, roleGroup: saved.role.roleGroup } : null,
     });
+  }
+
+  /** Admin sets a new password for any user. */
+  async resetPassword(userId: number, newPassword: string): Promise<{ id: number }> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    const saltRounds = Number(this.configService.get<string>('BCRYPT_SALT_ROUNDS', '12'));
+    user.password = await bcrypt.hash(
+      newPassword,
+      Number.isFinite(saltRounds) && saltRounds >= 10 ? saltRounds : 12,
+    );
+    await this.userRepository.save(user);
+    return { id: user.id };
+  }
+
+  /** Admin deletes a user (cannot delete own account). */
+  async deleteUser(userId: number, staffUserId: number): Promise<{ id: number }> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    if (user.id === staffUserId) {
+      throw new BadRequestException('You cannot delete your own account');
+    }
+    try {
+      await this.userRepository.remove(user);
+    } catch {
+      throw new ConflictException(
+        'Cannot delete this user — they have linked records (inquiries, logs).',
+      );
+    }
+    return { id: userId };
   }
 }
 

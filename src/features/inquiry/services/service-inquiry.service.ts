@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, In, Repository } from 'typeorm';
 import { ServiceInquiry } from '../entities/service-inquiry.entity';
+import { InquiryFieldChangeLog } from '../entities/inquiry-field-change-log.entity';
 import { ServiceType } from '../../logistics/entities/service-type.entity';
 import { User } from '../../auth/entities/user.entity';
 import { PublicInquiryRequestDto } from '../dto/public-inquiry-request.dto';
@@ -38,6 +39,8 @@ export class ServiceInquiryService {
   constructor(
     @InjectRepository(ServiceInquiry)
     private readonly inquiryRepository: Repository<ServiceInquiry>,
+    @InjectRepository(InquiryFieldChangeLog)
+    private readonly fieldChangeLogRepository: Repository<InquiryFieldChangeLog>,
     @InjectRepository(ServiceType)
     private readonly serviceTypeRepository: Repository<ServiceType>,
     @InjectRepository(User)
@@ -241,10 +244,20 @@ export class ServiceInquiryService {
     return this.toResponse(saved, 'admin');
   }
 
+  /**
+   * Remove every child row that references an inquiry so it can be deleted
+   * cleanly (the FK on shipping_agency_field_change_logs is not guaranteed to
+   * carry ON DELETE CASCADE at the DB level, so we delete the audit logs here).
+   */
+  private async deleteInquiryChildren(inquiryId: number): Promise<void> {
+    await this.fieldChangeLogRepository.delete({ inquiryId });
+    await this.inquiryDocumentService.hardDeleteByInquiry(inquiryId);
+  }
+
   async deleteByServiceAndId(serviceTypeName: string, id: number): Promise<void> {
     const row = await this.requireByServiceAndId(serviceTypeName, id);
 
-    await this.inquiryDocumentService.hardDeleteByInquiry(row.id);
+    await this.deleteInquiryChildren(row.id);
     await this.inquiryRepository.remove(row);
   }
 
@@ -264,7 +277,7 @@ export class ServiceInquiryService {
     }
 
     for (const row of ownedRows) {
-      await this.inquiryDocumentService.hardDeleteByInquiry(row.id);
+      await this.deleteInquiryChildren(row.id);
       await this.inquiryRepository.remove(row);
     }
 
@@ -277,7 +290,7 @@ export class ServiceInquiryService {
     });
 
     for (const row of rows) {
-      await this.inquiryDocumentService.hardDeleteByInquiry(row.id);
+      await this.deleteInquiryChildren(row.id);
       await this.inquiryRepository.remove(row);
     }
 

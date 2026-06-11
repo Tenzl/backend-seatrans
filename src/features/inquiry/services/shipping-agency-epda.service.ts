@@ -69,7 +69,9 @@ export class ShippingAgencyEpdaService {
       email: customer.email,
       phone: customer.phone,
       company: customer.company,
-      status: InquiryStatus.PROCESSING,
+      // Staff-created EPDA: COMPLETED when all required fields are filled,
+      // otherwise PROCESSING (a partially-filled draft).
+      status: dto.isComplete ? InquiryStatus.COMPLETED : InquiryStatus.PROCESSING,
       notes: this.trimToNull(dto.notes),
       createdSource: InquiryCreatedSource.INTERNAL_EPDA,
       processedBy: actor,
@@ -93,7 +95,7 @@ export class ShippingAgencyEpdaService {
       berthHours: this.toNumericString(dto.berthHours ?? 96),
       anchorageHours: this.toNumericString(dto.anchorageHours ?? 24),
       pilotage3rdMiles: this.toNumericString(
-        dto.pilotage3rdMiles ?? (dto.quoteForm === 'QN' ? 5 : 17),
+        dto.pilotage3rdMiles ?? (dto.quoteForm === 'QN' ? 5 : 47),
       ),
       oceanFrtRateUsdPerMt: this.toNumericString(dto.oceanFrtRateUsdPerMt),
       garbageCbmAmount: this.toNumericString(dto.garbageCbmAmount ?? DEFAULT_GARBAGE_CBM_AMOUNT),
@@ -175,6 +177,15 @@ export class ShippingAgencyEpdaService {
     }
     if (dto.epdaSnapshot !== undefined) {
       row.epdaSnapshot = dto.epdaSnapshot ? this.validateSnapshot(dto.epdaSnapshot) : null;
+    }
+
+    // Draft completeness drives the status: COMPLETED when all required fields
+    // are filled, PROCESSING otherwise. Issuing to the customer (separate call)
+    // is what moves it to QUOTED.
+    if (dto.isComplete !== undefined) {
+      row.status = dto.isComplete
+        ? InquiryStatus.COMPLETED
+        : InquiryStatus.PROCESSING;
     }
 
     await this.touchProcessedBy(row, actorUserId);
@@ -439,38 +450,47 @@ export class ShippingAgencyEpdaService {
       const str = String(v).trim();
       return str.length ? str : null;
     };
+    // Numeric fields: compare/display by value, not raw DB text. Postgres numeric
+    // serializes as "54.0000"/"12000.00" — strip the trailing zeros so a format-only
+    // difference (e.g. "54.0000" vs "54") is NOT recorded as a change.
+    const n = (v: unknown): string | null => {
+      const str = s(v);
+      if (str === null) return null;
+      const num = Number(str);
+      return Number.isFinite(num) ? String(num) : str;
+    };
     return {
       'Ship owner': s(row.toName),
       Vessel: s(row.mv),
-      GRT: s(row.grt),
-      DWT: s(row.dwt),
-      LOA: s(row.loa),
+      GRT: n(row.grt),
+      DWT: n(row.dwt),
+      LOA: n(row.loa),
       ETA: s(row.eta),
       'Cargo type': s(row.cargoType),
       'Cargo name': s(row.cargoName),
       'Cargo name (other)': s(row.cargoNameOther),
-      Quantity: s(row.cargoQuantity),
+      Quantity: n(row.cargoQuantity),
       'Freight tax type': s(row.frtTaxType),
       'Purpose of calling': s(row.purposeOfCalling),
       'Port of call': s(row.portOfCall),
       'Discharge/loading at': s(row.dischargeLoadingLocation),
       'Quote form': s(row.quoteForm),
-      'Berth hours': s(row.berthHours),
-      'Anchorage hours': s(row.anchorageHours),
-      'Pilotage miles': s(row.pilotage3rdMiles),
+      'Berth hours': n(row.berthHours),
+      'Anchorage hours': n(row.anchorageHours),
+      'Pilotage miles': n(row.pilotage3rdMiles),
       'Document date': s(row.epdaDocumentDate),
       'Ship type': s(row.shipType),
-      'Ocean freight rate': s(row.oceanFrtRateUsdPerMt),
-      'Garbage cbm': s(row.garbageCbmAmount),
-      'Garbage USD rate': s(row.garbageUsdRate),
+      'Ocean freight rate': n(row.oceanFrtRateUsdPerMt),
+      'Garbage cbm': n(row.garbageCbmAmount),
+      'Garbage USD rate': n(row.garbageUsdRate),
       'Quarantine cargo mode': s(row.quarantineCargoMode),
       'Agency fee mode': s(row.agencyFeeMode),
-      'Agency discount %': s(row.agencyDiscountPercent),
-      'Agency lumpsum': s(row.agencyLumpsumAmount),
-      'Boat hire (agency)': s(row.boatHireAmount),
-      'Tally fee': s(row.tallyFeeAmount),
+      'Agency discount %': n(row.agencyDiscountPercent),
+      'Agency lumpsum': n(row.agencyLumpsumAmount),
+      'Boat hire (agency)': n(row.boatHireAmount),
+      'Tally fee': n(row.tallyFeeAmount),
       'Transport (taxi/courier)': s(row.transportLs),
-      'Boat hire (quarantine)': s(row.transportQuarantine),
+      'Boat hire (quarantine)': n(row.transportQuarantine),
     };
   }
 

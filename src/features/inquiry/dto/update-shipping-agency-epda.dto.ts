@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsDateString,
   IsIn,
   IsNumber,
@@ -192,4 +193,12 @@ export class UpdateShippingAgencyEpdaDto {
   @ValidateNested({ each: true })
   @Type(() => ConfirmedCustomerFieldChangeDto)
   confirmedCustomerFieldChanges?: ConfirmedCustomerFieldChangeDto[];
+
+  /**
+   * Whether all required EPDA fields are filled (computed by the admin UI).
+   * Drives the draft status: true → COMPLETED, false → PROCESSING.
+   */
+  @IsOptional()
+  @IsBoolean()
+  isComplete?: boolean;
 }

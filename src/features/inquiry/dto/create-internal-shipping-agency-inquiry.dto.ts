@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsDateString,
   IsIn,
   IsInt,
@@ -147,4 +148,12 @@ export class CreateInternalShippingAgencyInquiryDto {
   @IsOptional()
   @IsObject()
   epdaSnapshot?: Record<string, unknown>;
+
+  /**
+   * Whether all required EPDA fields are filled (computed by the admin UI).
+   * Drives the initial status: true → COMPLETED, false → PROCESSING.
+   */
+  @IsOptional()
+  @IsBoolean()
+  isComplete?: boolean;
 }
