@@ -160,21 +160,38 @@ export class AdminUsersService {
     return { id: user.id };
   }
 
-  /** Admin deletes a user (cannot delete own account). */
+  /**
+   * Admin deactivates a user (soft delete; cannot deactivate own account).
+   *
+   * We never hard-delete: users own linked records (inquiries, quotes, uploaded
+   * documents, audit logs) that must be preserved for history and referential
+   * integrity. Deactivating sets `isActive = false`, which blocks login and
+   * invalidates existing sessions (enforced in AuthService.validate / login).
+   */
   async deleteUser(userId: number, staffUserId: number): Promise<{ id: number }> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
       throw new NotFoundException('User not found');
     }
     if (user.id === staffUserId) {
-      throw new BadRequestException('You cannot delete your own account');
+      throw new BadRequestException('You cannot deactivate your own account');
     }
-    try {
-      await this.userRepository.remove(user);
-    } catch {
-      throw new ConflictException(
-        'Cannot delete this user — they have linked records (inquiries, logs).',
-      );
+    if (user.isActive) {
+      user.isActive = false;
+      await this.userRepository.save(user);
+    }
+    return { id: userId };
+  }
+
+  /** Admin reactivates a previously deactivated user (re-enables login). */
+  async reactivateUser(userId: number): Promise<{ id: number }> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    if (!user.isActive) {
+      user.isActive = true;
+      await this.userRepository.save(user);
     }
     return { id: userId };
   }

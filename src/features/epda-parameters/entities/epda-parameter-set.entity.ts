@@ -23,6 +23,14 @@ export interface LoaTier {
   label: string;
 }
 
+/** Agency fee on cargo (BB section) keyed by cargo type code, USD/MT. */
+export interface CargoAgencyRate {
+  /** Normalized cargo type code (e.g. IN_BULK, EQUIPMENT). */
+  code: string;
+  label: string;
+  rate: number;
+}
+
 /** @deprecated use GrtTier. */
 export type AgencyFeeTier = GrtTier;
 
@@ -48,6 +56,7 @@ export interface EpdaParameterValues {
     tonnagePerGrt: number;
     navigationPerGrt: number;
     tankerFactor: number;
+    bulkFactor: number;
     berthDuePerGrtHour: number;
     buoyDuePerGrtHour: number;
     anchoragePerGrtHour: number;
@@ -69,6 +78,8 @@ export interface EpdaParameterValues {
   moorUnmoorBerthTiers: GrtTier[];
   moorUnmoorBuoyTiers: GrtTier[];
   tugTiers: LoaTier[];
+  /** Per-cargo-type agency fee on cargo. Falls back to coeff bag/equip/bulk rates. */
+  cargoAgencyRates: CargoAgencyRate[];
 }
 
 /** Deeply-partial values — used for port overrides and incoming upsert payloads. */
@@ -81,6 +92,7 @@ export type PartialEpdaParameterValues = {
   moorUnmoorBerthTiers?: GrtTier[];
   moorUnmoorBuoyTiers?: GrtTier[];
   tugTiers?: LoaTier[];
+  cargoAgencyRates?: CargoAgencyRate[];
 };
 
 /**

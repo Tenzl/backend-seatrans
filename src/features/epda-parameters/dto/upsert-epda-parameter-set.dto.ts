@@ -32,6 +32,7 @@ class CoeffDto {
   @IsOptional() @IsNumber() tonnagePerGrt?: number;
   @IsOptional() @IsNumber() navigationPerGrt?: number;
   @IsOptional() @IsNumber() tankerFactor?: number;
+  @IsOptional() @IsNumber() bulkFactor?: number;
   @IsOptional() @IsNumber() berthDuePerGrtHour?: number;
   @IsOptional() @IsNumber() buoyDuePerGrtHour?: number;
   @IsOptional() @IsNumber() anchoragePerGrtHour?: number;
@@ -63,6 +64,12 @@ class LoaTierDto {
   @IsString() label!: string;
 }
 
+class CargoAgencyRateDto {
+  @IsString() code!: string;
+  @IsString() label!: string;
+  @IsNumber() rate!: number;
+}
+
 export class EpdaParameterValuesDto {
   @IsOptional() @ValidateNested() @Type(() => HoursDto) hours?: HoursDto;
   @IsOptional() @ValidateNested() @Type(() => GarbageDto) garbage?: GarbageDto;
@@ -92,6 +99,12 @@ export class EpdaParameterValuesDto {
   @ValidateNested({ each: true })
   @Type(() => LoaTierDto)
   tugTiers?: LoaTierDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CargoAgencyRateDto)
+  cargoAgencyRates?: CargoAgencyRateDto[];
 }
 
 export class UpsertEpdaParameterSetDto {

@@ -38,6 +38,7 @@ export function defaultValuesForArea(area?: string | null): EpdaParameterValues 
       tonnagePerGrt: 0.034,
       navigationPerGrt: 0.1,
       tankerFactor: 0.85,
+      bulkFactor: 1,
       berthDuePerGrtHour: 0.0031,
       buoyDuePerGrtHour: 0.0013,
       anchoragePerGrtHour: 0.0005,
@@ -80,6 +81,9 @@ export function defaultValuesForArea(area?: string | null): EpdaParameterValues 
       { minLoa: 190, amount: 2600, label: '190 - <205m' },
       { minLoa: 205, amount: 2800, label: '205 - <225m' },
     ],
+    // Empty by default: the EPDA calc falls back to the coeff bag/equip/bulk rates
+    // until an admin adds explicit per-cargo-type rates on the Parameter screen.
+    cargoAgencyRates: [],
   };
   if (!isQn) return base;
   return {
@@ -125,6 +129,8 @@ function mergeValues(
       out.moorUnmoorBuoyTiers = layer.moorUnmoorBuoyTiers.map((t) => ({ ...t }));
     if (Array.isArray(layer.tugTiers))
       out.tugTiers = layer.tugTiers.map((t) => ({ ...t }));
+    if (Array.isArray(layer.cargoAgencyRates))
+      out.cargoAgencyRates = layer.cargoAgencyRates.map((r) => ({ ...r }));
   }
   return out;
 }

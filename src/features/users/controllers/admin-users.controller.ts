@@ -75,5 +75,11 @@ export class AdminUsersController {
     }
     return this.adminUsersService.deleteUser(id, staffUserId);
   }
+
+  @Post(':id/reactivate')
+  @HttpCode(HttpStatus.OK)
+  async reactivate(@Param('id', ParseIntPipe) id: number) {
+    return this.adminUsersService.reactivateUser(id);
+  }
 }
 
