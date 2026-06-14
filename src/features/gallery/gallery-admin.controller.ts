@@ -61,12 +61,31 @@ export class GalleryAdminController {
   async uploadSingle(
     @UploadedFile() file: { buffer: Buffer },
     @Body() body: Record<string, unknown>,
+    @Query() query: Record<string, unknown>,
     @Req() req: Request & { user?: { id?: number } },
   ) {
-    const fields = await validateDto(GalleryMultipartFieldsDto, body);
+    // Metadata can arrive via query string (preferred — survives a same-origin
+    // reverse proxy that strips multipart text fields) or the multipart body.
+    // Parse explicitly: the class-transformer @Transform + implicit-conversion
+    // combo mis-handled the snake_case keys, so we coerce to numbers here.
+    const src = { ...body, ...query } as Record<string, unknown>;
+    const parseId = (camel: string, snake: string): number =>
+      Number(src[camel] ?? src[snake]);
+    const dto: CreateGalleryImageDto = {
+      provinceId: parseId('provinceId', 'province_id'),
+      portId: parseId('portId', 'port_id'),
+      serviceTypeId: parseId('serviceTypeId', 'service_type_id'),
+      commodityId: parseId('commodityId', 'commodity_id'),
+    };
+    const invalid = Object.entries(dto)
+      .filter(([, v]) => !Number.isInteger(v) || v < 1)
+      .map(([field]) => ({ field, message: `${field} must be a positive integer` }));
+    if (invalid.length) {
+      throw new BadRequestException({ message: 'Request validation failed', details: invalid });
+    }
     const uploaderUserId = req.user?.id;
     if (!uploaderUserId) throw new BadRequestException('User not authenticated');
-    return this.galleryService.uploadSingle(file, fields.toCreateDto(), uploaderUserId);
+    return this.galleryService.uploadSingle(file, dto, uploaderUserId);
   }
 
   @Post('from-url')
