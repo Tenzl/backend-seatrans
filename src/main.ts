@@ -48,8 +48,10 @@ async function bootstrap() {
   // Wrap responses in ApiResponse payload mirroring Java's ApiResponse wrapper
   app.useGlobalInterceptors(new ResponseInterceptor());
 
-  const port = process.env.SERVER_PORT ?? 8080;
-  await app.listen(port);
-  console.log(`Application is running on: http://localhost:${port}`);
+  // Render (and most PaaS) inject the port to bind on via PORT; fall back to
+  // SERVER_PORT for local dev. Bind 0.0.0.0 so the platform can detect the port.
+  const port = process.env.PORT ?? process.env.SERVER_PORT ?? 8080;
+  await app.listen(port, '0.0.0.0');
+  console.log(`Application is running on port ${port}`);
 }
 bootstrap();
