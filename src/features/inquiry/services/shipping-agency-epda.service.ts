@@ -305,6 +305,9 @@ export class ShippingAgencyEpdaService {
     if (dto.tallyFeeAmount !== undefined) {
       row.tallyFeeAmount = this.toNumericString(dto.tallyFeeAmount);
     }
+    if (dto.tugAssistanceAmount !== undefined) {
+      row.tugAssistanceAmount = this.toNumericString(dto.tugAssistanceAmount);
+    }
     if (dto.transportLs !== undefined) {
       row.transportLs = this.trimToNull(dto.transportLs);
     }
@@ -489,6 +492,7 @@ export class ShippingAgencyEpdaService {
       'Agency lumpsum': n(row.agencyLumpsumAmount),
       'Boat hire (agency)': n(row.boatHireAmount),
       'Tally fee': n(row.tallyFeeAmount),
+      'Tug assistance': n(row.tugAssistanceAmount),
       'Transport (taxi/courier)': s(row.transportLs),
       'Boat hire (quarantine)': n(row.transportQuarantine),
     };

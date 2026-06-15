@@ -27,6 +27,7 @@ function shippingAgencySharedFields(row: ShippingAgencyInquiryEntity): Record<st
     purposeOfCalling: row.purposeOfCalling,
     boatHireAmount: row.boatHireAmount,
     tallyFeeAmount: row.tallyFeeAmount,
+    tugAssistanceAmount: row.tugAssistanceAmount,
     quoteForm: row.quoteForm,
   };
 }

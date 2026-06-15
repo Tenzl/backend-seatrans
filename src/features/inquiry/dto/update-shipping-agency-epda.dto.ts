@@ -107,6 +107,11 @@ export class UpdateShippingAgencyEpdaDto {
   tallyFeeAmount?: number;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  tugAssistanceAmount?: number;
+
+  @IsOptional()
   @IsString()
   transportLs?: string;
 

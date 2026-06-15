@@ -53,6 +53,9 @@ export class ShippingAgencyInquiryEntity extends BaseInquiry {
   @Column({ name: 'tally_fee_amount', type: 'decimal', precision: 15, scale: 2, nullable: true })
   tallyFeeAmount!: string | null;
 
+  @Column({ name: 'tug_assistance_amount', type: 'decimal', precision: 15, scale: 2, nullable: true })
+  tugAssistanceAmount!: string | null;
+
   @Column({ name: 'transport_ls', type: 'text', nullable: true })
   transportLs!: string | null;
 
