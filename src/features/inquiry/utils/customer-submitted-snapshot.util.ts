@@ -1,4 +1,4 @@
-import { ServiceInquiry } from '../entities/service-inquiry.entity';
+import { ShippingAgencyInquiryEntity } from '../entities/shipping-agency-inquiry.entity';
 
 export const CUSTOMER_SNAPSHOT_FIELD_KEYS = [
   'toShipowner',
@@ -35,7 +35,7 @@ export function originalValueFromSnapshot(
 
 export function buildCustomerSubmittedSnapshot(
   source: Pick<
-    ServiceInquiry,
+    ShippingAgencyInquiryEntity,
     | 'toName'
     | 'mv'
     | 'dwt'

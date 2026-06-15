@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ServiceInquiry } from '../entities/service-inquiry.entity';
+import { ShippingAgencyInquiryEntity } from '../entities/shipping-agency-inquiry.entity';
 import { ServiceType } from '../../logistics/entities/service-type.entity';
 import { User } from '../../auth/entities/user.entity';
 import { InquiryCreatedSource } from '../enums/inquiry-created-source.enum';
@@ -33,8 +33,8 @@ const SERVICE_SHIPPING_AGENCY = 'SHIPPING AGENCY';
 @Injectable()
 export class ShippingAgencyEpdaService {
   constructor(
-    @InjectRepository(ServiceInquiry)
-    private readonly inquiryRepository: Repository<ServiceInquiry>,
+    @InjectRepository(ShippingAgencyInquiryEntity)
+    private readonly inquiryRepository: Repository<ShippingAgencyInquiryEntity>,
     @InjectRepository(ServiceType)
     private readonly serviceTypeRepository: Repository<ServiceType>,
     @InjectRepository(User)
@@ -254,7 +254,7 @@ export class ShippingAgencyEpdaService {
   }
 
   private applyCustomerVisibleUpdates(
-    row: ServiceInquiry,
+    row: ShippingAgencyInquiryEntity,
     dto: UpdateShippingAgencyEpdaDto,
   ): void {
     if (dto.shipownerTo !== undefined) {
@@ -313,7 +313,7 @@ export class ShippingAgencyEpdaService {
     }
   }
 
-  private async requireShippingAgencyInquiry(inquiryId: number): Promise<ServiceInquiry> {
+  private async requireShippingAgencyInquiry(inquiryId: number): Promise<ShippingAgencyInquiryEntity> {
     const serviceType = await this.requireShippingAgencyServiceType();
     const row = await this.inquiryRepository.findOne({
       where: {
@@ -350,7 +350,7 @@ export class ShippingAgencyEpdaService {
     return serviceType;
   }
 
-  private async touchProcessedBy(row: ServiceInquiry, actorUserId: number): Promise<void> {
+  private async touchProcessedBy(row: ShippingAgencyInquiryEntity, actorUserId: number): Promise<void> {
     if (row.processedById === actorUserId) {
       return;
     }
@@ -398,7 +398,7 @@ export class ShippingAgencyEpdaService {
     return `${prefix}${String(nextNumber).padStart(4, '0')}`;
   }
 
-  private toAdminInquiryPayload(row: ServiceInquiry): Record<string, unknown> {
+  private toAdminInquiryPayload(row: ShippingAgencyInquiryEntity): Record<string, unknown> {
     return {
       id: row.id,
       code: row.code,
@@ -443,7 +443,7 @@ export class ShippingAgencyEpdaService {
   }
 
   /** All audited EPDA fields of a row as readable label → string value. */
-  private epdaFieldSnapshot(row: ServiceInquiry): Record<string, string | null> {
+  private epdaFieldSnapshot(row: ShippingAgencyInquiryEntity): Record<string, string | null> {
     const s = (v: unknown): string | null => {
       if (v === null || v === undefined) return null;
       if (v instanceof Date) return v.toISOString().slice(0, 10);

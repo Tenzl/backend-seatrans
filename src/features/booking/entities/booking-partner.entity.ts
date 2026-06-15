@@ -7,8 +7,10 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { ApproveStatus } from '../enums/approve-status.enum';
 import { CustomerStatus } from '../enums/customer-status.enum';
 import { CustomerType } from '../enums/customer-type.enum';
+import { PartnerContact } from '../types/partner-contact';
 import { BookingPartnerAdditionTypeEntity } from './booking-partner-addition-type.entity';
 import { BookingShipping } from './booking-shipping.entity';
 
@@ -40,8 +42,9 @@ export class BookingPartner {
   @Column({ type: 'varchar', length: 128, nullable: true })
   city!: string | null;
 
-  @Column({ name: 'contact_email', type: 'varchar', length: 255, nullable: true })
-  contactEmail!: string | null;
+  /** Zero or many contact persons; see {@link PartnerContact}. */
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  contacts!: PartnerContact[];
 
   @Column({ type: 'varchar', length: 64, nullable: true })
   phone!: string | null;
@@ -73,6 +76,47 @@ export class BookingPartner {
 
   @Column({ name: 'tax_number', type: 'varchar', length: 128, nullable: true })
   taxNumber!: string | null;
+
+  @Column({
+    name: 'approve_status',
+    type: 'enum',
+    enum: ApproveStatus,
+    nullable: true,
+  })
+  approveStatus!: ApproveStatus | null;
+
+  @Column({ name: 'approve_by', type: 'varchar', length: 255, nullable: true })
+  approveBy!: string | null;
+
+  @Column({ name: 'company_establishment_date', type: 'date', nullable: true })
+  companyEstablishmentDate!: string | null;
+
+  @Column({ name: 'payment_due_days', type: 'int', nullable: true })
+  paymentDueDays!: number | null;
+
+  @Column({ name: 'contract_no', type: 'varchar', length: 128, nullable: true })
+  contractNo!: string | null;
+
+  @Column({ name: 'invoice_company_name', type: 'varchar', length: 255, nullable: true })
+  invoiceCompanyName!: string | null;
+
+  @Column({ name: 'invoice_company_address', type: 'text', nullable: true })
+  invoiceCompanyAddress!: string | null;
+
+  @Column({ name: 'invoice_company_phone', type: 'varchar', length: 64, nullable: true })
+  invoiceCompanyPhone!: string | null;
+
+  @Column({ name: 'invoice_company_email', type: 'varchar', length: 255, nullable: true })
+  invoiceCompanyEmail!: string | null;
+
+  @Column({ name: 'invoice_bank_name', type: 'varchar', length: 255, nullable: true })
+  invoiceBankName!: string | null;
+
+  @Column({ name: 'invoice_bank_branch', type: 'varchar', length: 255, nullable: true })
+  invoiceBankBranch!: string | null;
+
+  @Column({ name: 'invoice_bank_account', type: 'varchar', length: 128, nullable: true })
+  invoiceBankAccount!: string | null;
 
   @Column({ name: 'created_by', length: 255, default: 'system' })
   createdBy!: string;

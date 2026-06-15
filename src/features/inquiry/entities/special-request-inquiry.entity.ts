@@ -7,16 +7,10 @@ export class SpecialRequestInquiryEntity extends BaseInquiry {
   subject!: string | null;
 
   @Column({ name: 'preferred_province_id', type: 'bigint', nullable: true })
-  preferredProvinceId!: string | null;
-
-  @Column({ name: 'preferred_province_name', type: 'varchar', length: 255, nullable: true })
-  preferredProvinceName!: string | null;
+  preferredProvinceId!: number | null;
 
   @Column({ name: 'related_department_id', type: 'bigint', nullable: true })
-  relatedDepartmentId!: string | null;
-
-  @Column({ name: 'related_department_name', type: 'varchar', length: 255, nullable: true })
-  relatedDepartmentName!: string | null;
+  relatedDepartmentId!: number | null;
 
   @Column({ type: 'text', nullable: true })
   message!: string | null;

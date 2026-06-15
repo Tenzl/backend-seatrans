@@ -7,7 +7,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
 import { Repository } from 'typeorm';
 import { InquiryDocument } from '../entities/inquiry-document.entity';
-import { ServiceInquiry } from '../entities/service-inquiry.entity';
+import { BaseInquiry } from '../entities/base-inquiry.entity';
+import { ShippingAgencyInquiryEntity } from '../entities/shipping-agency-inquiry.entity';
+import { CharteringBrokerageInquiryEntity } from '../entities/chartering-brokerage-inquiry.entity';
+import { FreightForwardingInquiryEntity } from '../entities/freight-forwarding-inquiry.entity';
+import { TotalLogisticsInquiryEntity } from '../entities/total-logistics-inquiry.entity';
+import { SpecialRequestInquiryEntity } from '../entities/special-request-inquiry.entity';
 import { InquiryDocumentType } from '../enums/inquiry-document-type.enum';
 import { InquiryDocumentDto } from '../dto/inquiry-document.dto';
 import { CloudinaryService } from '../../../shared/services/cloudinary.service';
@@ -15,15 +20,34 @@ import { User } from '../../auth/entities/user.entity';
 
 @Injectable()
 export class InquiryDocumentService {
+  /** Normalized service slug → per-service inquiry repository. */
+  private readonly inquiryRepos: Record<string, Repository<BaseInquiry>>;
+
   constructor(
     @InjectRepository(InquiryDocument)
     private readonly inquiryDocumentRepository: Repository<InquiryDocument>,
-    @InjectRepository(ServiceInquiry)
-    private readonly inquiryRepository: Repository<ServiceInquiry>,
+    @InjectRepository(ShippingAgencyInquiryEntity)
+    shippingAgencyRepo: Repository<ShippingAgencyInquiryEntity>,
+    @InjectRepository(CharteringBrokerageInquiryEntity)
+    charteringRepo: Repository<CharteringBrokerageInquiryEntity>,
+    @InjectRepository(FreightForwardingInquiryEntity)
+    freightRepo: Repository<FreightForwardingInquiryEntity>,
+    @InjectRepository(TotalLogisticsInquiryEntity)
+    totalLogisticsRepo: Repository<TotalLogisticsInquiryEntity>,
+    @InjectRepository(SpecialRequestInquiryEntity)
+    specialRequestRepo: Repository<SpecialRequestInquiryEntity>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly cloudinaryService: CloudinaryService,
-  ) {}
+  ) {
+    this.inquiryRepos = {
+      'shipping-agency': shippingAgencyRepo,
+      chartering: charteringRepo,
+      'freight-forwarding': freightRepo,
+      'total-logistic': totalLogisticsRepo,
+      'special-request': specialRequestRepo,
+    };
+  }
 
   async uploadDocument(
     serviceSlug: string,
@@ -37,13 +61,8 @@ export class InquiryDocumentService {
       throw new BadRequestException('file is required');
     }
 
-    const inquiry = await this.requireInquiry(targetId);
-    const normalizedRequestedSlug = this.normalizeServiceSlug(serviceSlug);
+    const inquiry = await this.requireInquiry(serviceSlug, targetId);
     const inquirySlug = this.toServiceSlug(inquiry.serviceType?.name);
-
-    if (normalizedRequestedSlug !== inquirySlug) {
-      throw new BadRequestException('Document does not belong to the specified inquiry');
-    }
 
     const uploader = await this.userRepository.findOne({ where: { id: uploaderUserId } });
     if (!uploader) {
@@ -77,7 +96,7 @@ export class InquiryDocumentService {
   }
 
   async saveAttachmentsForInquiry(
-    inquiry: ServiceInquiry,
+    inquiry: BaseInquiry,
     files: Express.Multer.File[],
     uploaderUserId: number,
   ): Promise<void> {
@@ -95,8 +114,7 @@ export class InquiryDocumentService {
 
   async getDocuments(serviceSlug: string, targetId: number): Promise<InquiryDocumentDto[]> {
     // Ensure inquiry exists + matches service slug (legacy safety check)
-    const inquiry = await this.requireInquiry(targetId);
-    this.ensureServiceSlugMatches(serviceSlug, inquiry);
+    await this.requireInquiry(serviceSlug, targetId);
 
     const rows = await this.inquiryDocumentRepository.find({
       where: {
@@ -116,8 +134,7 @@ export class InquiryDocumentService {
    * Used to enforce ownership checks on customer-facing document routes.
    */
   async getInquiryOwnerId(serviceSlug: string, targetId: number): Promise<number> {
-    const inquiry = await this.requireInquiry(targetId);
-    this.ensureServiceSlugMatches(serviceSlug, inquiry);
+    const inquiry = await this.requireInquiry(serviceSlug, targetId);
     return inquiry.userId;
   }
 
@@ -126,8 +143,7 @@ export class InquiryDocumentService {
     targetId: number,
     type: InquiryDocumentType,
   ): Promise<InquiryDocumentDto[]> {
-    const inquiry = await this.requireInquiry(targetId);
-    this.ensureServiceSlugMatches(serviceSlug, inquiry);
+    await this.requireInquiry(serviceSlug, targetId);
 
     const rows = await this.inquiryDocumentRepository.find({
       where: {
@@ -163,6 +179,11 @@ export class InquiryDocumentService {
     await this.inquiryDocumentRepository.remove(row);
   }
 
+  /**
+   * Delete all documents for an inquiry by its (globally-unique) id. Inquiry ids
+   * are unique across every service table (shared sequence), so the bare
+   * targetId match is safe.
+   */
   async hardDeleteByInquiry(inquiryId: number): Promise<void> {
     const rows = await this.inquiryDocumentRepository.find({
       where: { targetId: inquiryId },
@@ -175,13 +196,18 @@ export class InquiryDocumentService {
   }
 
   async hardDeleteByServiceAndTarget(serviceSlug: string, targetId: number): Promise<void> {
-    const inquiry = await this.requireInquiry(targetId);
-    this.ensureServiceSlugMatches(serviceSlug, inquiry);
+    await this.requireInquiry(serviceSlug, targetId);
     await this.hardDeleteByInquiry(targetId);
   }
 
-  private async requireInquiry(inquiryId: number): Promise<ServiceInquiry> {
-    const inquiry = await this.inquiryRepository.findOne({
+  private async requireInquiry(serviceSlug: string, inquiryId: number): Promise<BaseInquiry> {
+    const slug = this.normalizeServiceSlug(serviceSlug);
+    const repo = this.inquiryRepos[slug];
+    if (!repo) {
+      throw new BadRequestException(`Unsupported service type: ${serviceSlug}`);
+    }
+
+    const inquiry = await repo.findOne({
       where: { id: inquiryId },
       relations: {
         serviceType: true,
@@ -193,14 +219,6 @@ export class InquiryDocumentService {
     }
 
     return inquiry;
-  }
-
-  private ensureServiceSlugMatches(serviceSlug: string, inquiry: ServiceInquiry): void {
-    const normalizedRequestedSlug = this.normalizeServiceSlug(serviceSlug);
-    const inquirySlug = this.toServiceSlug(inquiry.serviceType?.name);
-    if (normalizedRequestedSlug !== inquirySlug) {
-      throw new BadRequestException('Document does not belong to the specified inquiry');
-    }
   }
 
   private toDto(row: InquiryDocument): InquiryDocumentDto {

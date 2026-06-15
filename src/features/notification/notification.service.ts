@@ -4,7 +4,7 @@ import { In, IsNull, Repository } from 'typeorm';
 import { Notification } from './entities/notification.entity';
 import { NotificationType } from './enums/notification-type.enum';
 import { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
-import { ServiceInquiry } from '../inquiry/entities/service-inquiry.entity';
+import { BaseInquiry } from '../inquiry/entities/base-inquiry.entity';
 import { InquiryStatus } from '../inquiry/enums/inquiry-status.enum';
 import { User } from '../auth/entities/user.entity';
 import { RoleGroup } from '../auth/enums/role-group.enum';
@@ -86,7 +86,7 @@ export class NotificationService {
   }
 
   async notifyCustomerFieldChanges(
-    inquiry: ServiceInquiry,
+    inquiry: BaseInquiry,
     changedFields: string[],
   ): Promise<Notification | null> {
     if (!changedFields.length) return null;
@@ -125,7 +125,7 @@ export class NotificationService {
   }
 
   async notifyInquiryQuotedIfNeeded(
-    inquiry: ServiceInquiry,
+    inquiry: BaseInquiry,
     previousStatus: string,
   ): Promise<Notification | null> {
     if (inquiry.status !== InquiryStatus.QUOTED) {
@@ -164,7 +164,7 @@ export class NotificationService {
   }
 
   async notifyStatusChanged(
-    inquiry: ServiceInquiry,
+    inquiry: BaseInquiry,
     previousStatus: string,
   ): Promise<Notification | null> {
     if (!inquiry.userId) return null;
@@ -194,7 +194,7 @@ export class NotificationService {
     return this.notificationRepository.save(row);
   }
 
-  async notifyInternalNewInquiry(inquiry: ServiceInquiry): Promise<void> {
+  async notifyInternalNewInquiry(inquiry: BaseInquiry): Promise<void> {
     const internalUsers = await this.userRepository
       .createQueryBuilder('user')
       .leftJoin('user.role', 'role')

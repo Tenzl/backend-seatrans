@@ -118,6 +118,11 @@ export class AdminBookingPartnerController {
     return this.bookingPartnerService.updateCustomerStatus(id, dto, this.currentActor(req));
   }
 
+  @Delete()
+  removeAllPartners() {
+    return this.bookingPartnerService.deleteAll();
+  }
+
   @Delete(':id')
   removePartner(@Param('id', ParseIntPipe) id: number) {
     return this.bookingPartnerService.delete(id);

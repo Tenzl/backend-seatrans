@@ -1,4 +1,4 @@
-import { ServiceInquiry } from '../entities/service-inquiry.entity';
+import { ShippingAgencyInquiryEntity } from '../entities/shipping-agency-inquiry.entity';
 import {
   resolveGarbageCbmAmount,
   resolveGarbageUsdRate,
@@ -6,7 +6,7 @@ import {
 
 export type InquiryResponseAudience = 'user' | 'admin';
 
-function shippingAgencySharedFields(row: ServiceInquiry): Record<string, unknown> {
+function shippingAgencySharedFields(row: ShippingAgencyInquiryEntity): Record<string, unknown> {
   return {
     toName: row.toName,
     mv: row.mv,
@@ -31,7 +31,7 @@ function shippingAgencySharedFields(row: ServiceInquiry): Record<string, unknown
   };
 }
 
-function shippingAgencyInternalEpdaFields(row: ServiceInquiry): Record<string, unknown> {
+function shippingAgencyInternalEpdaFields(row: ShippingAgencyInquiryEntity): Record<string, unknown> {
   return {
     epdaDocumentDate: row.epdaDocumentDate,
     shipType: row.shipType,
@@ -55,7 +55,7 @@ function shippingAgencyInternalEpdaFields(row: ServiceInquiry): Record<string, u
 }
 
 export function mapShippingAgencyInquiryFields(
-  row: ServiceInquiry,
+  row: ShippingAgencyInquiryEntity,
   audience: InquiryResponseAudience,
 ): Record<string, unknown> {
   const shared = shippingAgencySharedFields(row);

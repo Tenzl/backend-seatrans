@@ -6,7 +6,7 @@ import {
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
-import { ServiceInquiry } from './service-inquiry.entity';
+import { ShippingAgencyInquiryEntity } from './shipping-agency-inquiry.entity';
 import { User } from '../../auth/entities/user.entity';
 
 export enum InquiryFieldChangeAction {
@@ -23,9 +23,9 @@ export class InquiryFieldChangeLog {
   @Column({ name: 'inquiry_id', type: 'bigint' })
   inquiryId!: number;
 
-  @ManyToOne(() => ServiceInquiry, { onDelete: 'CASCADE' })
+  @ManyToOne(() => ShippingAgencyInquiryEntity, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'inquiry_id' })
-  inquiry!: ServiceInquiry;
+  inquiry!: ShippingAgencyInquiryEntity;
 
   @Column({ name: 'changed_by_user_id', type: 'bigint' })
   changedByUserId!: number;

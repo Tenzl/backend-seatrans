@@ -8,6 +8,7 @@ import {
   Brackets,
   DataSource,
   EntityManager,
+  In,
   IsNull,
   Repository,
   SelectQueryBuilder,
@@ -15,7 +16,11 @@ import {
 import { BookingPartner } from '../entities/booking-partner.entity';
 import { BookingPartnerAdditionTypeEntity } from '../entities/booking-partner-addition-type.entity';
 import { ListBookingPartnersDto } from '../dto/list-booking-partners.dto';
-import { UpsertBookingPartnerDto } from '../dto/upsert-booking-partner.dto';
+import {
+  PartnerContactDto,
+  UpsertBookingPartnerDto,
+} from '../dto/upsert-booking-partner.dto';
+import { PartnerContact } from '../types/partner-contact';
 import {
   BookingPartnerDetailResponseDto,
   BookingPartnerListItemResponseDto,
@@ -137,12 +142,74 @@ export class BookingPartnerService {
       const partner = repository.create();
 
       this.assignUpsertFields(partner, dto);
-      partner.customerId = await this.generateCustomerId(manager);
+      partner.customerId = await this.resolveCustomerId(manager, dto.customerId);
       partner.createdBy = actor;
       partner.updatedBy = actor;
 
       const saved = await repository.save(partner);
       return this.toDetailResponse(saved);
+    });
+  }
+
+  /**
+   * Create many partners in a SINGLE transaction (used by import). Avoids the
+   * per-row transaction + per-row sequence round-trips of {@link createPartner}:
+   * duplicate customer ids are checked in one query, all auto ids are reserved
+   * in one block, and entities are saved in chunks.
+   */
+  async createPartnersBulk(
+    dtos: UpsertBookingPartnerDto[],
+    actor: string,
+  ): Promise<{
+    successCount: number;
+    errorCount: number;
+    errors: Array<{ index: number; message: string }>;
+  }> {
+    return this.dataSource.transaction(async (manager) => {
+      const repository = manager.getRepository(BookingPartner);
+
+      const providedIds = dtos
+        .map((dto) => this.trimToNull(dto.customerId))
+        .filter((id): id is string => id != null);
+
+      const existingRows = providedIds.length
+        ? await repository.find({
+            where: { customerId: In(providedIds) },
+            select: { customerId: true },
+          })
+        : [];
+      const takenIds = new Set(existingRows.map((row) => row.customerId));
+
+      const autoCount = dtos.filter((dto) => !this.trimToNull(dto.customerId)).length;
+      const autoIds = await this.reserveCustomerIdBlock(manager, autoCount);
+
+      const errors: Array<{ index: number; message: string }> = [];
+      const entities: BookingPartner[] = [];
+      let autoIndex = 0;
+
+      dtos.forEach((dto, i) => {
+        const provided = this.trimToNull(dto.customerId);
+        if (provided) {
+          if (takenIds.has(provided)) {
+            errors.push({ index: i + 1, message: `Customer ID "${provided}" already exists` });
+            return;
+          }
+          takenIds.add(provided);
+        }
+
+        const partner = repository.create();
+        this.assignUpsertFields(partner, dto);
+        partner.customerId = provided ?? autoIds[autoIndex++];
+        partner.createdBy = actor;
+        partner.updatedBy = actor;
+        entities.push(partner);
+      });
+
+      if (entities.length) {
+        await repository.save(entities, { chunk: 100 });
+      }
+
+      return { successCount: entities.length, errorCount: errors.length, errors };
     });
   }
 
@@ -201,6 +268,19 @@ export class BookingPartnerService {
     }
 
     await this.partnerRepository.remove(row);
+  }
+
+  /**
+   * Wipe ALL partners (and their FK-dependent rows: shipping, addition types)
+   * so a fresh dataset can be imported. TRUNCATE ... CASCADE clears dependent
+   * tables regardless of their FK onDelete config, and resets identities.
+   */
+  async deleteAll(): Promise<{ deleted: number }> {
+    const deleted = await this.partnerRepository.count();
+    await this.dataSource.query(
+      'TRUNCATE TABLE booking_partners RESTART IDENTITY CASCADE',
+    );
+    return { deleted };
   }
 
   private applyFilters(
@@ -287,7 +367,7 @@ export class BookingPartnerService {
   }
 
   private assignUpsertFields(partner: BookingPartner, dto: UpsertBookingPartnerDto): void {
-    const additionTypes = Array.from(new Set(dto.additionTypes));
+    const additionTypes = Array.from(new Set(dto.additionTypes ?? []));
 
     partner.name = this.trimToNull(dto.name) ?? '';
     partner.additionTypeRows = additionTypes.map((additionType) =>
@@ -296,14 +376,42 @@ export class BookingPartnerService {
 
     partner.country = this.trimToNull(dto.country);
     partner.city = this.trimToNull(dto.city);
-    partner.contactEmail = this.trimToNull(dto.contactEmail);
+    partner.contacts = this.normalizeContacts(dto.contacts);
     partner.phone = this.trimToNull(dto.phone);
     partner.fax = this.trimToNull(dto.fax);
     partner.trackingUrl = this.trimToNull(dto.trackingUrl);
     partner.address = this.trimToNull(dto.address);
     partner.customerStatus = dto.customerStatus ?? null;
     partner.customerType = dto.customerType ?? null;
+    partner.approveStatus = dto.approveStatus ?? null;
+    partner.approveBy = this.trimToNull(dto.approveBy);
+    partner.companyEstablishmentDate = this.trimToNull(dto.companyEstablishmentDate);
+    partner.paymentDueDays = dto.paymentDueDays ?? null;
+    partner.contractNo = this.trimToNull(dto.contractNo);
     partner.taxNumber = this.trimToNull(dto.taxNumber);
+    partner.invoiceCompanyName = this.trimToNull(dto.invoiceCompanyName);
+    partner.invoiceCompanyAddress = this.trimToNull(dto.invoiceCompanyAddress);
+    partner.invoiceCompanyPhone = this.trimToNull(dto.invoiceCompanyPhone);
+    partner.invoiceCompanyEmail = this.trimToNull(dto.invoiceCompanyEmail);
+    partner.invoiceBankName = this.trimToNull(dto.invoiceBankName);
+    partner.invoiceBankBranch = this.trimToNull(dto.invoiceBankBranch);
+    partner.invoiceBankAccount = this.trimToNull(dto.invoiceBankAccount);
+  }
+
+  /** Trim each contact field and drop contacts that are entirely empty. */
+  private normalizeContacts(contacts?: PartnerContactDto[]): PartnerContact[] {
+    if (!contacts?.length) return [];
+    return contacts
+      .map((c) => ({
+        person: this.trimToNull(c.person),
+        firstName: this.trimToNull(c.firstName),
+        lastName: this.trimToNull(c.lastName),
+        email: this.trimToNull(c.email),
+        phone: this.trimToNull(c.phone),
+        title: this.trimToNull(c.title),
+        dateOfBirth: this.trimToNull(c.dateOfBirth),
+      }))
+      .filter((c) => Object.values(c).some((v) => v != null));
   }
 
   private toAdditionTypeRow(
@@ -324,14 +432,26 @@ export class BookingPartnerService {
       additionTypes: (partner.additionTypeRows ?? []).map((row) => row.additionType),
       country: partner.country,
       city: partner.city,
-      contactEmail: partner.contactEmail,
+      contacts: partner.contacts ?? [],
       phone: partner.phone,
       fax: partner.fax,
       trackingUrl: partner.trackingUrl,
       address: partner.address,
       customerStatus: partner.customerStatus,
       customerType: partner.customerType,
+      approveStatus: partner.approveStatus,
+      approveBy: partner.approveBy,
+      companyEstablishmentDate: partner.companyEstablishmentDate,
+      paymentDueDays: partner.paymentDueDays,
+      contractNo: partner.contractNo,
       taxNumber: partner.taxNumber,
+      invoiceCompanyName: partner.invoiceCompanyName,
+      invoiceCompanyAddress: partner.invoiceCompanyAddress,
+      invoiceCompanyPhone: partner.invoiceCompanyPhone,
+      invoiceCompanyEmail: partner.invoiceCompanyEmail,
+      invoiceBankName: partner.invoiceBankName,
+      invoiceBankBranch: partner.invoiceBankBranch,
+      invoiceBankAccount: partner.invoiceBankAccount,
       createdBy: partner.createdBy,
       createdAt: partner.createdAt,
       updatedBy: partner.updatedBy,
@@ -344,10 +464,7 @@ export class BookingPartnerService {
     if (!this.trimToNull(dto.name)) {
       throw new BadRequestException('name is required');
     }
-
-    if (!dto.additionTypes?.length) {
-      throw new BadRequestException('additionTypes is required');
-    }
+    // additionTypes is optional: a partner may have zero or many.
   }
 
   private sanitizePage(page?: number): number {
@@ -380,44 +497,77 @@ export class BookingPartnerService {
     return normalized.length > 0 ? normalized : null;
   }
 
-  private async generateCustomerId(manager: EntityManager): Promise<string> {
-    await this.ensureSequenceTable(manager);
+  /**
+   * Preserve a customer id supplied on create (e.g. legacy migration / import),
+   * enforcing uniqueness; otherwise auto-generate a fresh one.
+   */
+  private async resolveCustomerId(
+    manager: EntityManager,
+    requested?: string | null,
+  ): Promise<string> {
+    const provided = this.trimToNull(requested);
+    if (!provided) {
+      return this.generateCustomerId(manager);
+    }
 
+    const existing = await manager.findOne(BookingPartner, {
+      where: { customerId: provided },
+    });
+    if (existing) {
+      throw new BadRequestException(`Customer ID "${provided}" already exists`);
+    }
+
+    return provided;
+  }
+
+  private currentDatePart(): string {
     const date = new Date();
     const yy = String(date.getFullYear()).slice(-2);
     const mm = String(date.getMonth() + 1).padStart(2, '0');
     const dd = String(date.getDate()).padStart(2, '0');
-    const datePart = `${yy}${mm}${dd}`;
+    return `${yy}${mm}${dd}`;
+  }
 
-    let rows = await manager.query(
-      'SELECT current_value FROM customer_id_sequences WHERE sequence_date = $1 FOR UPDATE',
+  private async generateCustomerId(manager: EntityManager): Promise<string> {
+    const [id] = await this.reserveCustomerIdBlock(manager, 1);
+    return id;
+  }
+
+  /**
+   * Atomically reserve a contiguous block of `count` customer ids for today,
+   * returning the formatted ids. One UPDATE ... RETURNING bumps the sequence by
+   * the whole block, so bulk import does not pay a round-trip per row.
+   */
+  private async reserveCustomerIdBlock(
+    manager: EntityManager,
+    count: number,
+  ): Promise<string[]> {
+    if (count <= 0) return [];
+    await this.ensureSequenceTable(manager);
+
+    const datePart = this.currentDatePart();
+
+    await manager.query(
+      'INSERT INTO customer_id_sequences(sequence_date, current_value) VALUES ($1, 0) ON CONFLICT (sequence_date) DO NOTHING',
       [datePart],
     );
 
-    if (!rows.length) {
-      await manager.query(
-        'INSERT INTO customer_id_sequences(sequence_date, current_value) VALUES ($1, $2) ON CONFLICT (sequence_date) DO NOTHING',
-        [datePart, 0],
-      );
-
-      rows = await manager.query(
-        'SELECT current_value FROM customer_id_sequences WHERE sequence_date = $1 FOR UPDATE',
-        [datePart],
-      );
-    }
-
-    if (!rows.length) {
-      throw new BadRequestException('Failed to initialize customer id sequence row');
-    }
-
-    const nextValue = Number(rows[0].current_value) + 1;
-
-    await manager.query(
-      'UPDATE customer_id_sequences SET current_value = $1 WHERE sequence_date = $2',
-      [nextValue, datePart],
+    const rows = await manager.query(
+      'UPDATE customer_id_sequences SET current_value = current_value + $1 WHERE sequence_date = $2 RETURNING current_value',
+      [count, datePart],
     );
 
-    return `CUS-${datePart}-${String(nextValue).padStart(6, '0')}`;
+    if (!rows.length) {
+      throw new BadRequestException('Failed to reserve customer id sequence');
+    }
+
+    const end = Number(rows[0].current_value);
+    const start = end - count + 1;
+    const ids: string[] = [];
+    for (let value = start; value <= end; value++) {
+      ids.push(`CUS-${datePart}-${String(value).padStart(6, '0')}`);
+    }
+    return ids;
   }
 
   private async ensureSequenceTable(manager: EntityManager): Promise<void> {

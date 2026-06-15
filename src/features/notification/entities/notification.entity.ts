@@ -7,7 +7,6 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { User } from '../../auth/entities/user.entity';
-import { ServiceInquiry } from '../../inquiry/entities/service-inquiry.entity';
 
 @Entity('notifications')
 export class Notification {
@@ -21,10 +20,9 @@ export class Notification {
   @Column({ name: 'user_id', type: 'bigint' })
   userId!: number;
 
-  @ManyToOne(() => ServiceInquiry, { nullable: true })
-  @JoinColumn({ name: 'inquiry_id' })
-  inquiry!: ServiceInquiry | null;
-
+  // Inquiry reference is a bare id (no FK): notifications span every per-service
+  // inquiry table, so a single foreign key cannot point at all of them. The
+  // service type / slug travels in `metadata` for resolution.
   @Column({ name: 'inquiry_id', type: 'bigint', nullable: true })
   inquiryId!: number | null;
 

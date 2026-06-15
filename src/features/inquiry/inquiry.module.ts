@@ -1,6 +1,10 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ServiceInquiry } from './entities/service-inquiry.entity';
+import { ShippingAgencyInquiryEntity } from './entities/shipping-agency-inquiry.entity';
+import { CharteringBrokerageInquiryEntity } from './entities/chartering-brokerage-inquiry.entity';
+import { FreightForwardingInquiryEntity } from './entities/freight-forwarding-inquiry.entity';
+import { TotalLogisticsInquiryEntity } from './entities/total-logistics-inquiry.entity';
+import { SpecialRequestInquiryEntity } from './entities/special-request-inquiry.entity';
 import { InquiryDocument } from './entities/inquiry-document.entity';
 import { InquiryFieldChangeLog } from './entities/inquiry-field-change-log.entity';
 import { ServiceType } from '../logistics/entities/service-type.entity';
@@ -21,7 +25,11 @@ import { NotificationModule } from '../notification/notification.module';
 @Module({
   imports: [
     TypeOrmModule.forFeature([
-      ServiceInquiry,
+      ShippingAgencyInquiryEntity,
+      CharteringBrokerageInquiryEntity,
+      FreightForwardingInquiryEntity,
+      TotalLogisticsInquiryEntity,
+      SpecialRequestInquiryEntity,
       InquiryDocument,
       InquiryFieldChangeLog,
       ServiceType,
