@@ -145,6 +145,55 @@ export class AdminUsersService {
     });
   }
 
+  /**
+   * Admin changes a user's role. The new role must belong to the same role group
+   * as the user's current role (we never move a user between INTERNAL/EXTERNAL —
+   * that would change their whole access scope). Admins cannot change their own
+   * role (anti-lockout, mirrors deactivate).
+   */
+  async updateUserRole(
+    userId: number,
+    roleId: number,
+    staffUserId: number,
+  ): Promise<AdminUserRowDto> {
+    if (userId === staffUserId) {
+      throw new BadRequestException('You cannot change your own role');
+    }
+
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      relations: { role: true },
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const role = await this.roleRepository.findOne({ where: { id: roleId } });
+    if (!role) {
+      throw new BadRequestException('Role not found');
+    }
+
+    if (user.role && role.roleGroup !== user.role.roleGroup) {
+      throw new BadRequestException(
+        'The new role must be in the same group as the user’s current role',
+      );
+    }
+
+    user.role = role;
+    const saved = await this.userRepository.save(user);
+    return AdminUserRowDto.from({
+      id: saved.id,
+      email: saved.email,
+      username: saved.username ?? null,
+      fullName: saved.fullName ?? null,
+      phone: saved.phone ?? null,
+      company: saved.company ?? null,
+      isActive: saved.isActive,
+      createdAt: saved.createdAt,
+      role: { id: role.id, name: role.name, roleGroup: role.roleGroup },
+    });
+  }
+
   /** Admin sets a new password for any user. */
   async resetPassword(userId: number, newPassword: string): Promise<{ id: number }> {
     const user = await this.userRepository.findOne({ where: { id: userId } });

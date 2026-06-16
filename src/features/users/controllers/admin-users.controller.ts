@@ -8,6 +8,7 @@ import {
   HttpStatus,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Query,
   Req,
@@ -20,6 +21,7 @@ import { AdminUsersService } from '../admin-users.service';
 import { AdminListUsersQueryDto } from '../dto/admin-list-users-query.dto';
 import { CreateInternalUserDto } from '../dto/create-internal-user.dto';
 import { ResetUserPasswordDto } from '../dto/reset-user-password.dto';
+import { UpdateUserRoleDto } from '../dto/update-user-role.dto';
 import { RoleGroup } from '../../auth/enums/role-group.enum';
 
 type StaffRequest = Request & { user?: { id?: number } };
@@ -54,6 +56,21 @@ export class AdminUsersController {
       throw new BadRequestException('User not authenticated');
     }
     return this.adminUsersService.createInternalUser(dto, staffUserId);
+  }
+
+  @Patch(':id/role')
+  @HttpCode(HttpStatus.OK)
+  async updateRole(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: UpdateUserRoleDto,
+    @Req() req: StaffRequest,
+  ) {
+    const dto = await validateDto(UpdateUserRoleDto, body);
+    const staffUserId = req.user?.id;
+    if (!staffUserId) {
+      throw new BadRequestException('User not authenticated');
+    }
+    return this.adminUsersService.updateUserRole(id, dto.roleId, staffUserId);
   }
 
   @Post(':id/reset-password')
