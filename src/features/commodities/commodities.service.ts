@@ -151,7 +151,12 @@ export class CommoditiesService {
     commodity.displayName = normalizedDisplayName;
     commodity.description = dto.description?.trim() || null;
     commodity.requiredImageCount = dto.requiredImageCount ?? commodity.requiredImageCount;
-    commodity.cargoType = this.normalizeCargoType(dto.cargoType ?? commodity.cargoType);
+    // Only re-validate when a cargo type is explicitly sent. Editing a legacy
+    // commodity (junk stored type) without touching it keeps its value as-is
+    // rather than failing the save.
+    if (dto.cargoType !== undefined) {
+      commodity.cargoType = this.normalizeCargoType(dto.cargoType);
+    }
 
     const updated = await this.commodityRepository.save(commodity);
     return this.toDto(updated);
@@ -179,12 +184,38 @@ export class CommoditiesService {
     };
   }
 
+  /** Cargo types are a FIXED set — anything else is rejected (no more junk types). */
+  private static readonly ALLOWED_CARGO_TYPES = [
+    'IN_BULK',
+    'IN_BAG_PACK',
+    'IN_EQUIPMENT',
+  ];
+
+  /**
+   * Canonicalize a cargo type to one of the three allowed codes. Common legacy
+   * variants are mapped; anything outside the set is rejected so values like
+   * "BREAK BULK" / "PROJECT CARGO" can never be persisted again.
+   */
   private normalizeCargoType(value?: string): string {
-    const normalized = value?.trim();
-    if (!normalized) {
-      return 'IN_BULK';
+    const raw = value?.trim();
+    if (!raw) return 'IN_BULK';
+
+    const key = raw.toUpperCase().replace(/[\s-]+/g, '_');
+    const mapped =
+      key === 'BULK' || key === 'INBULK'
+        ? 'IN_BULK'
+        : key === 'EQUIPMENT' || key === 'INEQUIPMENT'
+          ? 'IN_EQUIPMENT'
+          : ['IN_BAGS', 'INBAGS', 'BAG_PACK', 'BAGPACK', 'INBAGPACK'].includes(key)
+            ? 'IN_BAG_PACK'
+            : key;
+
+    if (!CommoditiesService.ALLOWED_CARGO_TYPES.includes(mapped)) {
+      throw new BadRequestException(
+        `Invalid cargo type "${value}". Allowed: ${CommoditiesService.ALLOWED_CARGO_TYPES.join(', ')}`,
+      );
     }
-    return normalized.toUpperCase();
+    return mapped;
   }
 
   private sanitizeLimit(limit: number): number {
