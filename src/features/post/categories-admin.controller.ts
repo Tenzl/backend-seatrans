@@ -14,9 +14,9 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CategoriesService } from './categories.service';
 import { CategoryRequestDto } from './dto/category-request.dto';
+import { AdminSection } from '../../shared/decorators/admin-section.decorator';
 
-@UseGuards(AuthGuard('jwt'), RolesGuard)
-@Roles('ROLE_ADMIN', 'ROLE_EMPLOYEE', 'ROLE_INTERNAL')
+@AdminSection('content-categories')
 @Controller('v1/admin/categories')
 export class CategoriesAdminController {
   constructor(private readonly categoriesService: CategoriesService) {}

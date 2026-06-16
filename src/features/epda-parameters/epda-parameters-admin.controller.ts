@@ -12,7 +12,7 @@ import {
   Req,
 } from '@nestjs/common';
 import type { Request } from 'express';
-import { ApiAdmin } from '../../shared/decorators/api-admin.decorator';
+import { AdminSection } from '../../shared/decorators/admin-section.decorator';
 import { EpdaParametersService } from './epda-parameters.service';
 import {
   CreateEpdaParameterGroupDto,
@@ -23,7 +23,7 @@ import {
 
 type StaffRequest = Request & { user?: { id?: number } };
 
-@ApiAdmin()
+@AdminSection('epda-parameter')
 @Controller('v1/admin/epda-parameters')
 export class EpdaParametersAdminController {
   constructor(private readonly service: EpdaParametersService) {}

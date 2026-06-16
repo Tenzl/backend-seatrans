@@ -9,13 +9,13 @@ import {
   Post,
   Put,
 } from '@nestjs/common';
-import { ApiAdmin } from '../../shared/decorators/api-admin.decorator';
+import { AdminSection } from '../../shared/decorators/admin-section.decorator';
 import { PortsService } from './ports.service';
 import { CreatePortDto } from './dto/create-port.dto';
 import { PortDto } from './dto/port.dto';
 import { UpdatePortHasInfoDto } from './dto/update-port-has-info.dto';
 
-@ApiAdmin()
+@AdminSection('data-ports')
 @Controller('v1/admin/ports')
 export class PortsAdminController {
   constructor(private readonly portsService: PortsService) {}

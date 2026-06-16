@@ -6,10 +6,14 @@ import { UpdateMeDto } from './dto/update-me.dto';
 import { AuthGuard } from '@nestjs/passport';
 import type { Response } from 'express';
 import { SessionExchangeDto } from './dto/session-exchange.dto';
+import { SectionAccessService } from '../roles/section-access.service';
 
 @Controller('v1/auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly sectionAccess: SectionAccessService,
+  ) {}
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
@@ -54,8 +58,12 @@ export class AuthController {
 
   @UseGuards(AuthGuard('jwt'))
   @Get(['me', 'current-user'])
-  getProfile(@Request() req: any) {
-    return this.authService.toPublicUser(req.user);
+  async getProfile(@Request() req: any) {
+    const user = this.authService.toPublicUser(req.user);
+    // Dashboard section keys this user's role may access — drives nav + route
+    // gating on the frontend (admins implicitly get the whole catalog).
+    const sections = await this.sectionAccess.getSectionsForUser(req.user);
+    return { ...user, sections };
   }
 
   @UseGuards(AuthGuard('jwt'))

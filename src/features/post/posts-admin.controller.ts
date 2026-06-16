@@ -11,12 +11,12 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
-import { ApiAdmin } from '../../shared/decorators/api-admin.decorator';
+import { AdminSection } from '../../shared/decorators/admin-section.decorator';
 import { LimitQueryDto } from '../../shared/dto/list-query.dto';
 import { PostsService } from './posts.service';
 import { PostRequestDto } from './dto/post-request.dto';
 
-@ApiAdmin()
+@AdminSection('content-posts')
 @Controller('v1/admin/posts')
 export class PostsAdminController {
   constructor(private readonly postsService: PostsService) {}

@@ -14,9 +14,9 @@ import { OfficesService } from './offices.service';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CreateOfficeDto } from './dto/create-office.dto';
+import { AdminSection } from '../../shared/decorators/admin-section.decorator';
 
-@UseGuards(AuthGuard('jwt'), RolesGuard)
-@Roles('ROLE_ADMIN', 'ROLE_EMPLOYEE', 'ROLE_INTERNAL')
+@AdminSection('data-offices')
 @Controller('v1/admin/offices')
 export class OfficesAdminController {
   constructor(private readonly officesService: OfficesService) {}

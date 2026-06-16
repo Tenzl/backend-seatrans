@@ -17,6 +17,7 @@ import { InquiryModule } from './features/inquiry/inquiry.module';
 import { EpdaParametersModule } from './features/epda-parameters/epda-parameters.module';
 import { UsersModule } from './features/users/users.module';
 import { NotificationModule } from './features/notification/notification.module';
+import { RolesModule } from './features/roles/roles.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { NotificationModule } from './features/notification/notification.module'
     EpdaParametersModule,
     UsersModule,
     NotificationModule,
+    RolesModule,
   ],
   controllers: [AppController],
   providers: [

@@ -27,6 +27,7 @@ import { ListPartnerOptionsQueryDto } from '../dto/list-partner-options-query.dt
 import { UpsertBookingPartnerDto } from '../dto/upsert-booking-partner.dto';
 import { UpdateCustomerStatusDto } from '../dto/update-customer-status.dto';
 import { Request } from 'express';
+import { AdminSection } from '../../../shared/decorators/admin-section.decorator';
 
 type AuthenticatedRequest = Request & {
   user?: {
@@ -35,8 +36,7 @@ type AuthenticatedRequest = Request & {
   };
 };
 
-@UseGuards(AuthGuard('jwt'), RolesGuard)
-@Roles('ROLE_ADMIN', 'ROLE_EMPLOYEE', 'ROLE_INTERNAL')
+@AdminSection('booking-partner')
 @Controller('v1/admin/booking-management/partners')
 export class AdminBookingPartnerController {
   constructor(

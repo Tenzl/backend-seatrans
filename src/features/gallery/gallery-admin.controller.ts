@@ -17,7 +17,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import type { Request } from 'express';
-import { ApiAdmin } from '../../shared/decorators/api-admin.decorator';
+import { AdminSection } from '../../shared/decorators/admin-section.decorator';
 import { GalleryService } from './gallery.service';
 import { CreateGalleryImageDto } from './dto/create-gallery-image.dto';
 import { UpdateGalleryImageDto } from './dto/update-gallery-image.dto';
@@ -26,7 +26,7 @@ import { GalleryMultipartFieldsDto } from './dto/gallery-multipart-fields.dto';
 import { validateDto } from '../../shared/utils/validate-dto.util';
 import { allowMimeTypes, MB } from '../../shared/uploads/upload-validators';
 
-@ApiAdmin()
+@AdminSection('data-images')
 @Controller('v1/admin/gallery-images')
 export class GalleryAdminController {
   constructor(private readonly galleryService: GalleryService) {}
