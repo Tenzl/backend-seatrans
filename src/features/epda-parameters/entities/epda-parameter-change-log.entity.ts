@@ -15,7 +15,10 @@ import { User } from '../../auth/entities/user.entity';
 export type EpdaParameterChangeAction =
   | 'UPSERT_AREA'
   | 'UPSERT_PORT'
-  | 'DELETE_PORT';
+  | 'DELETE_PORT'
+  | 'UPSERT_GROUP'
+  | 'DELETE_GROUP'
+  | 'SET_GROUP_MEMBERS';
 
 /** Audit trail for edits made on the EPDA Parameter screen (area sets + port overrides). */
 @Entity('epda_parameter_change_logs')
@@ -32,7 +35,7 @@ export class EpdaParameterChangeLog {
   @Column({ name: 'port_id', type: 'int', nullable: true })
   portId!: number | null;
 
-  @Column({ type: 'varchar', length: 16 })
+  @Column({ type: 'varchar', length: 20 })
   action!: EpdaParameterChangeAction;
 
   @Column({ name: 'changed_by_user_id', type: 'bigint', nullable: true })

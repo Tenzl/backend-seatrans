@@ -1,9 +1,13 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayUnique,
   IsArray,
+  IsInt,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
@@ -112,4 +116,38 @@ export class UpsertEpdaParameterSetDto {
   @ValidateNested()
   @Type(() => EpdaParameterValuesDto)
   values?: EpdaParameterValuesDto;
+}
+
+/** Create a new port group inside an area. */
+export class CreateEpdaParameterGroupDto {
+  @IsString() @IsNotEmpty() @MaxLength(50)
+  area!: string;
+
+  @IsString() @IsNotEmpty() @MaxLength(100)
+  name!: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EpdaParameterValuesDto)
+  values?: EpdaParameterValuesDto;
+}
+
+/** Update a group's name and/or its override values. */
+export class UpdateEpdaParameterGroupDto {
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(100)
+  name?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EpdaParameterValuesDto)
+  values?: EpdaParameterValuesDto;
+}
+
+/** Replace a group's member port list. */
+export class SetGroupMembersDto {
+  @IsArray()
+  @ArrayUnique()
+  @IsInt({ each: true })
+  @Type(() => Number)
+  portIds!: number[];
 }

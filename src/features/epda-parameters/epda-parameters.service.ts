@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
+  EpdaParameterScope,
   EpdaParameterSet,
   EpdaParameterValues,
   PartialEpdaParameterValues,
@@ -148,7 +149,7 @@ export class EpdaParametersService {
 
   /** Record an edit on the Parameter screen (best-effort; never blocks the write). */
   private async logChange(entry: {
-    scope: 'AREA' | 'PORT';
+    scope: EpdaParameterScope;
     area: string | null;
     portId: number | null;
     action: EpdaParameterChangeAction;
@@ -249,6 +250,125 @@ export class EpdaParametersService {
     });
   }
 
+  // ---------- port groups (named set of ports inside an area) ----------
+
+  listGroups(area: string): Promise<EpdaParameterSet[]> {
+    return this.repo.find({ where: { scope: 'GROUP', area }, order: { name: 'ASC' } });
+  }
+
+  getGroup(id: number): Promise<EpdaParameterSet | null> {
+    return this.repo.findOne({ where: { id, scope: 'GROUP' } });
+  }
+
+  /** The group (within `area`) that owns `portId`, if any. */
+  async findGroupForPort(area: string, portId: number): Promise<EpdaParameterSet | null> {
+    const groups = await this.listGroups(area);
+    return groups.find((g) => (g.memberPortIds ?? []).includes(portId)) ?? null;
+  }
+
+  async createGroup(
+    area: string,
+    name: string,
+    values: PartialEpdaParameterValues,
+    actorUserId?: number,
+  ): Promise<EpdaParameterSet> {
+    const saved = await this.repo.save(
+      this.repo.create({
+        scope: 'GROUP',
+        area,
+        portId: null,
+        name,
+        memberPortIds: [],
+        values: values ?? {},
+      }),
+    );
+    await this.logChange({
+      scope: 'GROUP',
+      area,
+      portId: null,
+      action: 'UPSERT_GROUP',
+      changedByUserId: actorUserId ?? null,
+      beforeValues: null,
+      afterValues: saved.values,
+    });
+    return saved;
+  }
+
+  async updateGroup(
+    id: number,
+    patch: { name?: string; values?: PartialEpdaParameterValues },
+    actorUserId?: number,
+  ): Promise<EpdaParameterSet> {
+    const group = await this.getGroup(id);
+    if (!group) throw new NotFoundException(`Group ${id} not found`);
+    const before = group.values;
+    if (patch.name !== undefined) group.name = patch.name;
+    if (patch.values !== undefined) group.values = patch.values; // full override replaces
+    const saved = await this.repo.save(group);
+    await this.logChange({
+      scope: 'GROUP',
+      area: group.area,
+      portId: null,
+      action: 'UPSERT_GROUP',
+      changedByUserId: actorUserId ?? null,
+      beforeValues: before,
+      afterValues: saved.values,
+    });
+    return saved;
+  }
+
+  async deleteGroup(id: number, actorUserId?: number): Promise<void> {
+    const group = await this.getGroup(id);
+    if (!group) return;
+    await this.repo.delete({ id, scope: 'GROUP' });
+    await this.logChange({
+      scope: 'GROUP',
+      area: group.area,
+      portId: null,
+      action: 'DELETE_GROUP',
+      changedByUserId: actorUserId ?? null,
+      beforeValues: group.values,
+      afterValues: null,
+    });
+  }
+
+  /**
+   * Replace a group's member ports. A port belongs to at most one group per area,
+   * so any incoming port is first removed from sibling groups in the same area.
+   */
+  async setGroupMembers(
+    id: number,
+    portIds: number[],
+    actorUserId?: number,
+  ): Promise<EpdaParameterSet> {
+    const group = await this.getGroup(id);
+    if (!group) throw new NotFoundException(`Group ${id} not found`);
+    const unique = Array.from(new Set(portIds.filter((n) => Number.isInteger(n))));
+
+    // Enforce exclusivity: drop these ports from other groups in the same area.
+    const siblings = (await this.listGroups(group.area ?? '')).filter((g) => g.id !== id);
+    for (const sib of siblings) {
+      const kept = (sib.memberPortIds ?? []).filter((pid) => !unique.includes(pid));
+      if (kept.length !== (sib.memberPortIds ?? []).length) {
+        sib.memberPortIds = kept;
+        await this.repo.save(sib);
+      }
+    }
+
+    group.memberPortIds = unique;
+    const saved = await this.repo.save(group);
+    await this.logChange({
+      scope: 'GROUP',
+      area: group.area,
+      portId: null,
+      action: 'SET_GROUP_MEMBERS',
+      changedByUserId: actorUserId ?? null,
+      beforeValues: null,
+      afterValues: null,
+    });
+    return saved;
+  }
+
   /** Recent Parameter-screen edits, filtered by port (preferred) or area. */
   async listChangeLogs(opts: { area?: string; portId?: number; limit?: number }) {
     const where: Record<string, unknown> = {};
@@ -279,13 +399,17 @@ export class EpdaParametersService {
     }));
   }
 
-  /** Resolved values used by the EPDA form: area set overlaid with port override. */
+  /**
+   * Resolved values used by the EPDA form. Layers (later wins):
+   * area set → group override (if the port belongs to a group) → port override.
+   */
   async getEffective(
     area: string,
     portId?: number,
   ): Promise<EpdaParameterValues> {
     const areaSet = area ? await this.getAreaSet(area) : null;
+    const groupSet = area && portId ? await this.findGroupForPort(area, portId) : null;
     const portSet = portId ? await this.getPortOverride(portId) : null;
-    return mergeValues(area, areaSet?.values, portSet?.values);
+    return mergeValues(area, areaSet?.values, groupSet?.values, portSet?.values);
   }
 }

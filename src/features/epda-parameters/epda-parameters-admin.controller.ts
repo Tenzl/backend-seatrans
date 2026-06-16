@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Post,
   Put,
   Query,
   Req,
@@ -13,7 +14,12 @@ import {
 import type { Request } from 'express';
 import { ApiAdmin } from '../../shared/decorators/api-admin.decorator';
 import { EpdaParametersService } from './epda-parameters.service';
-import { UpsertEpdaParameterSetDto } from './dto/upsert-epda-parameter-set.dto';
+import {
+  CreateEpdaParameterGroupDto,
+  SetGroupMembersDto,
+  UpdateEpdaParameterGroupDto,
+  UpsertEpdaParameterSetDto,
+} from './dto/upsert-epda-parameter-set.dto';
 
 type StaffRequest = Request & { user?: { id?: number } };
 
@@ -88,5 +94,51 @@ export class EpdaParametersAdminController {
     @Req() req: StaffRequest,
   ): Promise<void> {
     await this.service.deletePort(Number(portId), req.user?.id);
+  }
+
+  // ---------- port groups ----------
+
+  @Get('groups')
+  listGroups(@Query('area') area: string) {
+    return this.service.listGroups(area);
+  }
+
+  @Post('groups')
+  createGroup(
+    @Body() dto: CreateEpdaParameterGroupDto,
+    @Req() req: StaffRequest,
+  ) {
+    return this.service.createGroup(dto.area, dto.name, dto.values ?? {}, req.user?.id);
+  }
+
+  @Put('groups/:id')
+  updateGroup(
+    @Param('id') id: string,
+    @Body() dto: UpdateEpdaParameterGroupDto,
+    @Req() req: StaffRequest,
+  ) {
+    return this.service.updateGroup(
+      Number(id),
+      { name: dto.name, values: dto.values },
+      req.user?.id,
+    );
+  }
+
+  @Put('groups/:id/members')
+  setGroupMembers(
+    @Param('id') id: string,
+    @Body() dto: SetGroupMembersDto,
+    @Req() req: StaffRequest,
+  ) {
+    return this.service.setGroupMembers(Number(id), dto.portIds, req.user?.id);
+  }
+
+  @Delete('groups/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async deleteGroup(
+    @Param('id') id: string,
+    @Req() req: StaffRequest,
+  ): Promise<void> {
+    await this.service.deleteGroup(Number(id), req.user?.id);
   }
 }

@@ -7,7 +7,7 @@ import {
   Index,
 } from 'typeorm';
 
-export type EpdaParameterScope = 'AREA' | 'PORT';
+export type EpdaParameterScope = 'AREA' | 'GROUP' | 'PORT';
 
 /** A GRT-banded rate. `maxGrt: null` = the catch-all top band. */
 export interface GrtTier {
@@ -96,12 +96,14 @@ export type PartialEpdaParameterValues = {
 };
 
 /**
- * EPDA numeric parameters, scoped per area (full set) or per port (partial
- * override that inherits its area set). Stored as JSONB for flexibility.
+ * EPDA numeric parameters, scoped per area (full set), per group (named set of
+ * ports inside an area), or per port (partial override). Resolution layers
+ * area → group → port (later wins). Stored as JSONB for flexibility.
  */
 @Entity('epda_parameter_set')
 @Index('uq_epda_param_area', ['area'], { unique: true, where: "scope = 'AREA'" })
 @Index('uq_epda_param_port', ['portId'], { unique: true, where: "scope = 'PORT'" })
+@Index('uq_epda_param_group', ['area', 'name'], { unique: true, where: "scope = 'GROUP'" })
 export class EpdaParameterSet {
   @PrimaryGeneratedColumn()
   id!: number;
@@ -109,14 +111,22 @@ export class EpdaParameterSet {
   @Column({ type: 'varchar', length: 10 })
   scope!: EpdaParameterScope;
 
-  /** Area for AREA rows; owning area for PORT rows (for grouping/fallback). */
+  /** Area for AREA rows; owning area for GROUP/PORT rows (for grouping/fallback). */
   @Column({ type: 'varchar', length: 50, nullable: true })
   area!: string | null;
 
   @Column({ name: 'port_id', type: 'int', nullable: true })
   portId!: number | null;
 
-  /** Full set for AREA rows; partial (only overridden fields) for PORT rows. */
+  /** Group display name (GROUP rows only). */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  name!: string | null;
+
+  /** Port ids that belong to this group (GROUP rows only). A port is in ≤ 1 group/area. */
+  @Column({ name: 'member_port_ids', type: 'jsonb', nullable: true })
+  memberPortIds!: number[] | null;
+
+  /** Full set for AREA rows; partial (only overridden fields) for GROUP/PORT rows. */
   @Column({ type: 'jsonb' })
   values!: PartialEpdaParameterValues;
 
