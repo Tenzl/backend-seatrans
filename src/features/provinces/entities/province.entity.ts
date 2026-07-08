@@ -22,8 +22,8 @@ export class Province {
   @Column({ type: 'integer', unique: true, nullable: true })
   code!: number | null;
 
-  @Column({ type: 'varchar', length: 50, nullable: true })
-  area!: string | null;
+  @Column({ type: 'integer', nullable: true })
+  area!: number | null;
 
   @OneToMany(() => Port, (port) => port.province)
   ports!: Port[];

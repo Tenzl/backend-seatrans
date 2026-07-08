@@ -1,4 +1,6 @@
-import { IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { PROVINCE_AREA_CODES } from '../province-area';
 
 export class CreateProvinceDto {
   @IsString()
@@ -16,7 +18,8 @@ export class CreateProvinceDto {
   code?: number;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(50)
-  area?: string;
+  @Type(() => Number)
+  @IsInt()
+  @IsIn(PROVINCE_AREA_CODES)
+  area?: number;
 }

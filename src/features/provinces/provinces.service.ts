@@ -9,6 +9,7 @@ import { Repository } from 'typeorm';
 import { Province } from './entities/province.entity';
 import { ProvinceDto } from './dto/province.dto';
 import { CreateProvinceDto } from './dto/create-province.dto';
+import { normalizeProvinceAreaCode } from './province-area';
 
 @Injectable()
 export class ProvincesService {
@@ -86,7 +87,7 @@ export class ProvincesService {
 			name,
 			displayName: this.resolveDisplayName(name, dto.displayName),
 			code: dto.code ?? null,
-			area: dto.area?.trim() || null,
+			area: this.normalizeAreaCode(dto.area),
 			isActive: true,
 		});
 
@@ -117,7 +118,7 @@ export class ProvincesService {
 		province.name = name;
 		province.displayName = this.resolveDisplayName(name, dto.displayName);
 		province.code = dto.code ?? null;
-		province.area = dto.area?.trim() || null;
+		province.area = this.normalizeAreaCode(dto.area);
 
 		const updatedProvince = await this.provinceRepository.save(province);
 		return this.toDto(updatedProvince);
@@ -152,6 +153,10 @@ export class ProvincesService {
 			return normalizedDisplayName;
 		}
 		return this.toTitleCase(name);
+	}
+
+	private normalizeAreaCode(value?: number | null): number | null {
+		return normalizeProvinceAreaCode(value) ?? null;
 	}
 
 	private toTitleCase(value: string): string {

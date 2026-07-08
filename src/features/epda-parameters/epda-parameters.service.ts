@@ -12,6 +12,7 @@ import {
   EpdaParameterChangeLog,
 } from './entities/epda-parameter-change-log.entity';
 import { Port } from '../ports/entities/port.entity';
+import { normalizeProvinceAreaCode } from '../provinces/province-area';
 
 const AGENCY_FEE_TIERS = [
   { maxGrt: 1000, amount: 0, label: '0 - 1,000' },
@@ -30,7 +31,7 @@ const AGENCY_FEE_TIERS = [
  * NORTHERN / SOUTHERN = HCM template.
  */
 export function defaultValuesForArea(area?: string | null): EpdaParameterValues {
-  const isQn = (area ?? '').toUpperCase() === 'MIDDLE';
+  const isQn = normalizeEpdaAreaKey(area) === '2';
   const base: EpdaParameterValues = {
     hours: { berthHours: 96, anchorageHours: 24, pilotageThirdMiles: 17, qnPilotageMiles: 5 },
     garbage: { atBerthUsd: 54, atBuoyUsd: 54, cbmAmount: 1 },
@@ -165,11 +166,21 @@ export class EpdaParametersService {
   }
 
   listAll(): Promise<EpdaParameterSet[]> {
-    return this.repo.find({ order: { scope: 'ASC', area: 'ASC', portId: 'ASC' } });
+    return this.repo.find({ order: { scope: 'ASC', area: 'ASC', portId: 'ASC' } }).then((rows) =>
+      rows.map((row) => Object.assign(row, { area: normalizeEpdaAreaKey(row.area) })),
+    );
   }
 
-  getAreaSet(area: string): Promise<EpdaParameterSet | null> {
-    return this.repo.findOne({ where: { scope: 'AREA', area } });
+  async getAreaSet(area: string): Promise<EpdaParameterSet | null> {
+    const aliases = getEpdaAreaAliases(area);
+    if (aliases.length === 0) return null;
+    const row = await this.repo
+      .createQueryBuilder('epda')
+      .where(`epda.scope = 'AREA'`)
+      .andWhere('epda.area IN (:...aliases)', { aliases })
+      .orderBy('epda.updatedAt', 'DESC')
+      .getOne();
+    return row ? Object.assign(row, { area: normalizeEpdaAreaKey(row.area) }) : null;
   }
 
   getPortOverride(portId: number): Promise<EpdaParameterSet | null> {
@@ -181,18 +192,28 @@ export class EpdaParametersService {
     values: PartialEpdaParameterValues,
     actorUserId?: number,
   ): Promise<EpdaParameterSet> {
-    const existing = await this.getAreaSet(area);
+    const normalizedArea = normalizeEpdaAreaKey(area);
+    if (!normalizedArea) throw new NotFoundException('Invalid area');
+    const existing = await this.getAreaSet(normalizedArea);
     const before = existing ? existing.values : null;
     const saved = existing
       ? await this.repo.save(
-          Object.assign(existing, { values: mergeValues(area, existing.values, values) }),
+          Object.assign(existing, {
+            area: normalizedArea,
+            values: mergeValues(normalizedArea, existing.values, values),
+          }),
         )
       : await this.repo.save(
-          this.repo.create({ scope: 'AREA', area, portId: null, values: mergeValues(area, values) }),
+          this.repo.create({
+            scope: 'AREA',
+            area: normalizedArea,
+            portId: null,
+            values: mergeValues(normalizedArea, values),
+          }),
         );
     await this.logChange({
       scope: 'AREA',
-      area,
+      area: normalizedArea,
       portId: null,
       action: 'UPSERT_AREA',
       changedByUserId: actorUserId ?? null,
@@ -208,7 +229,8 @@ export class EpdaParametersService {
       relations: { province: true },
     });
     if (!port) throw new NotFoundException(`Port ${portId} not found`);
-    return port.province?.area ?? null;
+    const areaCode = normalizeProvinceAreaCode(port.province?.area ?? null);
+    return areaCode ? String(areaCode) : null;
   }
 
   async upsertPort(
@@ -252,8 +274,16 @@ export class EpdaParametersService {
 
   // ---------- port groups (named set of ports inside an area) ----------
 
-  listGroups(area: string): Promise<EpdaParameterSet[]> {
-    return this.repo.find({ where: { scope: 'GROUP', area }, order: { name: 'ASC' } });
+  async listGroups(area: string): Promise<EpdaParameterSet[]> {
+    const aliases = getEpdaAreaAliases(area);
+    if (aliases.length === 0) return [];
+    const rows = await this.repo
+      .createQueryBuilder('epda')
+      .where(`epda.scope = 'GROUP'`)
+      .andWhere('epda.area IN (:...aliases)', { aliases })
+      .orderBy('epda.name', 'ASC')
+      .getMany();
+    return rows.map((row) => Object.assign(row, { area: normalizeEpdaAreaKey(row.area) }));
   }
 
   getGroup(id: number): Promise<EpdaParameterSet | null> {
@@ -272,10 +302,12 @@ export class EpdaParametersService {
     values: PartialEpdaParameterValues,
     actorUserId?: number,
   ): Promise<EpdaParameterSet> {
+    const normalizedArea = normalizeEpdaAreaKey(area);
+    if (!normalizedArea) throw new NotFoundException('Invalid area');
     const saved = await this.repo.save(
       this.repo.create({
         scope: 'GROUP',
-        area,
+        area: normalizedArea,
         portId: null,
         name,
         memberPortIds: [],
@@ -284,7 +316,7 @@ export class EpdaParametersService {
     );
     await this.logChange({
       scope: 'GROUP',
-      area,
+      area: normalizedArea,
       portId: null,
       action: 'UPSERT_GROUP',
       changedByUserId: actorUserId ?? null,
@@ -371,21 +403,24 @@ export class EpdaParametersService {
 
   /** Recent Parameter-screen edits, filtered by port (preferred) or area. */
   async listChangeLogs(opts: { area?: string; portId?: number; limit?: number }) {
-    const where: Record<string, unknown> = {};
-    if (opts.portId != null) where.portId = opts.portId;
-    else if (opts.area) where.area = opts.area;
-
-    const rows = await this.logRepo.find({
-      where,
-      relations: { changedBy: true },
-      order: { createdAt: 'DESC', id: 'DESC' },
-      take: Math.min(100, Math.max(1, opts.limit ?? 50)),
-    });
+    const qb = this.logRepo
+      .createQueryBuilder('log')
+      .leftJoinAndSelect('log.changedBy', 'changedBy')
+      .orderBy('log.createdAt', 'DESC')
+      .addOrderBy('log.id', 'DESC')
+      .take(Math.min(100, Math.max(1, opts.limit ?? 50)));
+    if (opts.portId != null) qb.where('log.portId = :portId', { portId: opts.portId });
+    else if (opts.area) {
+      const aliases = getEpdaAreaAliases(opts.area);
+      if (aliases.length === 0) return [];
+      qb.where('log.area IN (:...aliases)', { aliases });
+    }
+    const rows = await qb.getMany();
 
     return rows.map((r) => ({
       id: r.id,
       scope: r.scope,
-      area: r.area,
+      area: normalizeEpdaAreaKey(r.area),
       portId: r.portId,
       action: r.action,
       createdAt: r.createdAt.toISOString(),
@@ -407,9 +442,28 @@ export class EpdaParametersService {
     area: string,
     portId?: number,
   ): Promise<EpdaParameterValues> {
-    const areaSet = area ? await this.getAreaSet(area) : null;
-    const groupSet = area && portId ? await this.findGroupForPort(area, portId) : null;
+    const normalizedArea = normalizeEpdaAreaKey(area);
+    const areaSet = normalizedArea ? await this.getAreaSet(normalizedArea) : null;
+    const groupSet = normalizedArea && portId ? await this.findGroupForPort(normalizedArea, portId) : null;
     const portSet = portId ? await this.getPortOverride(portId) : null;
-    return mergeValues(area, areaSet?.values, groupSet?.values, portSet?.values);
+    return mergeValues(normalizedArea, areaSet?.values, groupSet?.values, portSet?.values);
+  }
+}
+
+function normalizeEpdaAreaKey(value?: string | null): '1' | '2' | '3' | null {
+  const code = normalizeProvinceAreaCode(value ?? null);
+  return code ? (String(code) as '1' | '2' | '3') : null;
+}
+
+function getEpdaAreaAliases(value?: string | null): string[] {
+  const normalized = normalizeEpdaAreaKey(value);
+  if (!normalized) return [];
+  switch (normalized) {
+    case '1':
+      return ['1', 'NORTHERN'];
+    case '2':
+      return ['2', 'MIDDLE'];
+    case '3':
+      return ['3', 'SOUTHERN'];
   }
 }

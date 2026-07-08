@@ -16,11 +16,12 @@ import { ListPortsQueryDto, type PortSearchIn } from './dto/list-ports-query.dto
 import { buildPaginatedResponse } from '../../shared/dto/pagination.dto';
 import { API_MAX_PAGE_SIZE } from '../../shared/dto/list-query.dto';
 import type { SelectQueryBuilder } from 'typeorm';
+import { normalizeProvinceAreaCode, PROVINCE_AREA_LABELS } from '../provinces/province-area';
 
 interface PortListParams {
   activeOnly?: boolean;
   provinceId?: number;
-  area?: string;
+  area?: number;
   q?: string;
   searchIn?: PortSearchIn;
 }
@@ -352,8 +353,7 @@ export class PortsService {
         CASE
           -- province_id = 0 is a legacy sentinel, so only positive ids count as real province links.
           WHEN COALESCE(port.province_id, 0) > 0
-            AND NULLIF(TRIM(COALESCE(province.area, '')), '') IS NOT NULL
-            AND UPPER(COALESCE(province.area, '')) <> 'UNKNOWN'
+            AND province.area IN (1, 2, 3)
           THEN 0
           ELSE 1
         END ASC,
@@ -372,9 +372,9 @@ export class PortsService {
       .filter((id: number) => Number.isInteger(id) && id > 0);
   }
 
-  private buildPortListWhereClause(params: PortListParams): { whereSql: string; values: Array<string | number | boolean> } {
+  private buildPortListWhereClause(params: PortListParams): { whereSql: string; values: Array<string | number | boolean | number[]> } {
     const conditions: string[] = [];
-    const values: Array<string | number | boolean> = [];
+    const values: Array<string | number | boolean | number[]> = [];
 
     if (params.activeOnly) {
       values.push(true);
@@ -390,7 +390,7 @@ export class PortsService {
     if (params.area) {
       values.push(params.area);
       conditions.push(`province.id IS NOT NULL`);
-      conditions.push(`UPPER(province.area) = $${values.length}`);
+      conditions.push(`province.area = $${values.length}`);
     }
 
     const search = params.q?.trim().toLowerCase();
@@ -399,8 +399,21 @@ export class PortsService {
       const searchIn = params.searchIn ?? 'name';
 
       if (searchIn === 'area') {
-        values.push(`%${search.toUpperCase()}%`);
-        conditions.push(`UPPER(COALESCE(province.area, '')) LIKE $${values.length}`);
+        const areaCode = normalizeProvinceAreaCode(search);
+        if (areaCode != null) {
+          values.push(areaCode);
+          conditions.push(`province.area = $${values.length}`);
+        } else {
+          const matchedCodes = Object.entries(PROVINCE_AREA_LABELS)
+            .filter(([, label]) => label.includes(search.toUpperCase()))
+            .map(([code]) => Number(code));
+          if (matchedCodes.length === 0) {
+            conditions.push('1 = 0');
+          } else {
+            values.push(matchedCodes);
+            conditions.push(`province.area = ANY($${values.length})`);
+          }
+        }
       } else if (searchIn === 'provinceName') {
         values.push(term, term);
         conditions.push(

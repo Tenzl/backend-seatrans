@@ -3,7 +3,7 @@ export class ProvinceDto {
   name: string;
   displayName: string | null;
   code: number | null;
-  area: string | null;
+  area: number | null;
   portCount: number;
   ports: string[];
   isActive: boolean;

@@ -4,7 +4,7 @@ export class PortDto {
   portOfCall: string;
   provinceId: number | null;
   provinceName: string | null;
-  provinceArea: string | null;
+  provinceArea: number | null;
   zoneCode: string | null;
   countryCode: string | null;
   code: string | null;

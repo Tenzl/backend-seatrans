@@ -1,9 +1,9 @@
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, Min } from 'class-validator';
 import { ListQueryDto } from '../../../shared/dto/list-query.dto';
+import { PROVINCE_AREA_CODES, type ProvinceAreaCode, normalizeProvinceAreaCode } from '../../provinces/province-area';
 
-export const PORT_AREA_VALUES = ['NORTHERN', 'MIDDLE', 'SOUTHERN'] as const;
-export type PortArea = (typeof PORT_AREA_VALUES)[number];
+export type PortArea = ProvinceAreaCode;
 
 export const PORT_SEARCH_IN_VALUES = [
   'area',
@@ -18,10 +18,9 @@ export type PortSearchIn = (typeof PORT_SEARCH_IN_VALUES)[number];
 
 export class ListPortsQueryDto extends ListQueryDto {
   @IsOptional()
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.trim().toUpperCase() : value,
-  )
-  @IsIn(PORT_AREA_VALUES)
+  @Transform(({ value }) => normalizeProvinceAreaCode(value) ?? value)
+  @Type(() => Number)
+  @IsIn(PROVINCE_AREA_CODES)
   area?: PortArea;
 
   @IsOptional()

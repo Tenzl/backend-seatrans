@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Office } from './entities/office.entity';
 import { Province } from '../provinces/entities/province.entity';
+import { getProvinceAreaLabel } from '../provinces/province-area';
 import { CreateOfficeDto } from './dto/create-office.dto';
 import { OfficeDto } from './dto/office.dto';
 import {
@@ -155,7 +156,7 @@ export class OfficesService {
       provinceId: item.province?.id ?? null,
       name: item.name,
       city: item.province?.displayName ?? item.province?.name ?? null,
-      region: item.province?.area ?? null,
+      region: getProvinceAreaLabel(item.province?.area ?? null),
       address: item.address,
       mapUrl: item.mapUrl,
       latitude: item.latitude,
