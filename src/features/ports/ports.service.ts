@@ -17,6 +17,14 @@ import { buildPaginatedResponse } from '../../shared/dto/pagination.dto';
 import { API_MAX_PAGE_SIZE } from '../../shared/dto/list-query.dto';
 import type { SelectQueryBuilder } from 'typeorm';
 
+interface PortListParams {
+  activeOnly?: boolean;
+  provinceId?: number;
+  area?: string;
+  q?: string;
+  searchIn?: PortSearchIn;
+}
+
 @Injectable()
 export class PortsService {
   private static readonly DEFAULT_LIST_LIMIT = 2000;
@@ -34,65 +42,31 @@ export class PortsService {
   async listPortsPage(query: ListPortsQueryDto) {
     const page = Math.max(0, Number(query.page ?? 0));
     const size = this.sanitizePageSize(Number(query.size ?? API_MAX_PAGE_SIZE));
-
-    const qb = this.portRepository
-      .createQueryBuilder('port')
-      .leftJoinAndSelect('port.province', 'province')
-      .orderBy('port.name', 'ASC');
-
-    if (query.active) {
-      qb.andWhere('port.is_active = :active', { active: true });
-    }
-
-    if (query.provinceId != null) {
-      qb.andWhere('province.id = :provinceId', { provinceId: query.provinceId });
-    }
-
-    if (query.area) {
-      qb
-        .andWhere('province.id IS NOT NULL')
-        .andWhere('UPPER(province.area) = :area', { area: query.area });
-    }
-
-    const search = query.q?.trim();
-    if (search) {
-      this.applyPortSearch(qb, search, query.searchIn ?? 'name');
-    }
-
-    qb.skip(page * size).take(size);
-
-    const [ports, totalElements] = await qb.getManyAndCount();
-    const content = ports.map((port) => this.toDto(port));
+    const params: PortListParams = {
+      activeOnly: query.active,
+      provinceId: query.provinceId,
+      area: query.area,
+      q: query.q,
+      searchIn: query.searchIn,
+    };
+    const totalElements = await this.getPortListCount(params);
+    // Let Postgres rank/slice first, then fetch only the entities for that page.
+    const ids = await this.getOrderedPortIds(params, size, page * size);
+    const content = await this.getPortsByOrderedIds(ids);
     return buildPaginatedResponse(content, totalElements, page, size);
   }
 
   async listPorts(filters: ListPortsFilters = {}): Promise<PortDto[]> {
-    const queryBuilder = this.portRepository
-      .createQueryBuilder('port')
-      .leftJoinAndSelect('port.province', 'province')
-      .orderBy('port.name', 'ASC');
-
-    if (filters.activeOnly) {
-      queryBuilder.andWhere('port.is_active = :active', { active: true });
-    }
-
-    if (filters.provinceId != null) {
-      queryBuilder.andWhere('province.id = :provinceId', {
-        provinceId: filters.provinceId,
-      });
-    }
-
-    if (filters.area) {
-      queryBuilder
-        .andWhere('province.id IS NOT NULL')
-        .andWhere('UPPER(province.area) = :area', { area: filters.area });
-    }
-
     const limit = this.sanitizeLimit(filters.limit ?? PortsService.DEFAULT_LIST_LIMIT);
-    queryBuilder.take(limit);
-
-    const ports = await queryBuilder.getMany();
-    return ports.map((port) => this.toDto(port));
+    const ids = await this.getOrderedPortIds(
+      {
+        activeOnly: filters.activeOnly,
+        provinceId: filters.provinceId,
+        area: filters.area,
+      },
+      limit,
+    );
+    return this.getPortsByOrderedIds(ids);
   }
 
   async getAllPorts(limit = PortsService.DEFAULT_LIST_LIMIT): Promise<PortDto[]> {
@@ -307,12 +281,18 @@ export class PortsService {
   }
 
   private toDto(port: Port): PortDto {
+    // Legacy rows may still carry province_id = 0 until the DB cleanup runs.
+    const provinceId = this.normalizeProvinceId(port.province?.id);
+    const provinceName = provinceId ? (port.province?.displayName ?? port.province?.name ?? null) : null;
+    const provinceArea = provinceId ? (port.province?.area ?? null) : null;
+
     return {
       id: port.id,
       name: port.name,
       portOfCall: port.portOfCall,
-      provinceId: port.province?.id ?? null,
-      provinceName: port.province?.displayName ?? port.province?.name ?? null,
+      provinceId,
+      provinceName,
+      provinceArea,
       zoneCode: port.zoneCode ?? null,
       countryCode: port.countryCode ?? null,
       code: port.code ?? null,
@@ -343,17 +323,146 @@ export class PortsService {
     return strippedName || normalizedName.toUpperCase();
   }
 
+  private async getPortListCount(params: PortListParams): Promise<number> {
+    const { whereSql, values } = this.buildPortListWhereClause(params);
+    const sql = `
+      SELECT COUNT(*)::int AS total
+      FROM ports port
+      LEFT JOIN provinces province ON province.id = port.province_id
+      ${whereSql}
+    `;
+    const rows = await this.portRepository.query(sql, values);
+    return Number(rows[0]?.total ?? 0);
+  }
+
+  private async getOrderedPortIds(
+    params: PortListParams,
+    limit: number,
+    offset = 0,
+  ): Promise<number[]> {
+    const { whereSql, values } = this.buildPortListWhereClause(params);
+    const limitParam = values.length + 1;
+    const offsetParam = values.length + 2;
+    const sql = `
+      SELECT port.id
+      FROM ports port
+      LEFT JOIN provinces province ON province.id = port.province_id
+      ${whereSql}
+      ORDER BY
+        CASE
+          -- province_id = 0 is a legacy sentinel, so only positive ids count as real province links.
+          WHEN COALESCE(port.province_id, 0) > 0
+            AND NULLIF(TRIM(COALESCE(province.area, '')), '') IS NOT NULL
+            AND UPPER(COALESCE(province.area, '')) <> 'UNKNOWN'
+          THEN 0
+          ELSE 1
+        END ASC,
+        CASE
+          WHEN UPPER(COALESCE(port.country_code, '')) = 'VN' THEN 0
+          ELSE 1
+        END ASC,
+        port.name ASC
+      LIMIT $${limitParam}
+      OFFSET $${offsetParam}
+    `;
+
+    const rows = await this.portRepository.query(sql, [...values, limit, offset]);
+    return rows
+      .map((row: { id: number | string }) => Number(row.id))
+      .filter((id: number) => Number.isInteger(id) && id > 0);
+  }
+
+  private buildPortListWhereClause(params: PortListParams): { whereSql: string; values: Array<string | number | boolean> } {
+    const conditions: string[] = [];
+    const values: Array<string | number | boolean> = [];
+
+    if (params.activeOnly) {
+      values.push(true);
+      conditions.push(`port.is_active = $${values.length}`);
+    }
+
+    const provinceId = this.normalizeProvinceId(params.provinceId);
+    if (provinceId != null) {
+      values.push(provinceId);
+      conditions.push(`province.id = $${values.length}`);
+    }
+
+    if (params.area) {
+      values.push(params.area);
+      conditions.push(`province.id IS NOT NULL`);
+      conditions.push(`UPPER(province.area) = $${values.length}`);
+    }
+
+    const search = params.q?.trim().toLowerCase();
+    if (search) {
+      const term = `%${search}%`;
+      const searchIn = params.searchIn ?? 'name';
+
+      if (searchIn === 'area') {
+        values.push(`%${search.toUpperCase()}%`);
+        conditions.push(`UPPER(COALESCE(province.area, '')) LIKE $${values.length}`);
+      } else if (searchIn === 'provinceName') {
+        values.push(term, term);
+        conditions.push(
+          `(LOWER(COALESCE(province.name, '')) LIKE $${values.length - 1} OR LOWER(COALESCE(province.display_name, '')) LIKE $${values.length})`,
+        );
+      } else {
+        const columnBySearchIn: Record<Exclude<PortSearchIn, 'area' | 'provinceName'>, string> = {
+          name: 'port.name',
+          portOfCall: 'port.port_of_call',
+          code: 'port.code',
+          zoneCode: 'port.zone_code',
+          countryCode: 'port.country_code',
+        };
+        values.push(term);
+        conditions.push(`LOWER(COALESCE(${columnBySearchIn[searchIn]}, '')) LIKE $${values.length}`);
+      }
+    }
+
+    return {
+      whereSql: conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '',
+      values,
+    };
+  }
+
+  private async getPortsByOrderedIds(ids: number[]): Promise<PortDto[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const ports = await this.portRepository
+      .createQueryBuilder('port')
+      .leftJoinAndSelect('port.province', 'province')
+      .where('port.id IN (:...ids)', { ids })
+      .getMany();
+
+    const portMap = new Map(ports.map((port) => [port.id, port]));
+    return ids
+      .map((id) => portMap.get(id))
+      .filter((port): port is Port => Boolean(port))
+      .map((port) => this.toDto(port));
+  }
+
   private async resolveProvince(provinceId?: number): Promise<Province | null> {
-    if (provinceId === undefined || provinceId === null) {
+    const normalizedProvinceId = this.normalizeProvinceId(provinceId);
+    if (normalizedProvinceId === null) {
       return null;
     }
 
-    const province = await this.provinceRepository.findOne({ where: { id: provinceId } });
+    const province = await this.provinceRepository.findOne({ where: { id: normalizedProvinceId } });
     if (!province) {
       throw new BadRequestException('Province not found');
     }
 
     return province;
+  }
+
+  private normalizeProvinceId(provinceId?: number | null): number | null {
+    // Treat non-positive ids as "no province" so code and data use one consistent null semantic.
+    if (!Number.isInteger(provinceId) || (provinceId ?? 0) <= 0) {
+      return null;
+    }
+    return provinceId as number;
   }
 
   private async findDuplicatePort(name: string, provinceId: number | null): Promise<Port | null> {
@@ -369,44 +478,6 @@ export class PortsService {
     }
 
     return queryBuilder.getOne();
-  }
-
-  private applyPortSearch(
-    qb: SelectQueryBuilder<Port>,
-    rawQuery: string,
-    searchIn: PortSearchIn,
-  ): void {
-    const term = `%${rawQuery.toLowerCase()}%`;
-
-    switch (searchIn) {
-      case 'area':
-        qb.andWhere('UPPER(province.area) LIKE :term', {
-          term: `%${rawQuery.toUpperCase()}%`,
-        });
-        break;
-      case 'provinceName':
-        qb.andWhere(
-          '(LOWER(province.name) LIKE :term OR LOWER(province.display_name) LIKE :term)',
-          { term },
-        );
-        break;
-      case 'portOfCall':
-        qb.andWhere('LOWER(port.port_of_call) LIKE :term', { term });
-        break;
-      case 'code':
-        qb.andWhere('LOWER(port.code) LIKE :term', { term });
-        break;
-      case 'zoneCode':
-        qb.andWhere('LOWER(port.zone_code) LIKE :term', { term });
-        break;
-      case 'countryCode':
-        qb.andWhere('LOWER(port.country_code) LIKE :term', { term });
-        break;
-      case 'name':
-      default:
-        qb.andWhere('LOWER(port.name) LIKE :term', { term });
-        break;
-    }
   }
 
   private sanitizePageSize(size: number): number {

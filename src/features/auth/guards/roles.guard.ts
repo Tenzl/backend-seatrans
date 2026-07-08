@@ -1,9 +1,14 @@
 import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY } from '../decorators/roles.decorator';
+import { RoleGroup } from '../enums/role-group.enum';
 
 function normalizeRoleName(role: string): string {
   return role.trim().toUpperCase().replace(/^ROLE_/, '');
+}
+
+function normalizeRoleGroup(group: string): string {
+  return group.trim().toUpperCase();
 }
 
 @Injectable()
@@ -30,14 +35,22 @@ export class RolesGuard implements CanActivate {
       : user.role?.name
         ? [user.role.name]
         : [];
+    const userRoleGroup = typeof user.role?.roleGroup === 'string'
+      ? normalizeRoleGroup(user.role.roleGroup)
+      : null;
 
-    if (userRoleNames.length === 0) {
+    if (userRoleNames.length === 0 && !userRoleGroup) {
       return false;
     }
 
     const normalizedUserRoles = userRoleNames.map(normalizeRoleName);
     const normalizedRequired = requiredRoles.map(normalizeRoleName);
 
-    return normalizedRequired.some((required) => normalizedUserRoles.includes(required));
+    return normalizedRequired.some((required) => {
+      if (required === RoleGroup.INTERNAL || required === RoleGroup.EXTERNAL) {
+        return userRoleGroup === required;
+      }
+      return normalizedUserRoles.includes(required);
+    });
   }
 }
