@@ -81,4 +81,15 @@ export abstract class BaseInquiry {
 
   @Column({ name: 'details', type: 'json', nullable: true })
   details!: Record<string, unknown> | null;
+
+  /** Set when archived (soft-deleted). Hard delete removes the row entirely. */
+  @Column({ name: 'deleted_at', type: 'timestamp', nullable: true })
+  deletedAt!: Date | null;
+
+  @ManyToOne(() => User, { nullable: true })
+  @JoinColumn({ name: 'deleted_by' })
+  deletedBy!: User | null;
+
+  @Column({ name: 'deleted_by', type: 'bigint', nullable: true })
+  deletedById!: number | null;
 }

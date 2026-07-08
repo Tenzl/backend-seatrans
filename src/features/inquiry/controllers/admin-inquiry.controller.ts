@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
@@ -15,6 +16,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { ApiAdmin } from '../../../shared/decorators/api-admin.decorator';
+import { isAdminRoleName } from '../../roles/section-access.service';
 import { ServiceInquiryService } from '../services/service-inquiry.service';
 import { ShippingAgencyEpdaService } from '../services/shipping-agency-epda.service';
 import { ListInquiriesQueryDto } from '../dto/list-inquiries-query.dto';
@@ -22,6 +24,7 @@ import { UpdateInquiryStatusDto } from '../dto/update-inquiry-status.dto';
 import { UpdateInquiryFormDto } from '../dto/update-inquiry-form.dto';
 import { UpdateInquiryHoursDto } from '../dto/update-inquiry-hours.dto';
 import { DeleteInquiriesDto } from '../dto/delete-inquiries.dto';
+import { DeleteInquiriesQueryDto } from '../dto/delete-inquiries-query.dto';
 import { UpdateShippingAgencyEpdaDto } from '../dto/update-shipping-agency-epda.dto';
 import { IssueShippingAgencyEpdaDto } from '../dto/issue-shipping-agency-epda.dto';
 import { CreateInternalShippingAgencyInquiryDto } from '../dto/create-internal-shipping-agency-inquiry.dto';
@@ -33,7 +36,7 @@ import { validateDto } from '../../../shared/utils/validate-dto.util';
  * List/filter: GET /v1/admin/inquiries?serviceType=&status=&page=&size=
  * Detail: GET /v1/admin/inquiries/:serviceType/:id
  */
-type StaffRequest = Request & { user?: { id?: number } };
+type StaffRequest = Request & { user?: { id?: number; role?: { name?: string | null } | null } };
 
 @ApiAdmin()
 @Controller('v1/admin/inquiries')
@@ -44,14 +47,42 @@ export class AdminInquiryController {
   ) {}
 
   @Get()
-  list(@Query() query: ListInquiriesQueryDto) {
-    return this.inquiryService.listForAdmin(query);
+  list(@Query() query: ListInquiriesQueryDto, @Req() req: StaffRequest) {
+    const includeArchived = isAdminRoleName(req.user?.role?.name);
+    return this.inquiryService.listForAdmin(query, { includeArchived });
   }
 
   @Delete('batch')
   @HttpCode(HttpStatus.NO_CONTENT)
-  deleteBatch(@Body() dto: DeleteInquiriesDto) {
-    return this.inquiryService.deleteBatchByAdmin(dto.ids);
+  deleteBatch(
+    @Body() dto: DeleteInquiriesDto,
+    @Query() query: DeleteInquiriesQueryDto,
+    @Req() req: StaffRequest,
+  ) {
+    const actorUserId = req.user?.id;
+    if (!actorUserId) {
+      throw new BadRequestException('User not authenticated');
+    }
+
+    const serviceSlug = query.serviceSlug?.trim() || undefined;
+    if (isAdminRoleName(req.user?.role?.name)) {
+      return this.inquiryService.hardDeleteBatchByAdmin(dto.ids, serviceSlug);
+    }
+
+    return this.inquiryService.softDeleteBatch(dto.ids, actorUserId, serviceSlug);
+  }
+
+  @Post('batch/restore')
+  restoreBatch(
+    @Body() dto: DeleteInquiriesDto,
+    @Query() query: DeleteInquiriesQueryDto,
+    @Req() req: StaffRequest,
+  ) {
+    if (!isAdminRoleName(req.user?.role?.name)) {
+      throw new ForbiddenException('Only administrators can restore archived inquiries');
+    }
+    const serviceSlug = query.serviceSlug?.trim() || undefined;
+    return this.inquiryService.restoreBatchByAdmin(dto.ids, serviceSlug);
   }
 
   /**
@@ -165,7 +196,29 @@ export class AdminInquiryController {
   remove(
     @Param('serviceType') serviceType: string,
     @Param('id', ParseIntPipe) id: number,
+    @Req() req: StaffRequest,
   ) {
-    return this.inquiryService.deleteByServiceAndId(serviceType, id);
+    const actorUserId = req.user?.id;
+    if (!actorUserId) {
+      throw new BadRequestException('User not authenticated');
+    }
+
+    if (isAdminRoleName(req.user?.role?.name)) {
+      return this.inquiryService.hardDeleteByServiceAndId(serviceType, id);
+    }
+
+    return this.inquiryService.softDeleteBatch([id], actorUserId, serviceType);
+  }
+
+  @Post(':serviceType/:id/restore')
+  restoreOne(
+    @Param('serviceType') serviceType: string,
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: StaffRequest,
+  ) {
+    if (!isAdminRoleName(req.user?.role?.name)) {
+      throw new ForbiddenException('Only administrators can restore archived inquiries');
+    }
+    return this.inquiryService.restoreByServiceAndId(serviceType, id);
   }
 }

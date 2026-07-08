@@ -1,6 +1,8 @@
 import { Transform, Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsEnum, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { InquiryStatus } from '../enums/inquiry-status.enum';
+
+export type InquiryArchivedFilter = 'active' | 'archived' | 'all';
 
 export class ListInquiriesQueryDto {
   @IsOptional()
@@ -33,4 +35,16 @@ export class ListInquiriesQueryDto {
   @IsOptional()
   @IsEnum(InquiryStatus)
   status?: InquiryStatus;
+
+  /**
+   * Admin-only list filter:
+   * - active: only rows not archived
+   * - archived: only soft-deleted rows
+   * - all: both
+   *
+   * User-facing endpoints should ignore anything except the default "active".
+   */
+  @IsOptional()
+  @IsIn(['active', 'archived', 'all'])
+  archived?: InquiryArchivedFilter = 'active';
 }

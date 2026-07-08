@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, Repository } from 'typeorm';
+import { FindOptionsWhere, IsNull, Not, Repository } from 'typeorm';
 import { BaseInquiry } from '../entities/base-inquiry.entity';
 import { ShippingAgencyInquiryEntity } from '../entities/shipping-agency-inquiry.entity';
 import { CharteringBrokerageInquiryEntity } from '../entities/chartering-brokerage-inquiry.entity';
@@ -17,7 +17,7 @@ import { ServiceType } from '../../logistics/entities/service-type.entity';
 import { User } from '../../auth/entities/user.entity';
 import { PublicInquiryRequestDto } from '../dto/public-inquiry-request.dto';
 import { InquiryStatus } from '../enums/inquiry-status.enum';
-import { ListInquiriesQueryDto } from '../dto/list-inquiries-query.dto';
+import { ListInquiriesQueryDto, type InquiryArchivedFilter } from '../dto/list-inquiries-query.dto';
 import { UpdateInquiryStatusDto } from '../dto/update-inquiry-status.dto';
 import { UpdateInquiryFormDto } from '../dto/update-inquiry-form.dto';
 import { UpdateInquiryHoursDto } from '../dto/update-inquiry-hours.dto';
@@ -233,14 +233,19 @@ export class ServiceInquiryService {
 
   async listForAdmin(
     query: ListInquiriesQueryDto,
+    opts: { includeArchived?: boolean } = {},
   ): Promise<{ content: unknown[]; totalElements: number; totalPages: number; size: number; number: number }> {
     const serviceTypeFilter =
       query.serviceType?.trim() || query.serviceSlug?.trim();
     const serviceType = await this.resolveServiceTypeFromFilter(serviceTypeFilter);
+    const archivedFilter = opts.includeArchived
+      ? this.normalizeArchivedFilter(query.archived)
+      : 'active';
     return this.listInquiries(
       {
         status: query.status,
         serviceType: serviceType ?? undefined,
+        archivedFilter,
       },
       query,
       'admin',
@@ -317,19 +322,79 @@ export class ServiceInquiryService {
     await this.inquiryDocumentService.hardDeleteByInquiry(inquiryId);
   }
 
-  async deleteByServiceAndId(serviceTypeName: string, id: number): Promise<void> {
-    const { row, repo, slug } = await this.requireRowWithRepo(serviceTypeName, id);
-    await this.deleteInquiryChildren(slug, row.id);
-    await repo.remove(row);
+  async softDeleteBatch(
+    ids: number[],
+    deletedByUserId: number,
+    serviceSlug?: string,
+  ): Promise<{ deletedCount: number }> {
+    const found = await this.findRowsAcrossRepos(ids, {
+      includeDeleted: false,
+      serviceSlug,
+    });
+    if (found.length !== ids.length) {
+      throw new NotFoundException('One or more inquiries were not found');
+    }
+
+    const now = new Date();
+    for (const { row, repo } of found) {
+      row.deletedAt = now;
+      row.deletedById = deletedByUserId;
+      await repo.save(row);
+    }
+
+    return { deletedCount: found.length };
   }
 
-  async deleteBatchByUser(userId: number, ids: number[]): Promise<{ deletedCount: number }> {
-    const found = await this.findRowsAcrossRepos(ids);
+  async softDeleteBatchByUser(
+    userId: number,
+    ids: number[],
+    serviceSlug?: string,
+  ): Promise<{ deletedCount: number }> {
+    const found = await this.findRowsAcrossRepos(ids, {
+      includeDeleted: false,
+      serviceSlug,
+    });
 
     if (found.length !== ids.length || found.some((f) => f.row.userId !== userId)) {
       throw new ForbiddenException('You can only delete your own inquiries');
     }
 
+    const now = new Date();
+    for (const { row, repo } of found) {
+      row.deletedAt = now;
+      row.deletedById = userId;
+      await repo.save(row);
+    }
+
+    return { deletedCount: found.length };
+  }
+
+  async softDeleteBatchByAdmin(
+    ids: number[],
+    deletedByUserId: number,
+    serviceSlug?: string,
+  ): Promise<{ deletedCount: number }> {
+    return this.softDeleteBatch(ids, deletedByUserId, serviceSlug);
+  }
+
+  async hardDeleteByServiceAndId(serviceTypeName: string, id: number): Promise<void> {
+    const { row, repo, slug } = await this.requireRowWithRepo(serviceTypeName, id, {
+      includeDeleted: true,
+    });
+    await this.deleteInquiryChildren(slug, row.id);
+    await repo.remove(row);
+  }
+
+  async hardDeleteBatchByAdmin(ids: number[], serviceSlug?: string): Promise<{ deletedCount: number }> {
+    const found = await this.findRowsAcrossRepos(ids, {
+      includeDeleted: true,
+      serviceSlug,
+    });
+
+    if (found.length !== ids.length) {
+      throw new NotFoundException('One or more inquiries were not found');
+    }
+
     for (const { row, repo, slug } of found) {
       await this.deleteInquiryChildren(slug, row.id);
       await repo.remove(row);
@@ -338,15 +403,46 @@ export class ServiceInquiryService {
     return { deletedCount: found.length };
   }
 
-  async deleteBatchByAdmin(ids: number[]): Promise<{ deletedCount: number }> {
-    const found = await this.findRowsAcrossRepos(ids);
+  async restoreBatchByAdmin(ids: number[], serviceSlug?: string): Promise<{ restoredCount: number }> {
+    const found = await this.findRowsAcrossRepos(ids, {
+      includeDeleted: true,
+      serviceSlug,
+    });
 
-    for (const { row, repo, slug } of found) {
-      await this.deleteInquiryChildren(slug, row.id);
-      await repo.remove(row);
+    if (found.length !== ids.length) {
+      throw new NotFoundException('One or more inquiries were not found');
     }
 
-    return { deletedCount: found.length };
+    for (const { row, repo } of found) {
+      row.deletedAt = null;
+      row.deletedById = null;
+      await repo.save(row);
+    }
+
+    return { restoredCount: found.length };
+  }
+
+  async restoreByServiceAndId(serviceTypeName: string, id: number): Promise<void> {
+    const { row, repo } = await this.requireRowWithRepo(serviceTypeName, id, {
+      includeDeleted: true,
+    });
+    row.deletedAt = null;
+    row.deletedById = null;
+    await repo.save(row);
+  }
+
+  /** @deprecated Use softDeleteBatchByUser — kept for controller compatibility. */
+  async deleteBatchByUser(userId: number, ids: number[]): Promise<{ deletedCount: number }> {
+    return this.softDeleteBatchByUser(userId, ids);
+  }
+
+  /** @deprecated Use soft/hard delete methods explicitly. */
+  async deleteBatchByAdmin(ids: number[]): Promise<{ deletedCount: number }> {
+    return this.hardDeleteBatchByAdmin(ids);
+  }
+
+  async deleteByServiceAndId(serviceTypeName: string, id: number): Promise<void> {
+    return this.hardDeleteByServiceAndId(serviceTypeName, id);
   }
 
   private async listInquiries(
@@ -354,6 +450,8 @@ export class ServiceInquiryService {
       user?: { id: number };
       status?: InquiryStatus;
       serviceType?: ServiceType;
+      /** Admin list filter; user list is always "active". */
+      archivedFilter?: InquiryArchivedFilter;
     },
     query: ListInquiriesQueryDto,
     audience: InquiryResponseAudience = 'admin',
@@ -362,6 +460,12 @@ export class ServiceInquiryService {
     const size = this.sanitizePageSize(query.size);
 
     const where: FindOptionsWhere<BaseInquiry> = {};
+    const archivedFilter = filters.archivedFilter ?? 'active';
+    if (archivedFilter === 'active') {
+      where.deletedAt = IsNull();
+    } else if (archivedFilter === 'archived') {
+      where.deletedAt = Not(IsNull());
+    }
     if (filters.user) {
       where.user = { id: filters.user.id } as User;
     }
@@ -391,7 +495,11 @@ export class ServiceInquiryService {
     // No service filter → paginate across all tables at the DB level (UNION ALL),
     // then hydrate only the rows on the requested page.
     return this.listAcrossAllRepos(
-      { user: filters.user, status: filters.status },
+      {
+        user: filters.user,
+        status: filters.status,
+        archivedFilter,
+      },
       page,
       size,
       audience,
@@ -405,7 +513,7 @@ export class ServiceInquiryService {
    * constants (never user input); the user/status filters are parameterized.
    */
   private async listAcrossAllRepos(
-    filters: { user?: { id: number }; status?: InquiryStatus },
+    filters: { user?: { id: number }; status?: InquiryStatus; archivedFilter?: InquiryArchivedFilter },
     page: number,
     size: number,
     audience: InquiryResponseAudience,
@@ -417,10 +525,17 @@ export class ServiceInquiryService {
       ['total_logistics_inquiries', 'total-logistic'],
       ['special_request_inquiries', 'special-request'],
     ];
+    const archivedFilter = filters.archivedFilter ?? 'active';
+    const deletedFilter =
+      archivedFilter === 'all'
+        ? ''
+        : archivedFilter === 'archived'
+          ? ' WHERE deleted_at IS NOT NULL'
+          : ' WHERE deleted_at IS NULL';
     const union = sources
       .map(
         ([table, slug]) =>
-          `SELECT id, submitted_at, user_id, status, '${slug}'::text AS slug FROM ${table}`,
+          `SELECT id, submitted_at, user_id, status, '${slug}'::text AS slug FROM ${table}${deletedFilter}`,
       )
       .join(' UNION ALL ');
 
@@ -515,6 +630,8 @@ export class ServiceInquiryService {
       },
       submittedAt: row.submittedAt,
       updatedAt: row.updatedAt,
+      deletedAt: row.deletedAt,
+      isArchived: row.deletedAt != null,
     };
 
     if (serviceSlug === 'shipping-agency') {
@@ -577,11 +694,16 @@ export class ServiceInquiryService {
   private async requireRowWithRepo(
     serviceTypeName: string,
     id: number,
+    opts: { includeDeleted?: boolean } = {},
   ): Promise<{ row: BaseInquiry; repo: Repository<BaseInquiry>; slug: string }> {
     const slug = this.toServiceSlug(serviceTypeName);
     const repo = this.repoForSlug(slug);
+    const where: FindOptionsWhere<BaseInquiry> = { id };
+    if (!opts.includeDeleted) {
+      where.deletedAt = IsNull();
+    }
     const row = await repo.findOne({
-      where: { id },
+      where,
       relations: { serviceType: true, user: true },
     });
 
@@ -594,7 +716,7 @@ export class ServiceInquiryService {
 
   private async requireShippingAgencyRow(id: number): Promise<ShippingAgencyInquiryEntity> {
     const row = await this.shippingAgencyRepo.findOne({
-      where: { id },
+      where: { id, deletedAt: IsNull() },
       relations: { serviceType: true, user: true },
     });
     if (!row) {
@@ -605,13 +727,38 @@ export class ServiceInquiryService {
 
   private async findRowsAcrossRepos(
     ids: number[],
+    opts: { includeDeleted?: boolean; serviceSlug?: string } = {},
   ): Promise<Array<{ row: BaseInquiry; repo: Repository<BaseInquiry>; slug: string }>> {
-    const found: Array<{ row: BaseInquiry; repo: Repository<BaseInquiry>; slug: string }> = [];
-    if (!ids.length) return found;
+    if (!ids.length) return [];
 
-    for (const [slug, repo] of Object.entries(this.repos)) {
+    let idsBySlug = new Map<string, number[]>();
+
+    if (opts.serviceSlug?.trim()) {
+      const slug = this.toServiceSlug(opts.serviceSlug.trim());
+      idsBySlug.set(slug, [...ids]);
+    } else {
+      const refs = await this.resolveInquiryRefsByIds(ids, opts);
+      if (refs.length !== ids.length) {
+        return [];
+      }
+      for (const ref of refs) {
+        const list = idsBySlug.get(ref.slug) ?? [];
+        list.push(ref.id);
+        idsBySlug.set(ref.slug, list);
+      }
+    }
+
+    const found: Array<{ row: BaseInquiry; repo: Repository<BaseInquiry>; slug: string }> = [];
+    for (const [slug, slugIds] of idsBySlug) {
+      const repo = this.repoForSlug(slug);
       const rows = await repo.find({
-        where: ids.map((id) => ({ id }) as FindOptionsWhere<BaseInquiry>),
+        where: slugIds.map((id) => {
+          const clause: FindOptionsWhere<BaseInquiry> = { id };
+          if (!opts.includeDeleted) {
+            clause.deletedAt = IsNull();
+          }
+          return clause;
+        }),
         relations: { serviceType: true, user: true },
       });
       for (const row of rows) {
@@ -620,6 +767,46 @@ export class ServiceInquiryService {
     }
 
     return found;
+  }
+
+  /**
+   * Fallback when `serviceSlug` is omitted: resolve id → table via UNION.
+   * Prefer passing `serviceSlug` from the UI so only one table is touched.
+   */
+  private async resolveInquiryRefsByIds(
+    ids: number[],
+    opts: { includeDeleted?: boolean } = {},
+  ): Promise<Array<{ id: number; slug: string }>> {
+    if (!ids.length) return [];
+
+    const sources: Array<[string, string]> = [
+      ['shipping_agency_inquiries', 'shipping-agency'],
+      ['chartering_broking_inquiries', 'chartering'],
+      ['freight_forwarding_inquiries', 'freight-forwarding'],
+      ['total_logistics_inquiries', 'total-logistic'],
+      ['special_request_inquiries', 'special-request'],
+    ];
+
+    const deletedFilter = opts.includeDeleted ? '' : ' AND deleted_at IS NULL';
+    const union = sources
+      .map(
+        ([table, slug]) =>
+          `SELECT id, '${slug}'::text AS slug FROM ${table} WHERE id = ANY($1)${deletedFilter}`,
+      )
+      .join(' UNION ALL ');
+
+    const rows: Array<{ id: string | number; slug: string }> =
+      await this.shippingAgencyRepo.manager.query(
+        `SELECT id, slug FROM (${union}) AS t`,
+        [ids],
+      );
+
+    return rows.map((row) => ({ id: Number(row.id), slug: row.slug }));
+  }
+
+  private normalizeArchivedFilter(value?: string | null): InquiryArchivedFilter {
+    if (value === 'all' || value === 'archived') return value;
+    return 'active';
   }
 
   private repoForSlug(slug: string): Repository<BaseInquiry> {
