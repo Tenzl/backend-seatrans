@@ -29,6 +29,7 @@ export const SECTION_CATALOG: readonly SectionDef[] = [
   { key: 'data-cargo', label: 'Cargo', group: 'Data Management' },
   { key: 'data-images', label: 'Images', group: 'Data Management' },
   { key: 'data-offices', label: 'Offices', group: 'Data Management' },
+  { key: 'data-storage', label: 'Storage', group: 'Data Management' },
   { key: 'content-posts', label: 'Posts', group: 'Content Management' },
   { key: 'content-categories', label: 'Categories', group: 'Content Management' },
   { key: 'roles', label: 'Roles & access', group: 'Administration', adminOnly: true },

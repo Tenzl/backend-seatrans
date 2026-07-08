@@ -18,6 +18,7 @@ import { EpdaParametersModule } from './features/epda-parameters/epda-parameters
 import { UsersModule } from './features/users/users.module';
 import { NotificationModule } from './features/notification/notification.module';
 import { RolesModule } from './features/roles/roles.module';
+import { StorageModule } from './features/storage/storage.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { RolesModule } from './features/roles/roles.module';
     UsersModule,
     NotificationModule,
     RolesModule,
+    StorageModule,
   ],
   controllers: [AppController],
   providers: [
