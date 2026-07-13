@@ -9,13 +9,11 @@ import { resolveDatabaseSsl } from './database-ssl';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
-        // Prefer Nest autoLoadEntities over a recursive entities/migrations glob.
+        // Prefer Nest autoLoadEntities over a recursive entities glob.
         // TypeORM's DirectoryExportedClassesLoader can hit "Maximum call stack
         // size exceeded" when walking circular CommonJS exports from **/*.entity.
-        // Run migrations via CLI (`npm run db:migration:run`), not at app boot.
-        const synchronize =
-          configService.get<string>('DB_SYNCHRONIZE', 'false').toLowerCase() ===
-          'true';
+        // Schema changes: update the database directly (SQL / one-off scripts).
+        const synchronize = false;
         const migrationsRun = false;
 
         const dbUrl = configService.get<string>('DB_URL')?.trim();

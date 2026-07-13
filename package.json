@@ -19,15 +19,7 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json",
-    "db:migrate:garbage-usd-rate": "node scripts/run-garbage-usd-rate-migration.mjs",
-    "db:migrate:notifications": "node scripts/run-notifications-migration.mjs",
-    "db:migrate:epda-audit": "node scripts/run-epda-audit-migration.mjs",
-    "db:migrate:epda-parameters": "node scripts/run-epda-parameters-migration.mjs",
-    "db:migrate:inquiry-soft-delete": "node scripts/run-inquiry-soft-delete-migration.mjs",
-    "db:migration:show": "npm run build && node --env-file-if-exists=.env ./node_modules/typeorm/cli.js migration:show -d dist/migrations/data-source.js",
-    "db:migration:run": "npm run build && node --env-file-if-exists=.env ./node_modules/typeorm/cli.js migration:run -d dist/migrations/data-source.js",
-    "db:migration:revert": "npm run build && node --env-file-if-exists=.env ./node_modules/typeorm/cli.js migration:revert -d dist/migrations/data-source.js"
+    "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1081.0",
