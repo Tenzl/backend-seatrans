@@ -1,7 +1,11 @@
-import { Transform, Type } from 'class-transformer';
+import { Transform, Type, type TransformFnParams } from 'class-transformer';
 import { IsBoolean, IsIn, IsInt, IsOptional, Min } from 'class-validator';
 import { ListQueryDto } from '../../../shared/dto/list-query.dto';
-import { PROVINCE_AREA_CODES, type ProvinceAreaCode, normalizeProvinceAreaCode } from '../../provinces/province-area';
+import {
+  PROVINCE_AREA_CODES,
+  type ProvinceAreaCode,
+  normalizeProvinceAreaCode,
+} from '../../provinces/province-area';
 
 export type PortArea = ProvinceAreaCode;
 
@@ -18,7 +22,16 @@ export type PortSearchIn = (typeof PORT_SEARCH_IN_VALUES)[number];
 
 export class ListPortsQueryDto extends ListQueryDto {
   @IsOptional()
-  @Transform(({ value }) => normalizeProvinceAreaCode(value) ?? value)
+  @Transform(({ value }: TransformFnParams) => {
+    const rawValue = value as unknown;
+    const supportedValue =
+      typeof rawValue === 'string' || typeof rawValue === 'number'
+        ? rawValue
+        : rawValue == null
+          ? rawValue
+          : undefined;
+    return normalizeProvinceAreaCode(supportedValue) ?? rawValue;
+  })
   @Type(() => Number)
   @IsIn(PROVINCE_AREA_CODES)
   area?: PortArea;
@@ -30,7 +43,10 @@ export class ListPortsQueryDto extends ListQueryDto {
   provinceId?: number;
 
   @IsOptional()
-  @Transform(({ value }) => value === 'true' || value === true)
+  @Transform(({ value }: TransformFnParams) => {
+    const rawValue = value as unknown;
+    return rawValue === 'true' || rawValue === true;
+  })
   @IsBoolean()
   active?: boolean;
 

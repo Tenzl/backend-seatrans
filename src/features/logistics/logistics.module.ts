@@ -12,9 +12,15 @@ import { Commodity } from '../commodities/entities/commodity.entity';
 import { RolesGuard } from '../auth/guards/roles.guard';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ServiceType, Office, Province, Commodity])],
+  imports: [
+    TypeOrmModule.forFeature([ServiceType, Office, Province, Commodity]),
+  ],
   providers: [ServiceTypesService, OfficesService, RolesGuard],
-  controllers: [ServiceTypesController, OfficesController, OfficesAdminController],
+  controllers: [
+    ServiceTypesController,
+    OfficesController,
+    OfficesAdminController,
+  ],
   exports: [ServiceTypesService, OfficesService],
 })
 export class LogisticsModule {}

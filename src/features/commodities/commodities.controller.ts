@@ -8,7 +8,9 @@ export class CommoditiesController {
   constructor(private readonly commoditiesService: CommoditiesService) {}
 
   @Get('active')
-  getActive(@Query() query: LimitQueryDto & { q?: string }): Promise<CommodityDto[]> {
+  getActive(
+    @Query() query: LimitQueryDto & { q?: string },
+  ): Promise<CommodityDto[]> {
     if (query.q?.trim()) {
       return this.commoditiesService.search(query.q);
     }

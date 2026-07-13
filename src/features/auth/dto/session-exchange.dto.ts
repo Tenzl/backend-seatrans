@@ -5,4 +5,3 @@ export class SessionExchangeDto {
   @MinLength(16)
   token!: string;
 }
-

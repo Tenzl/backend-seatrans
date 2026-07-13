@@ -17,4 +17,3 @@ export class UpdateMeDto {
   @MaxLength(255)
   company?: string;
 }
-

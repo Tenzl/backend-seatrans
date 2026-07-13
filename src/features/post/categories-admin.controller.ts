@@ -7,11 +7,7 @@ import {
   Post,
   Put,
   Query,
-  UseGuards,
 } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
 import { CategoriesService } from './categories.service';
 import { CategoryRequestDto } from './dto/category-request.dto';
 import { AdminSection } from '../../shared/decorators/admin-section.decorator';

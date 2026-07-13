@@ -1,5 +1,14 @@
-import { Transform } from 'class-transformer';
-import { IsBoolean, IsEmail, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { Transform, type TransformFnParams } from 'class-transformer';
+import {
+  IsBoolean,
+  IsEmail,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export class CreateOfficeDto {
   @IsInt()
@@ -16,7 +25,10 @@ export class CreateOfficeDto {
   @IsString()
   @IsNotEmpty({ message: 'mapUrl is required' })
   @MaxLength(2048)
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @Transform(({ value }: TransformFnParams) => {
+    const rawValue = value as unknown;
+    return typeof rawValue === 'string' ? rawValue.trim() : rawValue;
+  })
   mapUrl!: string;
 
   @IsOptional()

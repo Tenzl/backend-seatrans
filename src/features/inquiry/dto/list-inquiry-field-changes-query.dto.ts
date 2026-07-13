@@ -1,17 +1,17 @@
-import { Type } from 'class-transformer'
-import { IsInt, IsOptional, Max, Min } from 'class-validator'
+import { Type } from 'class-transformer';
+import { IsInt, IsOptional, Max, Min } from 'class-validator';
 
 export class ListInquiryFieldChangesQueryDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
-  page?: number = 0
+  page?: number = 0;
 
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(50)
-  size?: number = 6
+  size?: number = 6;
 }

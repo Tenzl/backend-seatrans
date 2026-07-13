@@ -64,7 +64,9 @@ export class InquiryDocumentService {
     const inquiry = await this.requireInquiry(serviceSlug, targetId);
     const inquirySlug = this.toServiceSlug(inquiry.serviceType?.name);
 
-    const uploader = await this.userRepository.findOne({ where: { id: uploaderUserId } });
+    const uploader = await this.userRepository.findOne({
+      where: { id: uploaderUserId },
+    });
     if (!uploader) {
       throw new BadRequestException('User not found');
     }
@@ -112,7 +114,10 @@ export class InquiryDocumentService {
     }
   }
 
-  async getDocuments(serviceSlug: string, targetId: number): Promise<InquiryDocumentDto[]> {
+  async getDocuments(
+    serviceSlug: string,
+    targetId: number,
+  ): Promise<InquiryDocumentDto[]> {
     // Ensure inquiry exists + matches service slug (legacy safety check)
     await this.requireInquiry(serviceSlug, targetId);
 
@@ -133,7 +138,10 @@ export class InquiryDocumentService {
    * Returns inquiry owner id after validating the serviceSlug matches the inquiry service type.
    * Used to enforce ownership checks on customer-facing document routes.
    */
-  async getInquiryOwnerId(serviceSlug: string, targetId: number): Promise<number> {
+  async getInquiryOwnerId(
+    serviceSlug: string,
+    targetId: number,
+  ): Promise<number> {
     const inquiry = await this.requireInquiry(serviceSlug, targetId);
     return inquiry.userId;
   }
@@ -190,17 +198,25 @@ export class InquiryDocumentService {
     });
 
     for (const row of rows) {
-      await this.cloudinaryService.deleteByPublicId(row.cloudinaryPublicId ?? '');
+      await this.cloudinaryService.deleteByPublicId(
+        row.cloudinaryPublicId ?? '',
+      );
       await this.inquiryDocumentRepository.remove(row);
     }
   }
 
-  async hardDeleteByServiceAndTarget(serviceSlug: string, targetId: number): Promise<void> {
+  async hardDeleteByServiceAndTarget(
+    serviceSlug: string,
+    targetId: number,
+  ): Promise<void> {
     await this.requireInquiry(serviceSlug, targetId);
     await this.hardDeleteByInquiry(targetId);
   }
 
-  private async requireInquiry(serviceSlug: string, inquiryId: number): Promise<BaseInquiry> {
+  private async requireInquiry(
+    serviceSlug: string,
+    inquiryId: number,
+  ): Promise<BaseInquiry> {
     const slug = this.normalizeServiceSlug(serviceSlug);
     const repo = this.inquiryRepos[slug];
     if (!repo) {
@@ -256,7 +272,10 @@ export class InquiryDocumentService {
     ) {
       return 'chartering';
     }
-    if (normalized === 'freight forwarding' || normalized === 'freight-forwarding') {
+    if (
+      normalized === 'freight forwarding' ||
+      normalized === 'freight-forwarding'
+    ) {
       return 'freight-forwarding';
     }
     if (

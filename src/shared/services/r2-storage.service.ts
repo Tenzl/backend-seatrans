@@ -28,6 +28,10 @@ import {
   parentPrefixOf,
 } from './storage-key.util';
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export type StorageNodeType = 'folder' | 'file';
 
 export interface StorageObjectDto {
@@ -55,17 +59,30 @@ export class R2StorageService {
 
   constructor(private readonly configService: ConfigService) {
     const accountId = this.configService.get<string>('R2_ACCOUNT_ID')?.trim();
-    const accessKeyId = this.configService.get<string>('R2_ACCESS_KEY_ID')?.trim();
-    const secretAccessKey = this.configService.get<string>('R2_SECRET_ACCESS_KEY')?.trim();
-    this.bucket = this.configService.get<string>('R2_BUCKET_NAME')?.trim() ?? '';
+    const accessKeyId = this.configService
+      .get<string>('R2_ACCESS_KEY_ID')
+      ?.trim();
+    const secretAccessKey = this.configService
+      .get<string>('R2_SECRET_ACCESS_KEY')
+      ?.trim();
+    this.bucket =
+      this.configService.get<string>('R2_BUCKET_NAME')?.trim() ?? '';
 
-    this.configured = !!(accountId && accessKeyId && secretAccessKey && this.bucket);
+    this.configured = !!(
+      accountId &&
+      accessKeyId &&
+      secretAccessKey &&
+      this.bucket
+    );
 
     if (this.configured) {
       this.client = new S3Client({
         region: 'auto',
         endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-        credentials: { accessKeyId: accessKeyId!, secretAccessKey: secretAccessKey! },
+        credentials: {
+          accessKeyId: accessKeyId!,
+          secretAccessKey: secretAccessKey!,
+        },
       });
     } else {
       this.client = null;
@@ -97,11 +114,15 @@ export class R2StorageService {
           Delimiter: '/',
         }),
       )
-      .catch((error) => {
-        throw new InternalServerErrorException(`Failed to list storage: ${error?.message ?? error}`);
+      .catch((error: unknown) => {
+        throw new InternalServerErrorException(
+          `Failed to list storage: ${errorMessage(error)}`,
+        );
       });
 
-    const folders = (response.CommonPrefixes ?? []).map((cp) => this.toFolderDto(cp, normalized));
+    const folders = (response.CommonPrefixes ?? []).map((cp) =>
+      this.toFolderDto(cp, normalized),
+    );
     const files = (response.Contents ?? [])
       .filter((obj) => this.isImmediateFile(obj, normalized))
       .map((obj) => this.toFileDto(obj));
@@ -129,8 +150,10 @@ export class R2StorageService {
           ContentType: 'application/x-directory',
         }),
       )
-      .catch((error) => {
-        throw new InternalServerErrorException(`Failed to create folder: ${error?.message ?? error}`);
+      .catch((error: unknown) => {
+        throw new InternalServerErrorException(
+          `Failed to create folder: ${errorMessage(error)}`,
+        );
       });
 
     return {
@@ -162,8 +185,10 @@ export class R2StorageService {
           ContentType: contentType || 'application/octet-stream',
         }),
       )
-      .catch((error) => {
-        throw new InternalServerErrorException(`Failed to upload file: ${error?.message ?? error}`);
+      .catch((error: unknown) => {
+        throw new InternalServerErrorException(
+          `Failed to upload file: ${errorMessage(error)}`,
+        );
       });
 
     return {
@@ -177,17 +202,21 @@ export class R2StorageService {
     };
   }
 
-  async   rename(fromKey: string, toKey: string): Promise<StorageObjectDto> {
+  async rename(fromKey: string, toKey: string): Promise<StorageObjectDto> {
     const client = this.requireClient();
     assertSafeKey(fromKey, 'fromKey');
     assertSafeKey(toKey, 'toKey');
 
     const folderRename = isFolderKey(fromKey) || isFolderKey(toKey);
-    const normalizedFrom = folderRename && !isFolderKey(fromKey) ? `${fromKey}/` : fromKey;
-    const normalizedTo = folderRename && !isFolderKey(toKey) ? `${toKey}/` : toKey;
+    const normalizedFrom =
+      folderRename && !isFolderKey(fromKey) ? `${fromKey}/` : fromKey;
+    const normalizedTo =
+      folderRename && !isFolderKey(toKey) ? `${toKey}/` : toKey;
 
     if (isFolderKey(normalizedFrom) !== isFolderKey(normalizedTo)) {
-      throw new BadRequestException('Cannot rename between file and folder types');
+      throw new BadRequestException(
+        'Cannot rename between file and folder types',
+      );
     }
 
     if (isFolderKey(normalizedFrom)) {
@@ -207,11 +236,15 @@ export class R2StorageService {
           Key: normalizedTo,
         }),
       )
-      .catch((error) => {
-        throw new InternalServerErrorException(`Failed to rename file: ${error?.message ?? error}`);
+      .catch((error: unknown) => {
+        throw new InternalServerErrorException(
+          `Failed to rename file: ${errorMessage(error)}`,
+        );
       });
 
-    await client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: normalizedFrom }));
+    await client.send(
+      new DeleteObjectCommand({ Bucket: this.bucket, Key: normalizedFrom }),
+    );
 
     return {
       key: normalizedTo,
@@ -231,25 +264,34 @@ export class R2StorageService {
 
     await client
       .send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }))
-      .catch((error) => {
-        throw new InternalServerErrorException(`Failed to delete object: ${error?.message ?? error}`);
+      .catch((error: unknown) => {
+        throw new InternalServerErrorException(
+          `Failed to delete object: ${errorMessage(error)}`,
+        );
       });
   }
 
-  async getDownloadUrl(key: string, expiresInSeconds = 3600): Promise<{ url: string; expiresAt: string }> {
+  async getDownloadUrl(
+    key: string,
+    expiresInSeconds = 3600,
+  ): Promise<{ url: string; expiresAt: string }> {
     const client = this.requireClient();
     assertSafeKey(key, 'key');
     if (isFolderKey(key)) {
       throw new BadRequestException('Cannot download a folder');
     }
 
-    const expiresAt = new Date(Date.now() + expiresInSeconds * 1000).toISOString();
+    const expiresAt = new Date(
+      Date.now() + expiresInSeconds * 1000,
+    ).toISOString();
     const url = await getSignedUrl(
       client,
       new GetObjectCommand({ Bucket: this.bucket, Key: key }),
       { expiresIn: expiresInSeconds },
-    ).catch((error) => {
-      throw new InternalServerErrorException(`Failed to create download URL: ${error?.message ?? error}`);
+    ).catch((error: unknown) => {
+      throw new InternalServerErrorException(
+        `Failed to create download URL: ${errorMessage(error)}`,
+      );
     });
 
     return { url, expiresAt };
@@ -264,7 +306,9 @@ export class R2StorageService {
 
   private toFolderDto(cp: CommonPrefix, prefix: string): StorageObjectDto {
     const key = cp.Prefix ?? '';
-    const name = prefix ? key.slice(prefix.length).replace(/\/$/, '') : key.replace(/\/$/, '');
+    const name = prefix
+      ? key.slice(prefix.length).replace(/\/$/, '')
+      : key.replace(/\/$/, '');
     return { key, name, type: 'folder' };
   }
 
@@ -305,11 +349,16 @@ export class R2StorageService {
         );
       }
 
-      continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+      continuationToken = listed.IsTruncated
+        ? listed.NextContinuationToken
+        : undefined;
     } while (continuationToken);
   }
 
-  private async renameFolderPrefix(fromPrefix: string, toPrefix: string): Promise<void> {
+  private async renameFolderPrefix(
+    fromPrefix: string,
+    toPrefix: string,
+  ): Promise<void> {
     const client = this.requireClient();
     let continuationToken: string | undefined;
 
@@ -334,10 +383,14 @@ export class R2StorageService {
             Key: destKey,
           }),
         );
-        await client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: obj.Key }));
+        await client.send(
+          new DeleteObjectCommand({ Bucket: this.bucket, Key: obj.Key }),
+        );
       }
 
-      continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+      continuationToken = listed.IsTruncated
+        ? listed.NextContinuationToken
+        : undefined;
     } while (continuationToken);
   }
 }

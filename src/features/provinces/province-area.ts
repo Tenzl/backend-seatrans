@@ -13,13 +13,17 @@ const PROVINCE_AREA_LABEL_TO_CODE: Record<string, ProvinceAreaCode> = {
   SOUTHERN: 3,
 };
 
-export function normalizeProvinceAreaCode(value?: number | string | null): ProvinceAreaCode | null {
+export function normalizeProvinceAreaCode(
+  value?: number | string | null,
+): ProvinceAreaCode | null {
   if (value === undefined || value === null || value === '') {
     return null;
   }
 
   if (typeof value === 'number') {
-    return PROVINCE_AREA_CODES.includes(value as ProvinceAreaCode) ? (value as ProvinceAreaCode) : null;
+    return PROVINCE_AREA_CODES.includes(value as ProvinceAreaCode)
+      ? (value as ProvinceAreaCode)
+      : null;
   }
 
   const normalized = value.trim().toUpperCase();

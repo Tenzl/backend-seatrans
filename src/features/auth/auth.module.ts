@@ -6,9 +6,25 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from './entities/user.entity';
 import { Role } from './entities/role.entity';
 import { PassportModule } from '@nestjs/passport';
-import { JwtModule } from '@nestjs/jwt';
+import { JwtModule, type JwtModuleOptions } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtStrategy } from './strategies/jwt.strategy';
+
+type JwtExpiration = NonNullable<
+  NonNullable<JwtModuleOptions['signOptions']>['expiresIn']
+>;
+
+function parseJwtExpiration(value: string): JwtExpiration {
+  if (/^\d+$/.test(value)) return Number(value);
+  if (
+    /^\d+(?:\.\d+)?\s*(?:years?|yrs?|y|weeks?|w|days?|d|hours?|hrs?|hr|h|minutes?|mins?|min|m|seconds?|secs?|sec|s|milliseconds?|msecs?|msec|ms)$/i.test(
+      value,
+    )
+  ) {
+    return value as JwtExpiration;
+  }
+  return '1d';
+}
 
 @Module({
   imports: [
@@ -20,7 +36,9 @@ import { JwtStrategy } from './strategies/jwt.strategy';
       useFactory: (configService: ConfigService) => ({
         secret: configService.getOrThrow<string>('APP_JWT_SECRET'),
         signOptions: {
-          expiresIn: configService.get<string>('APP_JWT_EXPIRATION', '1d') as any,
+          expiresIn: parseJwtExpiration(
+            configService.get<string>('APP_JWT_EXPIRATION', '1d'),
+          ),
         },
       }),
     }),

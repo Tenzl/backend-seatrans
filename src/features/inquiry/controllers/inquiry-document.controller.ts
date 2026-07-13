@@ -17,6 +17,16 @@ import { InquiryDocumentService } from '../services/inquiry-document.service';
 import { DocumentByTypeQueryDto } from '../dto/document-by-type-query.dto';
 import { CloudinaryService } from '../../../shared/services/cloudinary.service';
 
+type AuthenticatedUser = {
+  id?: number | string;
+  role?: { name?: string };
+  roles?: string[];
+};
+
+type AuthenticatedRequest = Request & {
+  user?: AuthenticatedUser;
+};
+
 @Controller('v1/inquiries')
 export class InquiryDocumentController {
   constructor(
@@ -24,8 +34,8 @@ export class InquiryDocumentController {
     private readonly cloudinaryService: CloudinaryService,
   ) {}
 
-  private isPrivilegedUser(user: any): boolean {
-    const roleNames: string[] = Array.isArray(user?.roles)
+  private isPrivilegedUser(user?: AuthenticatedUser): boolean {
+    const roleNames = Array.isArray(user?.roles)
       ? user.roles
       : user?.role?.name
         ? [user.role.name]
@@ -35,7 +45,10 @@ export class InquiryDocumentController {
     );
   }
 
-  private ensureInquiryOwnerOrAdmin(inquiryOwnerId: number, user: any): void {
+  private ensureInquiryOwnerOrAdmin(
+    inquiryOwnerId: number,
+    user?: AuthenticatedUser,
+  ): void {
     const requesterId = Number(user?.id);
     if (Number.isFinite(requesterId) && requesterId === inquiryOwnerId) return;
     if (this.isPrivilegedUser(user)) return;
@@ -47,13 +60,13 @@ export class InquiryDocumentController {
   getDocuments(
     @Param('serviceSlug') serviceSlug: string,
     @Param('targetId', ParseIntPipe) targetId: number,
-    @Req() req: Request,
+    @Req() req: AuthenticatedRequest,
   ) {
     // Prevent IDOR: only inquiry owner or privileged roles can access documents
     return this.inquiryDocumentService
       .getInquiryOwnerId(serviceSlug, targetId)
       .then((ownerId) => {
-        this.ensureInquiryOwnerOrAdmin(ownerId, (req as any).user);
+        this.ensureInquiryOwnerOrAdmin(ownerId, req.user);
         return this.inquiryDocumentService.getDocuments(serviceSlug, targetId);
       });
   }
@@ -64,13 +77,13 @@ export class InquiryDocumentController {
     @Param('serviceSlug') serviceSlug: string,
     @Param('targetId', ParseIntPipe) targetId: number,
     @Query() query: DocumentByTypeQueryDto,
-    @Req() req: Request,
+    @Req() req: AuthenticatedRequest,
   ) {
     // Prevent IDOR: only inquiry owner or privileged roles can access documents
     return this.inquiryDocumentService
       .getInquiryOwnerId(serviceSlug, targetId)
       .then((ownerId) => {
-        this.ensureInquiryOwnerOrAdmin(ownerId, (req as any).user);
+        this.ensureInquiryOwnerOrAdmin(ownerId, req.user);
         return this.inquiryDocumentService.getDocumentsByType(
           serviceSlug,
           targetId,
@@ -79,7 +92,7 @@ export class InquiryDocumentController {
       });
   }
 
-  /** Redirect to stored file. disposition=attachment | inline (default) */
+  /** Redirect to the stored document using a short-lived signed URL. */
   @UseGuards(AuthGuard('jwt'))
   @Get(':serviceSlug/:targetId/documents/:documentId/content')
   async streamDocument(
@@ -87,15 +100,14 @@ export class InquiryDocumentController {
     @Param('targetId', ParseIntPipe) targetId: number,
     @Param('documentId', ParseIntPipe) documentId: number,
     @Res() res: Response,
-    @Req() req: Request,
-    @Query('disposition') _disposition: 'inline' | 'attachment' = 'inline',
+    @Req() req: AuthenticatedRequest,
   ) {
     // Prevent IDOR before revealing the redirect target
     const ownerId = await this.inquiryDocumentService.getInquiryOwnerId(
       serviceSlug,
       targetId,
     );
-    this.ensureInquiryOwnerOrAdmin(ownerId, (req as any).user);
+    this.ensureInquiryOwnerOrAdmin(ownerId, req.user);
 
     const doc = await this.inquiryDocumentService.getDocumentById(documentId);
     if (
@@ -112,10 +124,9 @@ export class InquiryDocumentController {
     }
 
     // Prefer short-lived signed authenticated URL (prevents link sharing).
-    const signed =
-      doc.cloudinaryPublicId?.trim()
-        ? this.cloudinaryService.buildSignedRawUrl(doc.cloudinaryPublicId, 60)
-        : null;
+    const signed = doc.cloudinaryPublicId?.trim()
+      ? this.cloudinaryService.buildSignedRawUrl(doc.cloudinaryPublicId, 60)
+      : null;
     res.redirect(302, this.buildCloudinaryPdfUrl(signed ?? doc.cloudinaryUrl));
   }
 

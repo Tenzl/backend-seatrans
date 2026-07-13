@@ -7,12 +7,13 @@ import {
 } from 'class-validator';
 
 type FieldCheck = (obj: Record<string, unknown>) => boolean;
+type ClassConstructor = new (...args: never[]) => unknown;
 
 export function RequireOneOf(
   checks: FieldCheck[],
   validationOptions?: ValidationOptions,
 ) {
-  return function (constructor: Function) {
+  return function (constructor: ClassConstructor): void {
     registerDecorator({
       name: 'requireOneOf',
       target: constructor,
@@ -32,9 +33,7 @@ export function RequireOneOf(
 }
 
 @ValidatorConstraint({ name: 'requireServiceTypeReference', async: false })
-export class RequireServiceTypeReferenceConstraint
-  implements ValidatorConstraintInterface
-{
+export class RequireServiceTypeReferenceConstraint implements ValidatorConstraintInterface {
   validate(_value: unknown, args: ValidationArguments) {
     const dto = args.object as {
       serviceTypeId?: number;
@@ -43,7 +42,10 @@ export class RequireServiceTypeReferenceConstraint
     if (dto.serviceTypeId != null && Number(dto.serviceTypeId) > 0) {
       return true;
     }
-    return typeof dto.serviceTypeSlug === 'string' && dto.serviceTypeSlug.trim().length > 0;
+    return (
+      typeof dto.serviceTypeSlug === 'string' &&
+      dto.serviceTypeSlug.trim().length > 0
+    );
   }
 
   defaultMessage() {
@@ -52,8 +54,10 @@ export class RequireServiceTypeReferenceConstraint
 }
 
 /** Class-level: require serviceTypeId or serviceTypeSlug */
-export function RequireServiceTypeReference(validationOptions?: ValidationOptions) {
-  return function (constructor: Function) {
+export function RequireServiceTypeReference(
+  validationOptions?: ValidationOptions,
+) {
+  return function (constructor: ClassConstructor): void {
     registerDecorator({
       name: 'requireServiceTypeReference',
       target: constructor,

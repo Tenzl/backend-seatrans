@@ -21,7 +21,9 @@ type StaffRequest = Request & { user?: { id?: number } };
 @ApiAdmin()
 @Controller('v1/admin/users/external-customers')
 export class AdminExternalCustomersController {
-  constructor(private readonly externalCustomersService: ExternalCustomersService) {}
+  constructor(
+    private readonly externalCustomersService: ExternalCustomersService,
+  ) {}
 
   @Get()
   list(@Query() query: ListExternalCustomersQueryDto) {
@@ -30,7 +32,10 @@ export class AdminExternalCustomersController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  async create(@Body() body: CreateExternalCustomerDto, @Req() req: StaffRequest) {
+  async create(
+    @Body() body: CreateExternalCustomerDto,
+    @Req() req: StaffRequest,
+  ) {
     const dto = await validateDto(CreateExternalCustomerDto, body);
     const staffUserId = req.user?.id;
     if (!staffUserId) {

@@ -1,4 +1,9 @@
-import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
+import {
+  CallHandler,
+  ExecutionContext,
+  Injectable,
+  NestInterceptor,
+} from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { ApiResponse } from '../dto/api-response';
@@ -7,10 +12,16 @@ import { ApiResponse } from '../dto/api-response';
  * Standardize ALL successful responses to the { success, message, data } envelope structure.
  */
 @Injectable()
-export class ResponseInterceptor<T> implements NestInterceptor<T, ApiResponse<T>> {
-  intercept(context: ExecutionContext, next: CallHandler): Observable<ApiResponse<T>> {
+export class ResponseInterceptor implements NestInterceptor<
+  unknown,
+  ApiResponse<unknown>
+> {
+  intercept(
+    _context: ExecutionContext,
+    next: CallHandler<unknown>,
+  ): Observable<ApiResponse<unknown>> {
     return next.handle().pipe(
-      map(data => {
+      map((data: unknown): ApiResponse<unknown> => {
         // Skip wrapping if the handler already returned an ApiResponse wrapper manually
         if (data instanceof ApiResponse) {
           return data;

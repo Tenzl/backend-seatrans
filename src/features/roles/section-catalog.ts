@@ -31,11 +31,22 @@ export const SECTION_CATALOG: readonly SectionDef[] = [
   { key: 'data-offices', label: 'Offices', group: 'Data Management' },
   { key: 'data-storage', label: 'Storage', group: 'Data Management' },
   { key: 'content-posts', label: 'Posts', group: 'Content Management' },
-  { key: 'content-categories', label: 'Categories', group: 'Content Management' },
-  { key: 'roles', label: 'Roles & access', group: 'Administration', adminOnly: true },
+  {
+    key: 'content-categories',
+    label: 'Categories',
+    group: 'Content Management',
+  },
+  {
+    key: 'roles',
+    label: 'Roles & access',
+    group: 'Administration',
+    adminOnly: true,
+  },
 ] as const;
 
-export const SECTION_KEYS: readonly string[] = SECTION_CATALOG.map((s) => s.key);
+export const SECTION_KEYS: readonly string[] = SECTION_CATALOG.map(
+  (s) => s.key,
+);
 
 /** Sections an admin may grant to other roles (excludes admin-only boundaries). */
 export const GRANTABLE_SECTION_KEYS: readonly string[] = SECTION_CATALOG.filter(

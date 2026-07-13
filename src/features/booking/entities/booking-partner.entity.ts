@@ -52,7 +52,12 @@ export class BookingPartner {
   @Column({ type: 'varchar', length: 64, nullable: true })
   fax!: string | null;
 
-  @Column({ name: 'tracking_url', type: 'varchar', length: 512, nullable: true })
+  @Column({
+    name: 'tracking_url',
+    type: 'varchar',
+    length: 512,
+    nullable: true,
+  })
   trackingUrl!: string | null;
 
   @Column({ type: 'text', nullable: true })
@@ -97,25 +102,55 @@ export class BookingPartner {
   @Column({ name: 'contract_no', type: 'varchar', length: 128, nullable: true })
   contractNo!: string | null;
 
-  @Column({ name: 'invoice_company_name', type: 'varchar', length: 255, nullable: true })
+  @Column({
+    name: 'invoice_company_name',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
   invoiceCompanyName!: string | null;
 
   @Column({ name: 'invoice_company_address', type: 'text', nullable: true })
   invoiceCompanyAddress!: string | null;
 
-  @Column({ name: 'invoice_company_phone', type: 'varchar', length: 64, nullable: true })
+  @Column({
+    name: 'invoice_company_phone',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
   invoiceCompanyPhone!: string | null;
 
-  @Column({ name: 'invoice_company_email', type: 'varchar', length: 255, nullable: true })
+  @Column({
+    name: 'invoice_company_email',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
   invoiceCompanyEmail!: string | null;
 
-  @Column({ name: 'invoice_bank_name', type: 'varchar', length: 255, nullable: true })
+  @Column({
+    name: 'invoice_bank_name',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
   invoiceBankName!: string | null;
 
-  @Column({ name: 'invoice_bank_branch', type: 'varchar', length: 255, nullable: true })
+  @Column({
+    name: 'invoice_bank_branch',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
   invoiceBankBranch!: string | null;
 
-  @Column({ name: 'invoice_bank_account', type: 'varchar', length: 128, nullable: true })
+  @Column({
+    name: 'invoice_bank_account',
+    type: 'varchar',
+    length: 128,
+    nullable: true,
+  })
   invoiceBankAccount!: string | null;
 
   @Column({ name: 'created_by', length: 255, default: 'system' })

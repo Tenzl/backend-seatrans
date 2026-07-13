@@ -27,6 +27,7 @@ import { DeleteInquiriesDto } from '../dto/delete-inquiries.dto';
 import { DeleteInquiriesQueryDto } from '../dto/delete-inquiries-query.dto';
 import { UpdateShippingAgencyEpdaDto } from '../dto/update-shipping-agency-epda.dto';
 import { IssueShippingAgencyEpdaDto } from '../dto/issue-shipping-agency-epda.dto';
+import { LockShippingAgencyEpdaDto } from '../dto/lock-shipping-agency-epda.dto';
 import { CreateInternalShippingAgencyInquiryDto } from '../dto/create-internal-shipping-agency-inquiry.dto';
 import { ListInquiryFieldChangesQueryDto } from '../dto/list-inquiry-field-changes-query.dto';
 import { validateDto } from '../../../shared/utils/validate-dto.util';
@@ -36,7 +37,9 @@ import { validateDto } from '../../../shared/utils/validate-dto.util';
  * List/filter: GET /v1/admin/inquiries?serviceType=&status=&page=&size=
  * Detail: GET /v1/admin/inquiries/:serviceType/:id
  */
-type StaffRequest = Request & { user?: { id?: number; role?: { name?: string | null } | null } };
+type StaffRequest = Request & {
+  user?: { id?: number; role?: { name?: string | null } | null };
+};
 
 @ApiAdmin()
 @Controller('v1/admin/inquiries')
@@ -69,7 +72,11 @@ export class AdminInquiryController {
       return this.inquiryService.hardDeleteBatchByAdmin(dto.ids, serviceSlug);
     }
 
-    return this.inquiryService.softDeleteBatch(dto.ids, actorUserId, serviceSlug);
+    return this.inquiryService.softDeleteBatch(
+      dto.ids,
+      actorUserId,
+      serviceSlug,
+    );
   }
 
   @Post('batch/restore')
@@ -79,7 +86,9 @@ export class AdminInquiryController {
     @Req() req: StaffRequest,
   ) {
     if (!isAdminRoleName(req.user?.role?.name)) {
-      throw new ForbiddenException('Only administrators can restore archived inquiries');
+      throw new ForbiddenException(
+        'Only administrators can restore archived inquiries',
+      );
     }
     const serviceSlug = query.serviceSlug?.trim() || undefined;
     return this.inquiryService.restoreBatchByAdmin(dto.ids, serviceSlug);
@@ -100,7 +109,10 @@ export class AdminInquiryController {
     if (!actorUserId) {
       throw new BadRequestException('User not authenticated');
     }
-    return this.shippingAgencyEpdaService.createInternalInquiry(dto, actorUserId);
+    return this.shippingAgencyEpdaService.createInternalInquiry(
+      dto,
+      actorUserId,
+    );
   }
 
   /**
@@ -136,7 +148,29 @@ export class AdminInquiryController {
     if (!actorUserId) {
       throw new BadRequestException('User not authenticated');
     }
-    return this.shippingAgencyEpdaService.issueEpdaToCustomer(id, dto, actorUserId);
+    return this.shippingAgencyEpdaService.issueEpdaToCustomer(
+      id,
+      dto,
+      actorUserId,
+    );
+  }
+
+  /**
+   * Lock EPDA edits: persist tariff snapshot and set epdaLockedAt.
+   * POST /api/v1/admin/inquiries/shipping-agency/:id/epda/lock
+   */
+  @Post('shipping-agency/:id/epda/lock')
+  async lockShippingAgencyEpda(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: LockShippingAgencyEpdaDto,
+    @Req() req: StaffRequest,
+  ) {
+    const dto = await validateDto(LockShippingAgencyEpdaDto, body);
+    const actorUserId = req.user?.id;
+    if (!actorUserId) {
+      throw new BadRequestException('User not authenticated');
+    }
+    return this.shippingAgencyEpdaService.lockEpda(id, dto, actorUserId);
   }
 
   @Get('shipping-agency/:id/epda/field-changes')
@@ -217,7 +251,9 @@ export class AdminInquiryController {
     @Req() req: StaffRequest,
   ) {
     if (!isAdminRoleName(req.user?.role?.name)) {
-      throw new ForbiddenException('Only administrators can restore archived inquiries');
+      throw new ForbiddenException(
+        'Only administrators can restore archived inquiries',
+      );
     }
     return this.inquiryService.restoreByServiceAndId(serviceType, id);
   }

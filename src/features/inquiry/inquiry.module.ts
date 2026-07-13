@@ -9,6 +9,7 @@ import { InquiryDocument } from './entities/inquiry-document.entity';
 import { InquiryFieldChangeLog } from './entities/inquiry-field-change-log.entity';
 import { ServiceType } from '../logistics/entities/service-type.entity';
 import { User } from '../auth/entities/user.entity';
+import { Port } from '../ports/entities/port.entity';
 import { ServiceInquiryService } from './services/service-inquiry.service';
 import { ShippingAgencyEpdaService } from './services/shipping-agency-epda.service';
 import { InquiryDocumentService } from './services/inquiry-document.service';
@@ -34,6 +35,7 @@ import { NotificationModule } from '../notification/notification.module';
       InquiryFieldChangeLog,
       ServiceType,
       User,
+      Port,
     ]),
     NotificationModule,
   ],

@@ -57,7 +57,9 @@ class CoeffDto {
 
 class GrtTierDto {
   // `null` allowed for the open-ended top tier; validate as number only when not null.
-  @ValidateIf((o) => o.maxGrt !== null) @IsNumber() maxGrt!: number | null;
+  @ValidateIf((tier: GrtTierDto) => tier.maxGrt !== null)
+  @IsNumber()
+  maxGrt!: number | null;
   @IsNumber() amount!: number;
   @IsString() label!: string;
 }
@@ -77,7 +79,10 @@ class CargoAgencyRateDto {
 export class EpdaParameterValuesDto {
   @IsOptional() @ValidateNested() @Type(() => HoursDto) hours?: HoursDto;
   @IsOptional() @ValidateNested() @Type(() => GarbageDto) garbage?: GarbageDto;
-  @IsOptional() @ValidateNested() @Type(() => QuarantineDto) quarantine?: QuarantineDto;
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => QuarantineDto)
+  quarantine?: QuarantineDto;
   @IsOptional() @ValidateNested() @Type(() => CoeffDto) coeff?: CoeffDto;
 
   @IsOptional()
@@ -120,10 +125,14 @@ export class UpsertEpdaParameterSetDto {
 
 /** Create a new port group inside an area. */
 export class CreateEpdaParameterGroupDto {
-  @IsString() @IsNotEmpty() @MaxLength(50)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(50)
   area!: string;
 
-  @IsString() @IsNotEmpty() @MaxLength(100)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
   name!: string;
 
   @IsOptional()
@@ -134,7 +143,10 @@ export class CreateEpdaParameterGroupDto {
 
 /** Update a group's name and/or its override values. */
 export class UpdateEpdaParameterGroupDto {
-  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(100)
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
   name?: string;
 
   @IsOptional()

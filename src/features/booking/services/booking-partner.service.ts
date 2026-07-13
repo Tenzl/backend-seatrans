@@ -44,9 +44,14 @@ export class BookingPartnerService {
     private readonly dataSource: DataSource,
   ) {}
 
-  async listPartnerOptions(q?: string, limit?: number): Promise<PartnerOptionDto[]> {
+  async listPartnerOptions(
+    q?: string,
+    limit?: number,
+  ): Promise<PartnerOptionDto[]> {
     const normalizedQ = q?.trim().toLowerCase() ?? '';
-    const take = this.sanitizeOptionsLimit(limit ?? BookingPartnerService.DEFAULT_OPTIONS_LIMIT);
+    const take = this.sanitizeOptionsLimit(
+      limit ?? BookingPartnerService.DEFAULT_OPTIONS_LIMIT,
+    );
 
     const qb = this.partnerRepository
       .createQueryBuilder('partner')
@@ -60,7 +65,9 @@ export class BookingPartnerService {
         new Brackets((sub) => {
           sub
             .where('LOWER(partner.name) LIKE :q', { q: `%${normalizedQ}%` })
-            .orWhere('LOWER(partner.customerId) LIKE :q', { q: `%${normalizedQ}%` });
+            .orWhere('LOWER(partner.customerId) LIKE :q', {
+              q: `%${normalizedQ}%`,
+            });
         }),
       );
     }
@@ -115,7 +122,10 @@ export class BookingPartnerService {
     return buildPaginatedResponse(content, totalElements, page, size);
   }
 
-  async getDetail(id: number, includeArchived = true): Promise<BookingPartnerDetailResponseDto> {
+  async getDetail(
+    id: number,
+    includeArchived = true,
+  ): Promise<BookingPartnerDetailResponseDto> {
     const where = includeArchived
       ? { id }
       : {
@@ -142,7 +152,10 @@ export class BookingPartnerService {
       const partner = repository.create();
 
       this.assignUpsertFields(partner, dto);
-      partner.customerId = await this.resolveCustomerId(manager, dto.customerId);
+      partner.customerId = await this.resolveCustomerId(
+        manager,
+        dto.customerId,
+      );
       partner.createdBy = actor;
       partner.updatedBy = actor;
 
@@ -180,7 +193,9 @@ export class BookingPartnerService {
         : [];
       const takenIds = new Set(existingRows.map((row) => row.customerId));
 
-      const autoCount = dtos.filter((dto) => !this.trimToNull(dto.customerId)).length;
+      const autoCount = dtos.filter(
+        (dto) => !this.trimToNull(dto.customerId),
+      ).length;
       const autoIds = await this.reserveCustomerIdBlock(manager, autoCount);
 
       const errors: Array<{ index: number; message: string }> = [];
@@ -191,7 +206,10 @@ export class BookingPartnerService {
         const provided = this.trimToNull(dto.customerId);
         if (provided) {
           if (takenIds.has(provided)) {
-            errors.push({ index: i + 1, message: `Customer ID "${provided}" already exists` });
+            errors.push({
+              index: i + 1,
+              message: `Customer ID "${provided}" already exists`,
+            });
             return;
           }
           takenIds.add(provided);
@@ -209,7 +227,11 @@ export class BookingPartnerService {
         await repository.save(entities, { chunk: 100 });
       }
 
-      return { successCount: entities.length, errorCount: errors.length, errors };
+      return {
+        successCount: entities.length,
+        errorCount: errors.length,
+        errors,
+      };
     });
   }
 
@@ -311,8 +333,12 @@ export class BookingPartnerService {
         new Brackets((subQb) => {
           subQb
             .where('LOWER(partner.name) LIKE :q', { q: `%${normalizedQ}%` })
-            .orWhere('LOWER(partner.customerId) LIKE :q', { q: `%${normalizedQ}%` })
-            .orWhere('LOWER(partner.taxNumber) LIKE :q', { q: `%${normalizedQ}%` });
+            .orWhere('LOWER(partner.customerId) LIKE :q', {
+              q: `%${normalizedQ}%`,
+            })
+            .orWhere('LOWER(partner.taxNumber) LIKE :q', {
+              q: `%${normalizedQ}%`,
+            });
         }),
       );
     }
@@ -361,12 +387,16 @@ export class BookingPartnerService {
     const [fieldRaw, directionRaw] = (sort ?? 'updatedAt,desc').split(',');
     const field = fieldRaw?.trim() ?? 'updatedAt';
     const sortColumn = sortMap[field] ?? sortMap.updatedAt;
-    const sortOrder = directionRaw?.trim().toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const sortOrder =
+      directionRaw?.trim().toLowerCase() === 'asc' ? 'ASC' : 'DESC';
 
     return { sortColumn, sortOrder };
   }
 
-  private assignUpsertFields(partner: BookingPartner, dto: UpsertBookingPartnerDto): void {
+  private assignUpsertFields(
+    partner: BookingPartner,
+    dto: UpsertBookingPartnerDto,
+  ): void {
     const additionTypes = Array.from(new Set(dto.additionTypes ?? []));
 
     partner.name = this.trimToNull(dto.name) ?? '';
@@ -385,7 +415,9 @@ export class BookingPartnerService {
     partner.customerType = dto.customerType ?? null;
     partner.approveStatus = dto.approveStatus ?? null;
     partner.approveBy = this.trimToNull(dto.approveBy);
-    partner.companyEstablishmentDate = this.trimToNull(dto.companyEstablishmentDate);
+    partner.companyEstablishmentDate = this.trimToNull(
+      dto.companyEstablishmentDate,
+    );
     partner.paymentDueDays = dto.paymentDueDays ?? null;
     partner.contractNo = this.trimToNull(dto.contractNo);
     partner.taxNumber = this.trimToNull(dto.taxNumber);
@@ -424,12 +456,16 @@ export class BookingPartnerService {
     return row;
   }
 
-  private toDetailResponse(partner: BookingPartner): BookingPartnerDetailResponseDto {
+  private toDetailResponse(
+    partner: BookingPartner,
+  ): BookingPartnerDetailResponseDto {
     return {
       id: partner.id,
       customerId: partner.customerId,
       name: partner.name,
-      additionTypes: (partner.additionTypeRows ?? []).map((row) => row.additionType),
+      additionTypes: (partner.additionTypeRows ?? []).map(
+        (row) => row.additionType,
+      ),
       country: partner.country,
       city: partner.city,
       contacts: partner.contacts ?? [],
@@ -552,7 +588,7 @@ export class BookingPartnerService {
       [datePart],
     );
 
-    const rows = await manager.query(
+    const rows = await manager.query<Array<{ current_value: number | string }>>(
       'UPDATE customer_id_sequences SET current_value = current_value + $1 WHERE sequence_date = $2 RETURNING current_value',
       [count, datePart],
     );

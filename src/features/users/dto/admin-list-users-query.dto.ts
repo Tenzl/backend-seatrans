@@ -1,5 +1,13 @@
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { RoleGroup } from '../../auth/enums/role-group.enum';
 
 export class AdminListUsersQueryDto {
@@ -25,4 +33,3 @@ export class AdminListUsersQueryDto {
   @Max(200)
   limit?: number = 100;
 }
-

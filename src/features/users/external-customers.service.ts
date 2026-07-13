@@ -25,7 +25,10 @@ export class ExternalCustomersService {
     private readonly configService: ConfigService,
   ) {}
 
-  async listOptions(q?: string, limit = 100): Promise<ExternalCustomerOptionDto[]> {
+  async listOptions(
+    q?: string,
+    limit = 100,
+  ): Promise<ExternalCustomerOptionDto[]> {
     const cappedLimit = Math.min(Math.max(limit, 1), 200);
     const query = this.userRepository
       .createQueryBuilder('user')
@@ -38,7 +41,7 @@ export class ExternalCustomersService {
     const term = q?.trim();
     if (term) {
       query.andWhere(
-        '(LOWER(user.fullName) LIKE :term OR LOWER(user.email) LIKE :term OR LOWER(COALESCE(user.company, \'\')) LIKE :term)',
+        "(LOWER(user.fullName) LIKE :term OR LOWER(user.email) LIKE :term OR LOWER(COALESCE(user.company, '')) LIKE :term)",
         { term: `%${term.toLowerCase()}%` },
       );
     }
@@ -66,13 +69,17 @@ export class ExternalCustomersService {
       throw new BadRequestException('Authenticated staff user not found');
     }
     if (!staff.isInternal()) {
-      throw new BadRequestException('Only internal staff can create customer accounts');
+      throw new BadRequestException(
+        'Only internal staff can create customer accounts',
+      );
     }
 
     const role = await this.resolveExternalCustomerRole();
     const fullName = dto.fullName.trim();
     const email = await this.allocatePlaceholderEmail(fullName);
-    const saltRounds = Number(this.configService.get<string>('BCRYPT_SALT_ROUNDS', '12'));
+    const saltRounds = Number(
+      this.configService.get<string>('BCRYPT_SALT_ROUNDS', '12'),
+    );
     const password = await bcrypt.hash(
       randomBytes(32).toString('hex'),
       Number.isFinite(saltRounds) && saltRounds >= 10 ? saltRounds : 12,
@@ -110,7 +117,9 @@ export class ExternalCustomersService {
       this.configService.get<string>('EXTERNAL_CUSTOMER_ROLE_ID', '4'),
     );
     if (Number.isFinite(configuredId) && configuredId > 0) {
-      const byId = await this.roleRepository.findOne({ where: { id: configuredId } });
+      const byId = await this.roleRepository.findOne({
+        where: { id: configuredId },
+      });
       if (byId) {
         if (byId.roleGroup !== RoleGroup.EXTERNAL) {
           throw new BadRequestException(
@@ -138,7 +147,10 @@ export class ExternalCustomersService {
   /** Login not expected; unique placeholder satisfies DB constraint. */
   private async allocatePlaceholderEmail(fullName: string): Promise<string> {
     const domain = this.configService
-      .get<string>('EXTERNAL_CUSTOMER_PLACEHOLDER_EMAIL_DOMAIN', 'customers.seatrans.local')
+      .get<string>(
+        'EXTERNAL_CUSTOMER_PLACEHOLDER_EMAIL_DOMAIN',
+        'customers.seatrans.local',
+      )
       .trim()
       .toLowerCase();
     const slug = fullName
@@ -157,6 +169,8 @@ export class ExternalCustomersService {
       }
     }
 
-    throw new ConflictException('Could not allocate a unique placeholder email');
+    throw new ConflictException(
+      'Could not allocate a unique placeholder email',
+    );
   }
 }

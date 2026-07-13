@@ -22,17 +22,27 @@ export class ServiceTypesService {
     private readonly commodityRepository: Repository<Commodity>,
   ) {}
 
-  async getAll(limit = ServiceTypesService.DEFAULT_LIMIT): Promise<ServiceTypeDto[]> {
-    const rows = await this.serviceTypeRepository.find({ order: { name: 'ASC' } });
-    return rows.slice(0, this.sanitizeLimit(limit)).map((item) => this.toDto(item));
+  async getAll(
+    limit = ServiceTypesService.DEFAULT_LIMIT,
+  ): Promise<ServiceTypeDto[]> {
+    const rows = await this.serviceTypeRepository.find({
+      order: { name: 'ASC' },
+    });
+    return rows
+      .slice(0, this.sanitizeLimit(limit))
+      .map((item) => this.toDto(item));
   }
 
-  async getActive(limit = ServiceTypesService.DEFAULT_LIMIT): Promise<ServiceTypeDto[]> {
+  async getActive(
+    limit = ServiceTypesService.DEFAULT_LIMIT,
+  ): Promise<ServiceTypeDto[]> {
     const rows = await this.serviceTypeRepository.find({
       where: { isActive: true },
       order: { name: 'ASC' },
     });
-    return rows.slice(0, this.sanitizeLimit(limit)).map((item) => this.toDto(item));
+    return rows
+      .slice(0, this.sanitizeLimit(limit))
+      .map((item) => this.toDto(item));
   }
 
   async search(query?: string): Promise<ServiceTypeDto[]> {
@@ -44,7 +54,9 @@ export class ServiceTypesService {
     const rows = await this.serviceTypeRepository
       .createQueryBuilder('serviceType')
       .where('serviceType.is_active = :active', { active: true })
-      .andWhere('LOWER(serviceType.name) LIKE :q', { q: `%${normalizedQuery.toLowerCase()}%` })
+      .andWhere('LOWER(serviceType.name) LIKE :q', {
+        q: `%${normalizedQuery.toLowerCase()}%`,
+      })
       .orderBy('serviceType.name', 'ASC')
       .getMany();
 
@@ -67,7 +79,9 @@ export class ServiceTypesService {
       throw new BadRequestException('name and displayName are required');
     }
 
-    const duplicate = await this.serviceTypeRepository.findOne({ where: { name } });
+    const duplicate = await this.serviceTypeRepository.findOne({
+      where: { name },
+    });
     if (duplicate) {
       throw new ConflictException('Service type already exists');
     }
@@ -95,7 +109,9 @@ export class ServiceTypesService {
       throw new BadRequestException('name and displayName are required');
     }
 
-    const duplicate = await this.serviceTypeRepository.findOne({ where: { name } });
+    const duplicate = await this.serviceTypeRepository.findOne({
+      where: { name },
+    });
     if (duplicate && duplicate.id !== id) {
       throw new ConflictException('Service type name already exists');
     }
@@ -114,9 +130,13 @@ export class ServiceTypesService {
       throw new NotFoundException('Service type not found');
     }
 
-    const commodityCount = await this.commodityRepository.count({ where: { serviceTypeId: id } });
+    const commodityCount = await this.commodityRepository.count({
+      where: { serviceTypeId: id },
+    });
     if (commodityCount > 0) {
-      throw new ConflictException('Cannot delete service type with existing commodities');
+      throw new ConflictException(
+        'Cannot delete service type with existing commodities',
+      );
     }
 
     await this.serviceTypeRepository.delete(id);

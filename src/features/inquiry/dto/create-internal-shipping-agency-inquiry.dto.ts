@@ -6,14 +6,16 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumber,
-  IsObject,
   IsOptional,
   IsString,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
-
-const QUOTE_FORMS = ['HCM', 'QN'] as const;
+import {
+  EPDA_QUOTE_FORMS,
+  type EpdaQuoteForm,
+} from '../constants/epda-quote-form';
 
 /**
  * Internal-only: create shipping agency inquiry with EPDA fields pre-filled.
@@ -29,15 +31,21 @@ export class CreateInternalShippingAgencyInquiryDto {
   @MaxLength(2000)
   notes?: string;
 
+  @ValidateIf(
+    (dto: CreateInternalShippingAgencyInquiryDto) => dto.isComplete !== false,
+  )
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
-  shipownerTo!: string;
+  shipownerTo?: string | null;
 
+  @ValidateIf(
+    (dto: CreateInternalShippingAgencyInquiryDto) => dto.isComplete !== false,
+  )
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
-  vesselName!: string;
+  vesselName?: string | null;
 
   @IsOptional()
   @Type(() => Number)
@@ -54,6 +62,11 @@ export class CreateInternalShippingAgencyInquiryDto {
   @IsNumber()
   loa?: number;
 
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  portId!: number;
+
   @IsOptional()
   @IsDateString()
   eta?: string;
@@ -68,22 +81,63 @@ export class CreateInternalShippingAgencyInquiryDto {
 
   @IsOptional()
   @IsString()
+  cargoNameOther?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  quantityTons?: number;
+
+  @IsOptional()
+  @IsString()
   frtTaxType?: string;
 
   @IsOptional()
   @IsString()
   purposeOfCalling?: string;
 
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  portOfCall!: string;
+  portOfCall?: string;
 
+  @ValidateIf(
+    (dto: CreateInternalShippingAgencyInquiryDto) => dto.isComplete !== false,
+  )
   @IsString()
   @IsNotEmpty()
-  dischargeLoadingLocation!: string;
+  dischargeLoadingLocation?: string | null;
 
-  @IsIn(QUOTE_FORMS)
-  quoteForm!: (typeof QUOTE_FORMS)[number];
+  @IsOptional()
+  @IsIn(EPDA_QUOTE_FORMS)
+  quoteForm?: EpdaQuoteForm;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  boatHireAmount?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  tallyFeeAmount?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  tugAssistanceAmount?: number;
+
+  @IsOptional()
+  @IsString()
+  transportLs?: string;
+
+  @IsOptional()
+  @IsString()
+  transportQuarantine?: string;
 
   @IsOptional()
   @IsDateString()
@@ -154,10 +208,6 @@ export class CreateInternalShippingAgencyInquiryDto {
   @IsNumber()
   @Min(0)
   shorecraneHireUsdPerMt?: number;
-
-  @IsOptional()
-  @IsObject()
-  epdaSnapshot?: Record<string, unknown>;
 
   /**
    * Whether all required EPDA fields are filled (computed by the admin UI).

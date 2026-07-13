@@ -43,14 +43,19 @@ export class PostsService {
       .orderBy('post.published_at', 'DESC');
 
     if (categorySlug?.trim()) {
-      qb.andWhere('LOWER(category.slug) = :slug', { slug: categorySlug.trim().toLowerCase() });
+      qb.andWhere('LOWER(category.slug) = :slug', {
+        slug: categorySlug.trim().toLowerCase(),
+      });
     }
 
     const normalizedSearch = search?.trim();
     if (normalizedSearch) {
-      qb.andWhere('(LOWER(post.title) LIKE :q OR LOWER(post.content) LIKE :q)', {
-        q: `%${normalizedSearch.toLowerCase()}%`,
-      });
+      qb.andWhere(
+        '(LOWER(post.title) LIKE :q OR LOWER(post.content) LIKE :q)',
+        {
+          q: `%${normalizedSearch.toLowerCase()}%`,
+        },
+      );
       // Search requests can return full matching records.
       const rows = await qb.getMany();
       return rows.map((item) => this.toDto(item));
@@ -118,7 +123,9 @@ export class PostsService {
     return row;
   }
 
-  async getAdminList(limit = PostsService.DEFAULT_LIMIT): Promise<PostResponseDto[]> {
+  async getAdminList(
+    limit = PostsService.DEFAULT_LIMIT,
+  ): Promise<PostResponseDto[]> {
     const rows = await this.postRepository.find({
       order: { updatedAt: 'DESC' },
       take: this.sanitizeLimit(limit),
@@ -252,7 +259,9 @@ export class PostsService {
       return [];
     }
 
-    const rows = await this.categoryRepository.find({ where: { id: In(categoryIds) } });
+    const rows = await this.categoryRepository.find({
+      where: { id: In(categoryIds) },
+    });
     if (rows.length !== categoryIds.length) {
       throw new BadRequestException('Some categories were not found');
     }

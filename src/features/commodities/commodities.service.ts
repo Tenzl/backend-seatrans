@@ -19,13 +19,17 @@ export class CommoditiesService {
     private readonly commodityRepository: Repository<Commodity>,
   ) {}
 
-  async getActive(limit = CommoditiesService.DEFAULT_LIST_LIMIT): Promise<CommodityDto[]> {
+  async getActive(
+    limit = CommoditiesService.DEFAULT_LIST_LIMIT,
+  ): Promise<CommodityDto[]> {
     const commodities = await this.commodityRepository.find({
       where: { isActive: true },
       order: { name: 'ASC' },
     });
 
-    return commodities.slice(0, this.sanitizeLimit(limit)).map((item) => this.toDto(item));
+    return commodities
+      .slice(0, this.sanitizeLimit(limit))
+      .map((item) => this.toDto(item));
   }
 
   async getByServiceType(
@@ -37,7 +41,9 @@ export class CommoditiesService {
       order: { name: 'ASC' },
     });
 
-    return commodities.slice(0, this.sanitizeLimit(limit)).map((item) => this.toDto(item));
+    return commodities
+      .slice(0, this.sanitizeLimit(limit))
+      .map((item) => this.toDto(item));
   }
 
   async search(query?: string): Promise<CommodityDto[]> {
@@ -60,7 +66,10 @@ export class CommoditiesService {
     return commodities.map((item) => this.toDto(item));
   }
 
-  async searchByServiceType(serviceTypeId: number, query?: string): Promise<CommodityDto[]> {
+  async searchByServiceType(
+    serviceTypeId: number,
+    query?: string,
+  ): Promise<CommodityDto[]> {
     const normalizedQuery = query?.trim();
     if (!normalizedQuery) {
       return this.getByServiceType(serviceTypeId);
@@ -81,12 +90,16 @@ export class CommoditiesService {
     return commodities.map((item) => this.toDto(item));
   }
 
-  async getAllAdmin(limit = CommoditiesService.DEFAULT_LIST_LIMIT): Promise<CommodityDto[]> {
+  async getAllAdmin(
+    limit = CommoditiesService.DEFAULT_LIST_LIMIT,
+  ): Promise<CommodityDto[]> {
     const commodities = await this.commodityRepository.find({
       order: { name: 'ASC' },
     });
 
-    return commodities.slice(0, this.sanitizeLimit(limit)).map((item) => this.toDto(item));
+    return commodities
+      .slice(0, this.sanitizeLimit(limit))
+      .map((item) => this.toDto(item));
   }
 
   async getById(id: number): Promise<CommodityDto> {
@@ -101,7 +114,9 @@ export class CommoditiesService {
     const normalizedName = dto.name?.trim();
     const normalizedDisplayName = dto.displayName?.trim();
     if (!normalizedName || !normalizedDisplayName) {
-      throw new BadRequestException('Commodity name and displayName are required');
+      throw new BadRequestException(
+        'Commodity name and displayName are required',
+      );
     }
 
     const duplicate = await this.commodityRepository.findOne({
@@ -109,7 +124,9 @@ export class CommoditiesService {
     });
 
     if (duplicate) {
-      throw new ConflictException('Commodity already exists in this service type');
+      throw new ConflictException(
+        'Commodity already exists in this service type',
+      );
     }
 
     const commodity = this.commodityRepository.create({
@@ -135,7 +152,9 @@ export class CommoditiesService {
     const normalizedName = dto.name?.trim();
     const normalizedDisplayName = dto.displayName?.trim();
     if (!normalizedName || !normalizedDisplayName) {
-      throw new BadRequestException('Commodity name and displayName are required');
+      throw new BadRequestException(
+        'Commodity name and displayName are required',
+      );
     }
 
     const duplicate = await this.commodityRepository.findOne({
@@ -143,14 +162,17 @@ export class CommoditiesService {
     });
 
     if (duplicate && duplicate.id !== id) {
-      throw new ConflictException('Commodity already exists in this service type');
+      throw new ConflictException(
+        'Commodity already exists in this service type',
+      );
     }
 
     commodity.serviceTypeId = dto.serviceTypeId;
     commodity.name = normalizedName;
     commodity.displayName = normalizedDisplayName;
     commodity.description = dto.description?.trim() || null;
-    commodity.requiredImageCount = dto.requiredImageCount ?? commodity.requiredImageCount;
+    commodity.requiredImageCount =
+      dto.requiredImageCount ?? commodity.requiredImageCount;
     // Only re-validate when a cargo type is explicitly sent. Editing a legacy
     // commodity (junk stored type) without touching it keeps its value as-is
     // rather than failing the save.
@@ -206,7 +228,9 @@ export class CommoditiesService {
         ? 'IN_BULK'
         : key === 'EQUIPMENT' || key === 'INEQUIPMENT'
           ? 'IN_EQUIPMENT'
-          : ['IN_BAGS', 'INBAGS', 'BAG_PACK', 'BAGPACK', 'INBAGPACK'].includes(key)
+          : ['IN_BAGS', 'INBAGS', 'BAG_PACK', 'BAGPACK', 'INBAGPACK'].includes(
+                key,
+              )
             ? 'IN_BAG_PACK'
             : key;
 

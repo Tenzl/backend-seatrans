@@ -1,4 +1,12 @@
-import { Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { LimitQueryDto } from '../../shared/dto/list-query.dto';
 import { PostsService } from './posts.service';
 import { PublishedPostsQueryDto } from './dto/published-posts-query.dto';

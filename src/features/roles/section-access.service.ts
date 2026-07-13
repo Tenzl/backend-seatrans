@@ -6,7 +6,10 @@ import { SECTION_KEYS } from './section-catalog';
 
 /** Normalize a backend role name ("ROLE_ADMIN", "Admin") → "ADMIN". */
 function normalizeRoleName(role?: string | null): string {
-  return (role ?? '').trim().toUpperCase().replace(/^ROLE_/, '');
+  return (role ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/^ROLE_/, '');
 }
 
 /** Admin roles always have full access (anti-lockout); never gated by config. */
@@ -14,7 +17,9 @@ export function isAdminRoleName(role?: string | null): boolean {
   return normalizeRoleName(role).includes('ADMIN');
 }
 
-type UserLike = { role?: { id?: number | null; name?: string | null } | null };
+export type UserLike = {
+  role?: { id?: number | null; name?: string | null } | null;
+};
 
 @Injectable()
 export class SectionAccessService {

@@ -109,7 +109,9 @@ export class BookingShippingService {
     return this.toResponse(saved);
   }
 
-  private async getShippingByPartnerId(partnerId: number): Promise<BookingShipping | null> {
+  private async getShippingByPartnerId(
+    partnerId: number,
+  ): Promise<BookingShipping | null> {
     return this.shippingRepository.findOne({
       where: { bookingPartner: { id: partnerId } },
       relations: {
@@ -132,7 +134,9 @@ export class BookingShippingService {
   }
 
   private async requirePartner(partnerId: number): Promise<BookingPartner> {
-    const partner = await this.partnerRepository.findOne({ where: { id: partnerId } });
+    const partner = await this.partnerRepository.findOne({
+      where: { id: partnerId },
+    });
     if (!partner) {
       throw new NotFoundException('Partner not found');
     }
@@ -151,7 +155,10 @@ export class BookingShippingService {
     }
   }
 
-  private async applyScalars(row: BookingShipping, dto: UpsertBookingShippingDto): Promise<void> {
+  private async applyScalars(
+    row: BookingShipping,
+    dto: UpsertBookingShippingDto,
+  ): Promise<void> {
     row.bookingNo = this.trimToNull(dto.bookingNo);
     row.bookingTo = this.trimToNull(dto.bookingTo);
     row.bookingNumberReference = this.trimToNull(dto.bookingNumberReference);
@@ -180,7 +187,9 @@ export class BookingShippingService {
 
     row.portOfDischargePort = await this.resolvePort(dto.portOfDischargePortId);
     row.placeOfDeliveryPort = await this.resolvePort(dto.placeOfDeliveryPortId);
-    row.finalDestinationPort = await this.resolvePort(dto.finalDestinationPortId);
+    row.finalDestinationPort = await this.resolvePort(
+      dto.finalDestinationPortId,
+    );
     row.eta = this.toDateTime(dto.eta);
 
     row.volume = this.trimToNull(dto.volume);
@@ -203,7 +212,9 @@ export class BookingShippingService {
 
     for (const leg of transitLegs) {
       if (leg.portId == null || leg.sortOrder == null) {
-        throw new BadRequestException('Each transit leg requires portId and sortOrder');
+        throw new BadRequestException(
+          'Each transit leg requires portId and sortOrder',
+        );
       }
 
       const port = await this.resolveRequiredPort(leg.portId);
@@ -285,7 +296,9 @@ export class BookingShippingService {
     };
   }
 
-  private toTransitLegResponses(rows: BookingTransitPort[]): BookingTransitLegResponseDto[] {
+  private toTransitLegResponses(
+    rows: BookingTransitPort[],
+  ): BookingTransitLegResponseDto[] {
     return (rows ?? [])
       .slice()
       .sort((a, b) => a.sortOrder - b.sortOrder)

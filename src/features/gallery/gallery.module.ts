@@ -10,7 +10,9 @@ import { GalleryAdminController } from './gallery-admin.controller';
 import { CloudinaryService } from '../../shared/services/cloudinary.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([GalleryImage, Commodity, Province, Port])],
+  imports: [
+    TypeOrmModule.forFeature([GalleryImage, Commodity, Province, Port]),
+  ],
   providers: [GalleryService, CloudinaryService],
   controllers: [GalleryController, GalleryAdminController],
 })

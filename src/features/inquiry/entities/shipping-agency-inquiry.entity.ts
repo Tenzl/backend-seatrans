@@ -1,11 +1,17 @@
 import { Entity, Column, JoinColumn, ManyToOne } from 'typeorm';
 import { BaseInquiry } from './base-inquiry.entity';
 import { User } from '../../auth/entities/user.entity';
+import { Port } from '../../ports/entities/port.entity';
 
 @Entity('shipping_agency_inquiries')
 export class ShippingAgencyInquiryEntity extends BaseInquiry {
   // Customer-visible shipping agency fields
-  @Column({ name: 'shipowner_to', type: 'varchar', length: 255, nullable: true })
+  @Column({
+    name: 'shipowner_to',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
   toName!: string | null;
 
   @Column({ name: 'mv', type: 'varchar', length: 255, nullable: true })
@@ -29,31 +35,81 @@ export class ShippingAgencyInquiryEntity extends BaseInquiry {
   @Column({ name: 'cargo_name', type: 'varchar', length: 255, nullable: true })
   cargoName!: string | null;
 
-  @Column({ name: 'cargo_name_other', type: 'varchar', length: 255, nullable: true })
+  @Column({
+    name: 'cargo_name_other',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
   cargoNameOther!: string | null;
 
-  @Column({ name: 'cargo_quantity', type: 'varchar', length: 255, nullable: true })
+  @Column({
+    name: 'cargo_quantity',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
   cargoQuantity!: string | null;
 
   @Column({ name: 'frt_tax_type', type: 'varchar', length: 64, nullable: true })
   frtTaxType!: string | null;
 
-  @Column({ name: 'purpose_of_calling', type: 'varchar', length: 64, nullable: true })
+  @Column({
+    name: 'purpose_of_calling',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
   purposeOfCalling!: string | null;
 
-  @Column({ name: 'port_of_call', type: 'varchar', length: 255, nullable: true })
+  @Column({
+    name: 'port_of_call',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
   portOfCall!: string | null;
 
-  @Column({ name: 'discharge_loading_location', type: 'varchar', length: 64, nullable: true })
+  @ManyToOne(() => Port, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'port_id' })
+  port!: Port | null;
+
+  @Column({ name: 'port_id', type: 'int', nullable: true })
+  portId!: number | null;
+
+  @Column({
+    name: 'discharge_loading_location',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
   dischargeLoadingLocation!: string | null;
 
-  @Column({ name: 'boat_hire_amount', type: 'decimal', precision: 15, scale: 2, nullable: true })
+  @Column({
+    name: 'boat_hire_amount',
+    type: 'decimal',
+    precision: 15,
+    scale: 2,
+    nullable: true,
+  })
   boatHireAmount!: string | null;
 
-  @Column({ name: 'tally_fee_amount', type: 'decimal', precision: 15, scale: 2, nullable: true })
+  @Column({
+    name: 'tally_fee_amount',
+    type: 'decimal',
+    precision: 15,
+    scale: 2,
+    nullable: true,
+  })
   tallyFeeAmount!: string | null;
 
-  @Column({ name: 'tug_assistance_amount', type: 'decimal', precision: 15, scale: 2, nullable: true })
+  @Column({
+    name: 'tug_assistance_amount',
+    type: 'decimal',
+    precision: 15,
+    scale: 2,
+    nullable: true,
+  })
   tugAssistanceAmount!: string | null;
 
   @Column({
@@ -77,13 +133,31 @@ export class ShippingAgencyInquiryEntity extends BaseInquiry {
   @Column({ name: 'quote_form', type: 'varchar', length: 10, nullable: true })
   quoteForm!: string | null;
 
-  @Column({ name: 'berth_hours', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({
+    name: 'berth_hours',
+    type: 'decimal',
+    precision: 10,
+    scale: 2,
+    nullable: true,
+  })
   berthHours!: string | null;
 
-  @Column({ name: 'anchorage_hours', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({
+    name: 'anchorage_hours',
+    type: 'decimal',
+    precision: 10,
+    scale: 2,
+    nullable: true,
+  })
   anchorageHours!: string | null;
 
-  @Column({ name: 'pilotage_3rd_miles', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({
+    name: 'pilotage_3rd_miles',
+    type: 'decimal',
+    precision: 10,
+    scale: 2,
+    nullable: true,
+  })
   pilotage3rdMiles!: string | null;
 
   // Internal-only EPDA pricing / template inputs (never returned on customer APIs).
@@ -94,7 +168,12 @@ export class ShippingAgencyInquiryEntity extends BaseInquiry {
   shipType!: string | null;
 
   /** OVERSEAS | VIETNAMESE — Vietnamese shipowners pay +8% VAT on selected tariff fees. */
-  @Column({ name: 'shipowner_nationality', type: 'varchar', length: 32, nullable: true })
+  @Column({
+    name: 'shipowner_nationality',
+    type: 'varchar',
+    length: 32,
+    nullable: true,
+  })
   shipownerNationality!: string | null;
 
   @Column({
@@ -106,16 +185,38 @@ export class ShippingAgencyInquiryEntity extends BaseInquiry {
   })
   oceanFrtRateUsdPerMt!: string | null;
 
-  @Column({ name: 'garbage_cbm_amount', type: 'decimal', precision: 15, scale: 4, nullable: true })
+  @Column({
+    name: 'garbage_cbm_amount',
+    type: 'decimal',
+    precision: 15,
+    scale: 4,
+    nullable: true,
+  })
   garbageCbmAmount!: string | null;
 
-  @Column({ name: 'garbage_usd_rate', type: 'decimal', precision: 15, scale: 4, nullable: true })
+  @Column({
+    name: 'garbage_usd_rate',
+    type: 'decimal',
+    precision: 15,
+    scale: 4,
+    nullable: true,
+  })
   garbageUsdRate!: string | null;
 
-  @Column({ name: 'quarantine_cargo_mode', type: 'varchar', length: 32, nullable: true })
+  @Column({
+    name: 'quarantine_cargo_mode',
+    type: 'varchar',
+    length: 32,
+    nullable: true,
+  })
   quarantineCargoMode!: string | null;
 
-  @Column({ name: 'agency_fee_mode', type: 'varchar', length: 64, nullable: true })
+  @Column({
+    name: 'agency_fee_mode',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
   agencyFeeMode!: string | null;
 
   @Column({
@@ -139,8 +240,19 @@ export class ShippingAgencyInquiryEntity extends BaseInquiry {
   @Column({ name: 'epda_snapshot', type: 'jsonb', nullable: true })
   epdaSnapshot!: Record<string, unknown> | null;
 
+  /**
+   * When set, EPDA field edits are forbidden and quote calc must use `epdaSnapshot`
+   * (frozen tariff params). Unlocked drafts always resolve live area/port params.
+   */
+  @Column({ name: 'epda_locked_at', type: 'timestamptz', nullable: true })
+  epdaLockedAt!: Date | null;
+
   /** Immutable copy of customer-portal field values at submit time. */
-  @Column({ name: 'customer_submitted_snapshot', type: 'jsonb', nullable: true })
+  @Column({
+    name: 'customer_submitted_snapshot',
+    type: 'jsonb',
+    nullable: true,
+  })
   customerSubmittedSnapshot!: Record<string, string> | null;
 
   @Column({ name: 'quoted_at', type: 'timestamptz', nullable: true })

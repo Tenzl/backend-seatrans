@@ -1,12 +1,27 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, Get, Request, UseGuards, Patch, Res, UnauthorizedException } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  HttpCode,
+  HttpStatus,
+  Get,
+  Req,
+  UseGuards,
+  Patch,
+  Res,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { AuthGuard } from '@nestjs/passport';
-import type { Response } from 'express';
+import type { CookieOptions, Request, Response } from 'express';
 import { SessionExchangeDto } from './dto/session-exchange.dto';
 import { SectionAccessService } from '../roles/section-access.service';
+import { User } from './entities/user.entity';
+
+type AuthenticatedRequest = Request & { user: User };
 
 @Controller('v1/auth')
 export class AuthController {
@@ -17,7 +32,10 @@ export class AuthController {
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
-  async register(@Body() registerDto: RegisterDto, @Res({ passthrough: true }) res: Response) {
+  async register(
+    @Body() registerDto: RegisterDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const auth = await this.authService.register(registerDto);
     this.setAuthCookie(res, auth.token);
     return auth;
@@ -25,7 +43,10 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  async login(@Body() loginDto: LoginDto, @Res({ passthrough: true }) res: Response) {
+  async login(
+    @Body() loginDto: LoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const auth = await this.authService.login(loginDto);
     this.setAuthCookie(res, auth.token);
     return auth;
@@ -58,7 +79,7 @@ export class AuthController {
 
   @UseGuards(AuthGuard('jwt'))
   @Get(['me', 'current-user'])
-  async getProfile(@Request() req: any) {
+  async getProfile(@Req() req: AuthenticatedRequest) {
     const user = this.authService.toPublicUser(req.user);
     // Dashboard section keys this user's role may access — drives nav + route
     // gating on the frontend (admins implicitly get the whole catalog).
@@ -68,7 +89,7 @@ export class AuthController {
 
   @UseGuards(AuthGuard('jwt'))
   @Patch('me')
-  async updateMe(@Request() req: any, @Body() dto: UpdateMeDto) {
+  async updateMe(@Req() req: AuthenticatedRequest, @Body() dto: UpdateMeDto) {
     return this.authService.updateMe(req.user.id, dto);
   }
 
@@ -76,12 +97,12 @@ export class AuthController {
     res.cookie('auth_token', token, this.cookieOptions());
   }
 
-  private cookieOptions() {
+  private cookieOptions(): CookieOptions {
     const isProd = process.env.NODE_ENV === 'production';
     return {
       httpOnly: true,
       secure: isProd,
-      sameSite: (isProd ? 'none' : 'lax') as 'none' | 'lax',
+      sameSite: isProd ? 'none' : 'lax',
       path: '/',
       maxAge: 1000 * 60 * 60 * 24, // 1 day
     };

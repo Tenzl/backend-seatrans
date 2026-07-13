@@ -15,7 +15,12 @@ export class InquiryDocument {
   @PrimaryGeneratedColumn()
   id!: number;
 
-  @Column({ name: 'service_slug', type: 'varchar', length: 100, nullable: false })
+  @Column({
+    name: 'service_slug',
+    type: 'varchar',
+    length: 100,
+    nullable: false,
+  })
   serviceSlug!: string;
 
   @Column({ name: 'target_id', type: 'bigint', nullable: false })
@@ -32,7 +37,12 @@ export class InquiryDocument {
   @Column({ name: 'file_name', type: 'varchar', length: 255, nullable: false })
   fileName!: string;
 
-  @Column({ name: 'original_file_name', type: 'varchar', length: 255, nullable: false })
+  @Column({
+    name: 'original_file_name',
+    type: 'varchar',
+    length: 255,
+    nullable: false,
+  })
   originalFileName!: string;
 
   @Column({ name: 'file_path', type: 'varchar', length: 512, nullable: false })
@@ -63,7 +73,12 @@ export class InquiryDocument {
   @Column({ name: 'checksum', type: 'varchar', length: 64, nullable: true })
   checksum!: string | null;
 
-  @Column({ name: 'is_active', type: 'boolean', nullable: false, default: true })
+  @Column({
+    name: 'is_active',
+    type: 'boolean',
+    nullable: false,
+    default: true,
+  })
   isActive!: boolean;
 
   @CreateDateColumn({ name: 'uploaded_at' })

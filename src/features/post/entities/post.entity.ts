@@ -32,10 +32,20 @@ export class PostEntity {
   @JoinColumn({ name: 'author_id' })
   author!: User;
 
-  @Column({ name: 'thumbnail_url', type: 'varchar', length: 500, nullable: true })
+  @Column({
+    name: 'thumbnail_url',
+    type: 'varchar',
+    length: 500,
+    nullable: true,
+  })
   thumbnailUrl!: string | null;
 
-  @Column({ name: 'thumbnail_public_id', type: 'varchar', length: 255, nullable: true })
+  @Column({
+    name: 'thumbnail_public_id',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
   thumbnailPublicId!: string | null;
 
   @Column({ name: 'published_at', type: 'timestamp', nullable: true })

@@ -9,7 +9,11 @@ import { DataSource, Repository } from 'typeorm';
 import { Role } from '../auth/entities/role.entity';
 import { User } from '../auth/entities/user.entity';
 import { RoleSectionAccess } from './entities/role-section-access.entity';
-import { GRANTABLE_SECTION_KEYS, SECTION_CATALOG, SECTION_KEYS } from './section-catalog';
+import {
+  GRANTABLE_SECTION_KEYS,
+  SECTION_CATALOG,
+  SECTION_KEYS,
+} from './section-catalog';
 import { isAdminRoleName } from './section-access.service';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
@@ -45,11 +49,15 @@ export class RolesAdminService {
     if (!sections?.length) return [];
     const invalid = sections.filter((k) => !SECTION_KEYS.includes(k));
     if (invalid.length) {
-      throw new BadRequestException(`Unknown section(s): ${invalid.join(', ')}`);
+      throw new BadRequestException(
+        `Unknown section(s): ${invalid.join(', ')}`,
+      );
     }
     // Admin-only sections (users, roles) are privilege boundaries — they cannot
     // be granted to a role, even via a hand-crafted request.
-    const forbidden = sections.filter((k) => !GRANTABLE_SECTION_KEYS.includes(k));
+    const forbidden = sections.filter(
+      (k) => !GRANTABLE_SECTION_KEYS.includes(k),
+    );
     if (forbidden.length) {
       throw new BadRequestException(
         `These sections can't be granted: ${forbidden.join(', ')}`,
@@ -60,7 +68,7 @@ export class RolesAdminService {
 
   async listRoles(): Promise<RoleWithAccess[]> {
     const roles = await this.roleRepo.find({
-      order: { roleGroup: 'ASC' as any, name: 'ASC' as any },
+      order: { roleGroup: 'ASC', name: 'ASC' },
     });
 
     // One grouped query for user counts, one fetch for section rows — no N+1.
@@ -94,7 +102,9 @@ export class RolesAdminService {
         isAdmin,
         userCount: countByRole.get(r.id) ?? 0,
         // Admins implicitly hold every section (bypass) — reflect that to the UI.
-        sections: isAdmin ? [...SECTION_KEYS] : sectionsByRole.get(r.id) ?? [],
+        sections: isAdmin
+          ? [...SECTION_KEYS]
+          : (sectionsByRole.get(r.id) ?? []),
       };
     });
   }
@@ -135,10 +145,12 @@ export class RolesAdminService {
           id,
         })
         .getOne();
-      if (clash) throw new ConflictException('A role with this name already exists');
+      if (clash)
+        throw new ConflictException('A role with this name already exists');
       role.name = name;
     }
-    if (dto.description !== undefined) role.description = dto.description.trim();
+    if (dto.description !== undefined)
+      role.description = dto.description.trim();
     if (dto.roleGroup !== undefined) role.roleGroup = dto.roleGroup;
     await this.roleRepo.save(role);
 
@@ -178,7 +190,10 @@ export class RolesAdminService {
   }
 
   /** Replace a role's section set atomically (delete-all then insert). */
-  private async replaceSections(roleId: number, sections: string[]): Promise<void> {
+  private async replaceSections(
+    roleId: number,
+    sections: string[],
+  ): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
       await manager.delete(RoleSectionAccess, { roleId });
       if (sections.length) {

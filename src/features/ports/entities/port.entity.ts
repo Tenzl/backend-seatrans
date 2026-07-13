@@ -27,10 +27,22 @@ export class Port {
   @Column({ name: 'zone_code', type: 'varchar', length: 50, nullable: true })
   zoneCode!: string | null;
 
-  @Column({ name: 'longitude', type: 'decimal', precision: 15, scale: 8, nullable: true })
+  @Column({
+    name: 'longitude',
+    type: 'decimal',
+    precision: 15,
+    scale: 8,
+    nullable: true,
+  })
   longitude!: string | null;
 
-  @Column({ name: 'latitude', type: 'decimal', precision: 15, scale: 8, nullable: true })
+  @Column({
+    name: 'latitude',
+    type: 'decimal',
+    precision: 15,
+    scale: 8,
+    nullable: true,
+  })
   latitude!: string | null;
 
   @Column({ name: 'country_code', type: 'varchar', length: 10, nullable: true })

@@ -13,6 +13,7 @@ export enum InquiryFieldChangeAction {
   EPDA_CREATE = 'EPDA_CREATE',
   EPDA_SAVE_DRAFT = 'EPDA_SAVE_DRAFT',
   EPDA_ISSUE = 'EPDA_ISSUE',
+  EPDA_LOCK = 'EPDA_LOCK',
 }
 
 @Entity('shipping_agency_field_change_logs')

@@ -16,7 +16,12 @@ export class Province {
   @Column({ unique: true, length: 100 })
   name!: string;
 
-  @Column({ name: 'display_name', type: 'varchar', length: 100, nullable: true })
+  @Column({
+    name: 'display_name',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
   displayName!: string | null;
 
   @Column({ type: 'integer', unique: true, nullable: true })

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import { ConfirmedCustomerFieldChangeDto } from '../dto/confirmed-customer-field-change.dto';
 import {
   InquiryFieldChangeAction,
@@ -46,12 +46,19 @@ export class InquiryFieldChangeService {
     inquiryId: number,
     actorUserId: number,
     action: InquiryFieldChangeAction,
-    changes: Array<{ field: string; previousValue: string | null; newValue: string | null }>,
+    changes: Array<{
+      field: string;
+      previousValue: string | null;
+      newValue: string | null;
+    }>,
+    manager?: EntityManager,
   ): Promise<void> {
+    const repository =
+      manager?.getRepository(InquiryFieldChangeLog) ?? this.logRepo;
     const rows = changes
       .filter((c) => (c.previousValue ?? null) !== (c.newValue ?? null))
       .map((c) =>
-        this.logRepo.create({
+        repository.create({
           inquiryId,
           fieldName: c.field,
           previousValue: c.previousValue ?? null,
@@ -61,7 +68,7 @@ export class InquiryFieldChangeService {
         }),
       );
     if (!rows.length) return;
-    await this.logRepo.save(rows);
+    await repository.save(rows);
   }
 
   async logConfirmedChanges(
@@ -70,8 +77,11 @@ export class InquiryFieldChangeService {
     action: InquiryFieldChangeAction,
     changes: ConfirmedCustomerFieldChangeDto[] | undefined,
     customerSubmittedSnapshot: Record<string, string> | null | undefined,
+    manager?: EntityManager,
   ): Promise<void> {
     if (!changes?.length) return;
+    const repository =
+      manager?.getRepository(InquiryFieldChangeLog) ?? this.logRepo;
 
     const rows = changes.map((change) => {
       const original =
@@ -79,7 +89,7 @@ export class InquiryFieldChangeService {
         change.previousValue ??
         null;
 
-      return this.logRepo.create({
+      return repository.create({
         inquiryId,
         fieldName: change.field,
         previousValue: original,
@@ -89,7 +99,7 @@ export class InquiryFieldChangeService {
       });
     });
 
-    await this.logRepo.save(rows);
+    await repository.save(rows);
   }
 
   async listForInquiry(
@@ -109,7 +119,8 @@ export class InquiryFieldChangeService {
       take: safeSize,
     });
 
-    const totalPages = totalElements === 0 ? 0 : Math.ceil(totalElements / safeSize);
+    const totalPages =
+      totalElements === 0 ? 0 : Math.ceil(totalElements / safeSize);
 
     return {
       content: rows.map((row) => {

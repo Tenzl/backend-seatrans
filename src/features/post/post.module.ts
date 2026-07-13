@@ -14,7 +14,9 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { CloudinaryService } from '../../shared/services/cloudinary.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([PostEntity, PostImageEntity, Category, User])],
+  imports: [
+    TypeOrmModule.forFeature([PostEntity, PostImageEntity, Category, User]),
+  ],
   providers: [PostsService, CategoriesService, RolesGuard, CloudinaryService],
   controllers: [
     PostsPublicController,

@@ -1,8 +1,9 @@
-import { Transform, Type } from 'class-transformer';
+import { Transform, Type, type TransformFnParams } from 'class-transformer';
 import {
   IsBoolean,
   IsDateString,
   IsIn,
+  IsInt,
   IsNumber,
   IsObject,
   IsOptional,
@@ -13,8 +14,10 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { ConfirmedCustomerFieldChangeDto } from './confirmed-customer-field-change.dto';
-
-const QUOTE_FORMS = ['HCM', 'QN'] as const;
+import {
+  EPDA_QUOTE_FORMS,
+  type EpdaQuoteForm,
+} from '../constants/epda-quote-form';
 const QUARANTINE_MODES = [
   'ONE_LEG',
   'TWO_LEG',
@@ -38,85 +41,97 @@ export class UpdateShippingAgencyEpdaDto {
   @IsOptional()
   @IsString()
   @MaxLength(255)
-  shipownerTo?: string;
+  shipownerTo?: string | null;
 
   @IsOptional()
   @IsString()
   @MaxLength(255)
-  vesselName?: string;
+  vesselName?: string | null;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  grt?: number;
+  grt?: number | null;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  dwt?: number;
+  dwt?: number | null;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  loa?: number;
+  loa?: number | null;
+
+  @IsOptional()
+  @Transform(({ value }: TransformFnParams) => {
+    const input: unknown = value;
+    if (input === null || input === '') return null;
+    const parsed = Number(input);
+    return Number.isInteger(parsed) ? parsed : input;
+  })
+  @IsInt()
+  @Min(1)
+  portId?: number | null;
 
   @IsOptional()
   @IsDateString()
-  eta?: string;
+  eta?: string | null;
 
   @IsOptional()
   @IsString()
-  cargoType?: string;
+  cargoType?: string | null;
 
   @IsOptional()
   @IsString()
-  cargoName?: string;
+  cargoName?: string | null;
 
   @IsOptional()
   @IsString()
-  cargoNameOther?: string;
+  cargoNameOther?: string | null;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  quantityTons?: number;
+  quantityTons?: number | null;
 
   @IsOptional()
   @IsString()
-  frtTaxType?: string;
+  frtTaxType?: string | null;
 
   @IsOptional()
   @IsString()
-  purposeOfCalling?: string;
+  purposeOfCalling?: string | null;
 
   @IsOptional()
   @IsString()
-  portOfCall?: string;
+  portOfCall?: string | null;
 
   @IsOptional()
   @IsString()
-  dischargeLoadingLocation?: string;
+  dischargeLoadingLocation?: string | null;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  boatHireAmount?: number;
+  boatHireAmount?: number | null;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  tallyFeeAmount?: number;
+  tallyFeeAmount?: number | null;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  tugAssistanceAmount?: number;
+  tugAssistanceAmount?: number | null;
 
   @IsOptional()
-  @Transform(({ value }) => {
-    if (value === null || value === undefined || value === '') return null
-    const n = Number(value)
-    return Number.isFinite(n) ? n : value
+  @Transform(({ value }: TransformFnParams) => {
+    const input: unknown = value;
+    if (input === null || input === undefined || input === '') return null;
+    const n = Number(input);
+    return Number.isFinite(n) ? n : input;
   })
   @ValidateIf((_, value) => value !== null && value !== undefined)
   @IsNumber()
@@ -125,84 +140,84 @@ export class UpdateShippingAgencyEpdaDto {
 
   @IsOptional()
   @IsString()
-  transportLs?: string;
+  transportLs?: string | null;
 
   @IsOptional()
   @IsString()
-  transportQuarantine?: string;
+  transportQuarantine?: string | null;
 
   @IsOptional()
-  @IsIn(QUOTE_FORMS)
-  quoteForm?: (typeof QUOTE_FORMS)[number];
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  berthHours?: number;
+  @IsIn(EPDA_QUOTE_FORMS)
+  quoteForm?: EpdaQuoteForm;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  anchorageHours?: number;
+  berthHours?: number | null;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  pilotage3rdMiles?: number;
+  anchorageHours?: number | null;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  pilotage3rdMiles?: number | null;
 
   @IsOptional()
   @IsDateString()
-  epdaDocumentDate?: string;
+  epdaDocumentDate?: string | null;
 
   @IsOptional()
   @IsString()
   @MaxLength(64)
-  shipType?: string;
+  shipType?: string | null;
 
   @IsOptional()
   @IsIn(['OVERSEAS', 'VIETNAMESE'])
-  shipownerNationality?: 'OVERSEAS' | 'VIETNAMESE';
+  shipownerNationality?: 'OVERSEAS' | 'VIETNAMESE' | null;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  oceanFrtRateUsdPerMt?: number;
+  oceanFrtRateUsdPerMt?: number | null;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  garbageCbmAmount?: number;
+  garbageCbmAmount?: number | null;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  garbageUsdRate?: number;
+  garbageUsdRate?: number | null;
 
   @IsOptional()
   @IsIn(QUARANTINE_MODES)
-  quarantineCargoMode?: (typeof QUARANTINE_MODES)[number];
+  quarantineCargoMode?: (typeof QUARANTINE_MODES)[number] | null;
 
   @IsOptional()
   @IsIn(AGENCY_FEE_MODES)
-  agencyFeeMode?: (typeof AGENCY_FEE_MODES)[number];
+  agencyFeeMode?: (typeof AGENCY_FEE_MODES)[number] | null;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  agencyDiscountPercent?: number;
+  agencyDiscountPercent?: number | null;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  agencyLumpsumAmount?: number;
+  agencyLumpsumAmount?: number | null;
 
   /** Render-ready quote payload from admin UI (optional draft save). */
   @IsOptional()

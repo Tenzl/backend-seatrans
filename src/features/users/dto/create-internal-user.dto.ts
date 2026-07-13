@@ -1,4 +1,12 @@
-import { IsEmail, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateInternalUserDto {
@@ -27,4 +35,3 @@ export class CreateInternalUserDto {
   @IsInt()
   roleId!: number;
 }
-

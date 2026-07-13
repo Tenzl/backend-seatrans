@@ -7,6 +7,23 @@ export interface CloudinaryUploadResult {
   publicId: string;
 }
 
+function toError(error: unknown, fallbackMessage: string): Error {
+  if (error instanceof Error) {
+    return error;
+  }
+
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof error.message === 'string'
+  ) {
+    return new Error(error.message);
+  }
+
+  return new Error(fallbackMessage);
+}
+
 @Injectable()
 export class CloudinaryService {
   constructor(private readonly configService: ConfigService) {
@@ -45,21 +62,26 @@ export class CloudinaryService {
     }
   }
 
-  async uploadBuffer(buffer: Buffer, folder = 'gallery'): Promise<CloudinaryUploadResult> {
+  async uploadBuffer(
+    buffer: Buffer,
+    folder = 'gallery',
+  ): Promise<CloudinaryUploadResult> {
     const result = await new Promise<UploadApiResponse>((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(
         { folder, resource_type: 'image' },
         (error, uploadResult) => {
           if (error || !uploadResult) {
-            reject(error ?? new Error('Cloudinary upload failed'));
+            reject(toError(error, 'Cloudinary upload failed'));
             return;
           }
           resolve(uploadResult);
         },
       );
       stream.end(buffer);
-    }).catch((error) => {
-      throw new InternalServerErrorException(`Cloudinary upload failed: ${error?.message ?? error}`);
+    }).catch((error: unknown) => {
+      throw new InternalServerErrorException(
+        `Cloudinary upload failed: ${toError(error, 'Unknown error').message}`,
+      );
     });
 
     return {
@@ -68,21 +90,26 @@ export class CloudinaryService {
     };
   }
 
-  async uploadRawBuffer(buffer: Buffer, folder = 'inquiries'): Promise<CloudinaryUploadResult> {
+  async uploadRawBuffer(
+    buffer: Buffer,
+    folder = 'inquiries',
+  ): Promise<CloudinaryUploadResult> {
     const result = await new Promise<UploadApiResponse>((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(
         { folder, resource_type: 'raw' },
         (error, uploadResult) => {
           if (error || !uploadResult) {
-            reject(error ?? new Error('Cloudinary raw upload failed'));
+            reject(toError(error, 'Cloudinary raw upload failed'));
             return;
           }
           resolve(uploadResult);
         },
       );
       stream.end(buffer);
-    }).catch((error) => {
-      throw new InternalServerErrorException(`Cloudinary raw upload failed: ${error?.message ?? error}`);
+    }).catch((error: unknown) => {
+      throw new InternalServerErrorException(
+        `Cloudinary raw upload failed: ${toError(error, 'Unknown error').message}`,
+      );
     });
 
     return {
@@ -96,8 +123,10 @@ export class CloudinaryService {
       return;
     }
 
-    await cloudinary.uploader.destroy(publicId).catch((error) => {
-      throw new InternalServerErrorException(`Cloudinary delete failed: ${error?.message ?? error}`);
+    await cloudinary.uploader.destroy(publicId).catch((error: unknown) => {
+      throw new InternalServerErrorException(
+        `Cloudinary delete failed: ${toError(error, 'Unknown error').message}`,
+      );
     });
   }
 }

@@ -43,7 +43,10 @@ export class CommoditiesAdminController {
 
   @AdminSection('data-cargo')
   @Put(':id')
-  update(@Param('id') id: string, @Body() dto: CreateCommodityDto): Promise<CommodityDto> {
+  update(
+    @Param('id') id: string,
+    @Body() dto: CreateCommodityDto,
+  ): Promise<CommodityDto> {
     return this.commoditiesService.update(Number(id), dto);
   }
 

@@ -16,7 +16,12 @@ export class PostImageEntity {
   @Column({ type: 'varchar', length: 255 })
   url!: string;
 
-  @Column({ name: 'cloudinary_public_id', type: 'varchar', length: 255, nullable: true })
+  @Column({
+    name: 'cloudinary_public_id',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
   cloudinaryPublicId?: string | null;
 
   @ManyToOne(() => PostEntity, (post) => post.images, { onDelete: 'CASCADE' })

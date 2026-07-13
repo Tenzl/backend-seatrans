@@ -4,8 +4,15 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from '../auth.service';
 
-function cookieJwtExtractor(req: any): string | null {
-  const token = req?.cookies?.auth_token;
+type JwtAccessPayload = { sub?: unknown };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function cookieJwtExtractor(request: unknown): string | null {
+  if (!isRecord(request) || !isRecord(request.cookies)) return null;
+  const token = request.cookies.auth_token;
   return typeof token === 'string' && token.trim() ? token : null;
 }
 
@@ -25,8 +32,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: any) {
-    const user = await this.authService.validateUserContext(payload.sub);
+  async validate(payload: JwtAccessPayload) {
+    const userId = Number(payload.sub);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      throw new UnauthorizedException('Invalid token subject');
+    }
+    const user = await this.authService.validateUserContext(userId);
     if (!user) {
       throw new UnauthorizedException('User not found or disabled');
     }

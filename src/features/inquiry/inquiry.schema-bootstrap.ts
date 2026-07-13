@@ -25,7 +25,9 @@ export class InquirySchemaBootstrap implements OnModuleInit {
         this.logger.log(`Inquiry schema ready: ${file}`);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        this.logger.warn(`Inquiry schema bootstrap failed (${file}): ${message}`);
+        this.logger.warn(
+          `Inquiry schema bootstrap failed (${file}): ${message}`,
+        );
       }
     }
   }

@@ -1,5 +1,13 @@
-import { Transform, Type } from 'class-transformer';
-import { IsEnum, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { Transform, Type, type TransformFnParams } from 'class-transformer';
+import {
+  IsEnum,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 import { InquiryStatus } from '../enums/inquiry-status.enum';
 
 export type InquiryArchivedFilter = 'active' | 'archived' | 'all';
@@ -20,8 +28,14 @@ export class ListInquiriesQueryDto {
 
   /** Display name, e.g. `SHIPPING AGENCY` */
   @IsOptional()
-  @Transform(({ value, obj }) => {
-    const raw = value ?? obj.serviceSlug;
+  @Transform(({ value, obj }: TransformFnParams) => {
+    const transformedValue: unknown = value;
+    const source: unknown = obj;
+    const serviceSlug =
+      typeof source === 'object' && source !== null && 'serviceSlug' in source
+        ? source.serviceSlug
+        : undefined;
+    const raw = transformedValue ?? serviceSlug;
     return typeof raw === 'string' ? raw.trim() : raw;
   })
   @IsString()

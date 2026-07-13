@@ -9,7 +9,9 @@ export class ProvincesController {
   constructor(private readonly provincesService: ProvincesService) {}
 
   @Get()
-  getAllProvinces(@Query() query: ProvinceListQueryDto): Promise<ProvinceDto[]> {
+  getAllProvinces(
+    @Query() query: ProvinceListQueryDto,
+  ): Promise<ProvinceDto[]> {
     if (query.q?.trim()) {
       return this.provincesService.searchProvinces(query.q);
     }
@@ -17,7 +19,9 @@ export class ProvincesController {
   }
 
   @Get('active')
-  getActiveProvinces(@Query() query: ProvinceListQueryDto): Promise<ProvinceDto[]> {
+  getActiveProvinces(
+    @Query() query: ProvinceListQueryDto,
+  ): Promise<ProvinceDto[]> {
     if (query.q?.trim()) {
       return this.provincesService.searchProvinces(query.q);
     }

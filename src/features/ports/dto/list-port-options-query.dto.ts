@@ -12,7 +12,9 @@ export class ListPortOptionsQueryDto {
       return undefined;
     }
     const raw = Array.isArray(value) ? value : String(value).split(',');
-    return raw.map((item) => Number(item)).filter((id) => Number.isInteger(id) && id > 0);
+    return raw
+      .map((item) => Number(item))
+      .filter((id) => Number.isInteger(id) && id > 0);
   })
   ids?: number[];
 

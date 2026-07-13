@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { Notification } from './entities/notification.entity';
 import { NotificationType } from './enums/notification-type.enum';
 import { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
@@ -10,6 +10,7 @@ import { User } from '../auth/entities/user.entity';
 import { RoleGroup } from '../auth/enums/role-group.enum';
 
 const DEFAULT_LIMIT = 20;
+const QUOTED_STATUS: string = InquiryStatus.QUOTED;
 
 @Injectable()
 export class NotificationService {
@@ -36,7 +37,9 @@ export class NotificationService {
     }
 
     if (query.since) {
-      qb.andWhere('notification.created_at > :since', { since: new Date(query.since) });
+      qb.andWhere('notification.created_at > :since', {
+        since: new Date(query.since),
+      });
     }
 
     const [rows, unreadCount] = await Promise.all([
@@ -56,7 +59,10 @@ export class NotificationService {
     });
   }
 
-  async markAsRead(userId: number, notificationId: number): Promise<Record<string, unknown>> {
+  async markAsRead(
+    userId: number,
+    notificationId: number,
+  ): Promise<Record<string, unknown>> {
     const row = await this.notificationRepository.findOne({
       where: { id: notificationId, userId },
     });
@@ -128,11 +134,11 @@ export class NotificationService {
     inquiry: BaseInquiry,
     previousStatus: string,
   ): Promise<Notification | null> {
-    if (inquiry.status !== InquiryStatus.QUOTED) {
+    if (inquiry.status !== QUOTED_STATUS) {
       return null;
     }
 
-    if (previousStatus === InquiryStatus.QUOTED) {
+    if (previousStatus === QUOTED_STATUS) {
       return null;
     }
 

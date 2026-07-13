@@ -1,4 +1,9 @@
-import { Injectable, UnauthorizedException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -11,6 +16,8 @@ import { RegisterDto } from './dto/register.dto';
 import { ConfigService } from '@nestjs/config';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { OAuthUserProfile } from './dto/oauth-profile.dto';
+
+type JwtSessionPayload = { sub?: string | number };
 
 @Injectable()
 export class AuthService {
@@ -37,14 +44,16 @@ export class AuthService {
     if (username) {
       const existingUsername = await this.userRepository
         .createQueryBuilder('user')
-        .where('LOWER(COALESCE(user.username, \'\')) = :username', { username })
+        .where("LOWER(COALESCE(user.username, '')) = :username", { username })
         .getOne();
       if (existingUsername) {
         throw new ConflictException('Username already exists');
       }
     }
 
-    const saltRounds = Number(this.configService.get<string>('BCRYPT_SALT_ROUNDS', '12'));
+    const saltRounds = Number(
+      this.configService.get<string>('BCRYPT_SALT_ROUNDS', '12'),
+    );
     const hashedPassword = await bcrypt.hash(
       registerDto.password,
       Number.isFinite(saltRounds) && saltRounds >= 10 ? saltRounds : 12,
@@ -57,10 +66,15 @@ export class AuthService {
     });
 
     // Handle role lookup, etc.
-    const defaultRoleName = this.configService.get<string>('DEFAULT_USER_ROLE', 'ROLE_USER');
-    const defaultRole = await this.roleRepository.findOne({ where: { name: defaultRoleName } });
+    const defaultRoleName = this.configService.get<string>(
+      'DEFAULT_USER_ROLE',
+      'ROLE_USER',
+    );
+    const defaultRole = await this.roleRepository.findOne({
+      where: { name: defaultRoleName },
+    });
     if (defaultRole) {
-         newUser.role = defaultRole;
+      newUser.role = defaultRole;
     }
 
     await this.userRepository.save(newUser);
@@ -79,7 +93,9 @@ export class AuthService {
       .createQueryBuilder('user')
       .leftJoinAndSelect('user.role', 'role')
       .where('LOWER(user.email) = :identifier', { identifier })
-      .orWhere('LOWER(COALESCE(user.username, \'\')) = :identifier', { identifier })
+      .orWhere("LOWER(COALESCE(user.username, '')) = :identifier", {
+        identifier,
+      })
       .getOne();
 
     if (!user || !user.password) {
@@ -138,8 +154,7 @@ export class AuthService {
 
   async findOrCreateOAuthUser(profile: OAuthUserProfile): Promise<User> {
     const normalizedEmail = profile.email.trim().toLowerCase();
-    const fullName =
-      profile.fullName?.trim() || normalizedEmail.split('@')[0];
+    const fullName = profile.fullName?.trim() || normalizedEmail.split('@')[0];
 
     let user = await this.userRepository.findOne({
       where: {
@@ -165,7 +180,9 @@ export class AuthService {
       return this.applyOAuthLogin(user, profile, normalizedEmail, fullName);
     }
 
-    const saltRounds = Number(this.configService.get<string>('BCRYPT_SALT_ROUNDS', '12'));
+    const saltRounds = Number(
+      this.configService.get<string>('BCRYPT_SALT_ROUNDS', '12'),
+    );
     const hashedPassword = await bcrypt.hash(
       randomUUID(),
       Number.isFinite(saltRounds) && saltRounds >= 10 ? saltRounds : 12,
@@ -174,7 +191,9 @@ export class AuthService {
     const oauthRoleName =
       this.configService.get<string>('DEFAULT_OAUTH_ROLE', 'ROLE_CUSTOMER') ||
       this.configService.get<string>('DEFAULT_USER_ROLE', 'ROLE_USER');
-    const oauthRole = await this.roleRepository.findOne({ where: { name: oauthRoleName } });
+    const oauthRole = await this.roleRepository.findOne({
+      where: { name: oauthRoleName },
+    });
 
     const newUser = this.userRepository.create({
       email: normalizedEmail,
@@ -207,7 +226,10 @@ export class AuthService {
     return this.userRepository.save(user);
   }
 
-  private async saveOAuthUser(user: User, normalizedEmail: string): Promise<User> {
+  private async saveOAuthUser(
+    user: User,
+    normalizedEmail: string,
+  ): Promise<User> {
     try {
       return await this.userRepository.save(user);
     } catch (error) {
@@ -240,7 +262,10 @@ export class AuthService {
   }
 
   private isUsersPrimaryKeyConflict(error: unknown): boolean {
-    return this.isPostgresUniqueViolation(error, 'PK_a3ffb1c0c8416b9fc6f907b7433');
+    return this.isPostgresUniqueViolation(
+      error,
+      'PK_a3ffb1c0c8416b9fc6f907b7433',
+    );
   }
 
   private isUsersEmailConflict(error: unknown): boolean {
@@ -252,7 +277,10 @@ export class AuthService {
     );
   }
 
-  private isPostgresUniqueViolation(error: unknown, constraint?: string): boolean {
+  private isPostgresUniqueViolation(
+    error: unknown,
+    constraint?: string,
+  ): boolean {
     const pgError = error as { code?: string; constraint?: string };
     if (pgError.code !== '23505') return false;
     if (!constraint) return true;
@@ -274,8 +302,8 @@ export class AuthService {
    */
   async issueSessionFromToken(token: string) {
     try {
-      const payload = this.jwtService.verify(token) as any;
-      const userId = Number(payload?.sub);
+      const payload = this.jwtService.verify<JwtSessionPayload>(token);
+      const userId = Number(payload.sub);
       if (!Number.isFinite(userId)) return null;
 
       const user = await this.userRepository.findOne({
@@ -302,15 +330,21 @@ export class AuthService {
   }
 
   async validateUserContext(userId: number) {
-     const user = await this.userRepository.findOne({ where: { id: userId }, relations: ['role'] });
-     if (!user) return null;
-     // Never attach password hash to req.user (defense in depth)
-     delete (user as any).password;
-     return user;
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      relations: ['role'],
+    });
+    if (!user) return null;
+    // Never attach password hash to req.user (defense in depth)
+    delete user.password;
+    return user;
   }
 
   async updateMe(userId: number, dto: UpdateMeDto) {
-    const user = await this.userRepository.findOne({ where: { id: userId }, relations: ['role'] });
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      relations: ['role'],
+    });
     if (!user) {
       throw new NotFoundException('User not found');
     }
@@ -326,7 +360,10 @@ export class AuthService {
     }
 
     await this.userRepository.save(user);
-    const saved = await this.userRepository.findOne({ where: { id: userId }, relations: ['role'] });
+    const saved = await this.userRepository.findOne({
+      where: { id: userId },
+      relations: ['role'],
+    });
     if (!saved) throw new NotFoundException('User not found');
 
     // Return plain user payload; global ResponseInterceptor wraps it once.

@@ -8,6 +8,7 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { Role } from './role.entity';
+import { RoleGroup } from '../enums/role-group.enum';
 
 @Entity('users')
 export class User {
@@ -69,10 +70,10 @@ export class User {
   }
 
   isInternal(): boolean {
-    return this.role?.roleGroup === 'INTERNAL';
+    return this.role?.roleGroup === RoleGroup.INTERNAL;
   }
 
   isExternal(): boolean {
-    return this.role?.roleGroup === 'EXTERNAL';
+    return this.role?.roleGroup === RoleGroup.EXTERNAL;
   }
 }

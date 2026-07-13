@@ -24,7 +24,9 @@ import { UploadInquiryDocumentDto } from '../dto/upload-inquiry-document.dto';
 @ApiAdmin()
 @Controller('v1/admin/inquiries/:serviceSlug/:targetId/documents')
 export class AdminInquiryDocumentController {
-  constructor(private readonly inquiryDocumentService: InquiryDocumentService) {}
+  constructor(
+    private readonly inquiryDocumentService: InquiryDocumentService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)

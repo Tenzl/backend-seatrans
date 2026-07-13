@@ -8,7 +8,8 @@ import { PartnerAdditionType } from '../enums/partner-addition-type.enum';
 import { CustomerStatus } from '../enums/customer-status.enum';
 import { CustomerType } from '../enums/customer-type.enum';
 import { ApproveStatus } from '../enums/approve-status.enum';
-import * as XLSX from 'xlsx';
+import { Workbook } from 'exceljs';
+import { Readable } from 'node:stream';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 
@@ -17,6 +18,21 @@ export interface ImportPreviewRow {
   data: UpsertBookingPartnerDto;
   isValid: boolean;
   errors: string[];
+}
+
+export interface ImportPreviewResult {
+  total: number;
+  valid: number;
+  invalid: number;
+  rows: ImportPreviewRow[];
+}
+
+export interface ImportCommitResult {
+  totalInput: number;
+  successCount: number;
+  errorCount: number;
+  successIndexes: number[];
+  errorDetails: Array<{ index: number; message: string }>;
 }
 
 @Injectable()
@@ -63,16 +79,53 @@ export class BookingPartnerImportService {
       'Invoice_Bank_Branch',
       'Invoice_Bank_Account',
     ];
-    return '﻿' + headers.join(','); // BOM for Excel UTF-8 support
+    return '\uFEFF' + headers.join(','); // BOM for Excel UTF-8 support
   }
 
   /** Parse an uploaded buffer (.xlsx or .csv) into row objects keyed by header. */
-  public parseWorkbook(buffer: Buffer): Record<string, unknown>[] {
-    const workbook = XLSX.read(buffer, { type: 'buffer' });
-    const firstSheetName = workbook.SheetNames[0];
-    if (!firstSheetName) return [];
-    const sheet = workbook.Sheets[firstSheetName];
-    return XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+  public async parseWorkbook(
+    buffer: Buffer,
+  ): Promise<Record<string, unknown>[]> {
+    const workbook = new Workbook();
+    const isXlsxZip =
+      buffer.length >= 4 &&
+      buffer[0] === 0x50 &&
+      buffer[1] === 0x4b &&
+      buffer[2] === 0x03 &&
+      buffer[3] === 0x04;
+
+    if (isXlsxZip) {
+      await workbook.xlsx.read(Readable.from(buffer));
+    } else {
+      await workbook.csv.read(Readable.from(buffer));
+    }
+
+    const sheet = workbook.worksheets[0];
+    if (!sheet || sheet.rowCount < 2) return [];
+
+    const headers: string[] = [];
+    sheet.getRow(1).eachCell({ includeEmpty: true }, (cell, column) => {
+      headers[column] = cell.text.replace(/^\uFEFF/, '').trim();
+    });
+
+    const rows: Record<string, unknown>[] = [];
+    for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber += 1) {
+      const source = sheet.getRow(rowNumber);
+      const row: Record<string, unknown> = {};
+      let hasValue = false;
+
+      for (let column = 1; column < headers.length; column += 1) {
+        const header = headers[column];
+        if (!header) continue;
+        const cell = source.getCell(column);
+        const value = this.normalizeWorkbookCell(cell.value, cell.text);
+        row[header] = value;
+        hasValue ||= this.stringifyCell(value).trim().length > 0;
+      }
+
+      if (hasValue) rows.push(row);
+    }
+    return rows;
   }
 
   /** Collapse a header to a comparison key: lowercase, alphanumerics only. */
@@ -81,12 +134,14 @@ export class BookingPartnerImportService {
   }
 
   /** Map every cell to a normalized header key (first non-empty value wins). */
-  private buildNormalizedRow(row: Record<string, unknown>): Record<string, string> {
+  private buildNormalizedRow(
+    row: Record<string, unknown>,
+  ): Record<string, string> {
     const out: Record<string, string> = {};
     for (const [key, value] of Object.entries(row)) {
       if (value == null) continue;
       const normKey = this.normalizeKey(key);
-      const text = String(value).trim();
+      const text = this.stringifyCell(value).trim();
       if (text.length > 0 && out[normKey] == null) {
         out[normKey] = text;
       }
@@ -95,7 +150,10 @@ export class BookingPartnerImportService {
   }
 
   /** First non-empty value among any of the accepted header spellings. */
-  private pick(norm: Record<string, string>, ...keys: string[]): string | undefined {
+  private pick(
+    norm: Record<string, string>,
+    ...keys: string[]
+  ): string | undefined {
     for (const key of keys) {
       const value = norm[this.normalizeKey(key)];
       if (value != null && value.length > 0) return value;
@@ -110,7 +168,7 @@ export class BookingPartnerImportService {
     if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
 
     // DD/MM/YYYY or D/M/YYYY (and dash/dot separators) -> ISO
-    const dmy = raw.match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})$/);
+    const dmy = raw.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
     if (dmy) {
       const [, d, m, y] = dmy;
       return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
@@ -130,7 +188,7 @@ export class BookingPartnerImportService {
   ): T[keyof T] | undefined {
     if (!value) return undefined;
     const upper = value.trim().toUpperCase();
-    const match = (Object.values(enumObj) as string[]).find((v) => v.toUpperCase() === upper);
+    const match = Object.values(enumObj).find((v) => v.toUpperCase() === upper);
     return match as T[keyof T] | undefined;
   }
 
@@ -157,7 +215,12 @@ export class BookingPartnerImportService {
     const validTypes = new Set<string>(Object.values(PartnerAdditionType));
     const typeStr = this.pick(norm, 'Addition_Types', 'Types');
     data.additionTypes = (typeStr ? typeStr.split(',') : [])
-      .map((s) => s.trim().toUpperCase().replace(/[\s-]+/g, '_'))
+      .map((s) =>
+        s
+          .trim()
+          .toUpperCase()
+          .replace(/[\s-]+/g, '_'),
+      )
       .filter((s) => validTypes.has(s)) as PartnerAdditionType[];
 
     data.country = this.pick(norm, 'Country');
@@ -174,7 +237,9 @@ export class BookingPartnerImportService {
       title: this.pick(norm, 'Contact_Title'),
       dateOfBirth: this.toIsoDate(this.pick(norm, 'Date_Of_Birth')),
     };
-    data.contacts = Object.values(contact).some((v) => v != null) ? [contact] : [];
+    data.contacts = Object.values(contact).some((v) => v != null)
+      ? [contact]
+      : [];
 
     data.phone = this.pick(norm, 'Phone');
     data.fax = this.pick(norm, 'Fax');
@@ -194,16 +259,31 @@ export class BookingPartnerImportService {
 
     // Enum cells: keep only recognized values; unknowns become null/undefined
     // so a non-matching value never fails the whole row.
-    data.customerStatus = this.toEnum(CustomerStatus, this.pick(norm, 'Customer_Status'));
-    data.customerType = this.toEnum(CustomerType, this.pick(norm, 'Customer_Type'));
-    data.approveStatus = this.toEnum(ApproveStatus, this.pick(norm, 'Approve_Status'));
+    data.customerStatus = this.toEnum(
+      CustomerStatus,
+      this.pick(norm, 'Customer_Status'),
+    );
+    data.customerType = this.toEnum(
+      CustomerType,
+      this.pick(norm, 'Customer_Type'),
+    );
+    data.approveStatus = this.toEnum(
+      ApproveStatus,
+      this.pick(norm, 'Approve_Status'),
+    );
 
-    data.companyEstablishmentDate = this.toIsoDate(this.pick(norm, 'Company_Establishment_Date'));
-    data.paymentDueDays = this.toInt(this.pick(norm, 'Payment_Due_Days', 'Payment_Due'));
+    data.companyEstablishmentDate = this.toIsoDate(
+      this.pick(norm, 'Company_Establishment_Date'),
+    );
+    data.paymentDueDays = this.toInt(
+      this.pick(norm, 'Payment_Due_Days', 'Payment_Due'),
+    );
 
     const instance = plainToInstance(UpsertBookingPartnerDto, data);
     const errors = await validate(instance);
-    const errorMessages = errors.map((e) => Object.values(e.constraints || {}).join(', '));
+    const errorMessages = errors.map((e) =>
+      Object.values(e.constraints || {}).join(', '),
+    );
 
     return {
       index,
@@ -213,8 +293,8 @@ export class BookingPartnerImportService {
     };
   }
 
-  public async preview(buffer: Buffer): Promise<any> {
-    const rawRows = this.parseWorkbook(buffer);
+  public async preview(buffer: Buffer): Promise<ImportPreviewResult> {
+    const rawRows = await this.parseWorkbook(buffer);
     const results = await Promise.all(
       rawRows.map((row, i) => this.mapAndValidateRow(i + 1, row)),
     );
@@ -227,7 +307,10 @@ export class BookingPartnerImportService {
     };
   }
 
-  public async commit(buffer: Buffer, actor: string): Promise<any> {
+  public async commit(
+    buffer: Buffer,
+    actor: string,
+  ): Promise<ImportCommitResult> {
     const previewResult = await this.preview(buffer);
     if (previewResult.invalid > 0) {
       throw new BadRequestException(
@@ -247,5 +330,40 @@ export class BookingPartnerImportService {
       successIndexes: [],
       errorDetails: result.errors,
     };
+  }
+
+  private stringifyCell(value: unknown): string {
+    if (typeof value === 'string') return value;
+    if (
+      typeof value === 'number' ||
+      typeof value === 'boolean' ||
+      typeof value === 'bigint'
+    ) {
+      return String(value);
+    }
+    if (value instanceof Date) return value.toString();
+    return '';
+  }
+
+  private normalizeWorkbookCell(value: unknown, displayText: string): unknown {
+    if (
+      value == null ||
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean' ||
+      typeof value === 'bigint' ||
+      value instanceof Date
+    ) {
+      return value ?? '';
+    }
+
+    if (typeof value === 'object' && 'result' in value) {
+      return this.normalizeWorkbookCell(
+        (value as { result?: unknown }).result,
+        displayText,
+      );
+    }
+
+    return displayText;
   }
 }

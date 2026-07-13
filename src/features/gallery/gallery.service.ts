@@ -34,7 +34,9 @@ export class GalleryService {
 
   async getPublicPaged(query: GalleryListQueryDto) {
     const page = Math.max(0, Number(query.page ?? 0));
-    const size = this.sanitizeLimit(Number(query.size ?? GalleryService.DEFAULT_LIMIT));
+    const size = this.sanitizeLimit(
+      Number(query.size ?? GalleryService.DEFAULT_LIMIT),
+    );
 
     const qb = this.galleryRepository
       .createQueryBuilder('gallery')
@@ -44,13 +46,19 @@ export class GalleryService {
       .orderBy('gallery.uploadedAt', 'DESC');
 
     if (query.serviceTypeId) {
-      qb.andWhere('gallery.service_type_id = :serviceTypeId', { serviceTypeId: query.serviceTypeId });
+      qb.andWhere('gallery.service_type_id = :serviceTypeId', {
+        serviceTypeId: query.serviceTypeId,
+      });
     }
     if (query.commodityId) {
-      qb.andWhere('commodity.id = :commodityId', { commodityId: query.commodityId });
+      qb.andWhere('commodity.id = :commodityId', {
+        commodityId: query.commodityId,
+      });
     }
     if (query.provinceId) {
-      qb.andWhere('province.id = :provinceId', { provinceId: query.provinceId });
+      qb.andWhere('province.id = :provinceId', {
+        provinceId: query.provinceId,
+      });
     }
     if (query.portId) {
       qb.andWhere('port.id = :portId', { portId: query.portId });
@@ -64,7 +72,12 @@ export class GalleryService {
       );
       const rows = await qb.getMany();
       const content = rows.map((item) => this.toDto(item));
-      return buildPaginatedResponse(content, content.length, 0, content.length || 1);
+      return buildPaginatedResponse(
+        content,
+        content.length,
+        0,
+        content.length || 1,
+      );
     }
 
     qb.skip(page * size).take(size);
@@ -73,7 +86,9 @@ export class GalleryService {
     return buildPaginatedResponse(content, total, page, size);
   }
 
-  async getPublicImages(limit = GalleryService.DEFAULT_LIMIT): Promise<GalleryImageDto[]> {
+  async getPublicImages(
+    limit = GalleryService.DEFAULT_LIMIT,
+  ): Promise<GalleryImageDto[]> {
     const rows = await this.galleryRepository.find({
       relations: { commodity: true, province: true, port: true },
       order: { uploadedAt: 'DESC' },
@@ -87,7 +102,9 @@ export class GalleryService {
     return this.getPublicPaged(query);
   }
 
-  async getAdminImagesAll(limit = GalleryService.DEFAULT_LIMIT): Promise<GalleryImageDto[]> {
+  async getAdminImagesAll(
+    limit = GalleryService.DEFAULT_LIMIT,
+  ): Promise<GalleryImageDto[]> {
     return this.getPublicImages(limit);
   }
 
@@ -102,7 +119,10 @@ export class GalleryService {
     return this.toDto(image);
   }
 
-  async saveImageFromUrl(dto: CreateGalleryImageDto, uploadedById: number): Promise<GalleryImageDto> {
+  async saveImageFromUrl(
+    dto: CreateGalleryImageDto,
+    uploadedById: number,
+  ): Promise<GalleryImageDto> {
     if (!dto.imageUrl?.trim()) {
       throw new BadRequestException('imageUrl is required');
     }
@@ -129,7 +149,10 @@ export class GalleryService {
       throw new BadRequestException('file is required');
     }
 
-    const upload = await this.cloudinaryService.uploadBuffer(file.buffer, 'gallery');
+    const upload = await this.cloudinaryService.uploadBuffer(
+      file.buffer,
+      'gallery',
+    );
     const image = await this.createRecord(
       upload.secureUrl,
       upload.publicId,
@@ -154,7 +177,10 @@ export class GalleryService {
 
     const results: GalleryImageDto[] = [];
     for (const file of files) {
-      const upload = await this.cloudinaryService.uploadBuffer(file.buffer, 'gallery');
+      const upload = await this.cloudinaryService.uploadBuffer(
+        file.buffer,
+        'gallery',
+      );
       const image = await this.createRecord(
         upload.secureUrl,
         upload.publicId,
@@ -170,7 +196,10 @@ export class GalleryService {
     return results;
   }
 
-  async update(id: number, dto: UpdateGalleryImageDto): Promise<GalleryImageDto> {
+  async update(
+    id: number,
+    dto: UpdateGalleryImageDto,
+  ): Promise<GalleryImageDto> {
     const image = await this.galleryRepository.findOne({
       where: { id },
       relations: { commodity: true, province: true, port: true },
@@ -203,7 +232,9 @@ export class GalleryService {
       throw new NotFoundException('Gallery image not found');
     }
 
-    await this.cloudinaryService.deleteByPublicId(image.cloudinaryPublicId ?? '');
+    await this.cloudinaryService.deleteByPublicId(
+      image.cloudinaryPublicId ?? '',
+    );
     await this.galleryRepository.delete(id);
   }
 
@@ -236,7 +267,9 @@ export class GalleryService {
   }
 
   private async requireCommodity(id: number): Promise<Commodity> {
-    const commodity = await this.commodityRepository.findOne({ where: { id, isActive: true } });
+    const commodity = await this.commodityRepository.findOne({
+      where: { id, isActive: true },
+    });
     if (!commodity) {
       throw new BadRequestException('Commodity not found');
     }
@@ -268,13 +301,15 @@ export class GalleryService {
       uploadedById: item.uploadedById,
       serviceTypeId: item.serviceTypeId,
       commodityId: item.commodity?.id ?? item.commodityId ?? 0,
-      commodityName: item.commodity?.displayName ?? item.commodity?.name ?? 'Unknown',
+      commodityName:
+        item.commodity?.displayName ?? item.commodity?.name ?? 'Unknown',
       provinceId: item.province?.id ?? null,
       provinceName: item.province?.displayName ?? item.province?.name ?? null,
       portId: item.port?.id ?? null,
       portName: item.port?.name ?? null,
       provinceCode:
-        item.provinceCode ?? (item.province?.code != null ? String(item.province.code) : null),
+        item.provinceCode ??
+        (item.province?.code != null ? String(item.province.code) : null),
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
     };

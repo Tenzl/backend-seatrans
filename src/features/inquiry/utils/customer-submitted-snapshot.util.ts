@@ -16,9 +16,13 @@ export const CUSTOMER_SNAPSHOT_FIELD_KEYS = [
   'purposeOfCalling',
 ] as const;
 
-export type CustomerSnapshotFieldKey = (typeof CUSTOMER_SNAPSHOT_FIELD_KEYS)[number];
+export type CustomerSnapshotFieldKey =
+  (typeof CUSTOMER_SNAPSHOT_FIELD_KEYS)[number];
 
-export type CustomerSubmittedSnapshot = Record<CustomerSnapshotFieldKey, string>;
+export type CustomerSubmittedSnapshot = Record<
+  CustomerSnapshotFieldKey,
+  string
+>;
 
 function normalize(value: string | number | null | undefined): string {
   if (value == null) return '';

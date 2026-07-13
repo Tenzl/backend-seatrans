@@ -19,7 +19,12 @@ export class GalleryImage {
   @Column({ name: 'image_url', type: 'text' })
   imageUrl!: string;
 
-  @Column({ name: 'province_code', type: 'varchar', length: 32, nullable: true })
+  @Column({
+    name: 'province_code',
+    type: 'varchar',
+    length: 32,
+    nullable: true,
+  })
   provinceCode!: string | null;
 
   @Column({ name: 'service_type_id', type: 'int' })

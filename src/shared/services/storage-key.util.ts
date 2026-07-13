@@ -3,7 +3,13 @@
  */
 
 const INVALID_SEGMENT = /(?:^|\/)\.\.(?:\/|$)/;
-const INVALID_CHARS = /[\x00-\x1f\x7f]/;
+
+function containsControlCharacter(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0);
+    return codePoint !== undefined && (codePoint <= 31 || codePoint === 127);
+  });
+}
 
 export function normalizePrefix(prefix?: string | null): string {
   const trimmed = String(prefix ?? '')
@@ -50,7 +56,7 @@ export function assertSafeKey(key: string, label = 'key'): void {
   if (INVALID_SEGMENT.test(value) || value.includes('..')) {
     throw new Error(`${label} contains invalid path segments`);
   }
-  if (INVALID_CHARS.test(value)) {
+  if (containsControlCharacter(value)) {
     throw new Error(`${label} contains invalid characters`);
   }
   if (value.length > 1024) {

@@ -27,7 +27,10 @@ export class PortsAdminController {
   }
 
   @Put(':id')
-  updatePort(@Param('id') id: string, @Body() dto: CreatePortDto): Promise<PortDto> {
+  updatePort(
+    @Param('id') id: string,
+    @Body() dto: CreatePortDto,
+  ): Promise<PortDto> {
     return this.portsService.updatePort(Number(id), dto);
   }
 

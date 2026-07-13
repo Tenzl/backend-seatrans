@@ -1,4 +1,10 @@
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { BookingShipping } from './booking-shipping.entity';
 import { Port } from '../../ports/entities/port.entity';
 
@@ -7,10 +13,14 @@ export class BookingTransitPort {
   @PrimaryGeneratedColumn()
   id!: number;
 
-  @ManyToOne(() => BookingShipping, (bookingShipping) => bookingShipping.transitPorts, {
-    nullable: false,
-    onDelete: 'CASCADE',
-  })
+  @ManyToOne(
+    () => BookingShipping,
+    (bookingShipping) => bookingShipping.transitPorts,
+    {
+      nullable: false,
+      onDelete: 'CASCADE',
+    },
+  )
   @JoinColumn({ name: 'booking_shipping_id' })
   bookingShipping!: BookingShipping;
 

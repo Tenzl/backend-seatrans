@@ -1,9 +1,11 @@
-export const DEFAULT_GARBAGE_CBM_AMOUNT = 1
-export const DEFAULT_GARBAGE_USD_QN = 17
-export const DEFAULT_GARBAGE_USD_HCM = 54
+export const DEFAULT_GARBAGE_CBM_AMOUNT = 1;
+export const DEFAULT_GARBAGE_USD_QN = 17;
+export const DEFAULT_GARBAGE_USD_HCM = 54;
 
 export function getDefaultGarbageUsdRate(quoteForm?: string | null): number {
-  return quoteForm?.toUpperCase() === 'QN' ? DEFAULT_GARBAGE_USD_QN : DEFAULT_GARBAGE_USD_HCM
+  return quoteForm?.toUpperCase() === 'QN'
+    ? DEFAULT_GARBAGE_USD_QN
+    : DEFAULT_GARBAGE_USD_HCM;
 }
 
 export function resolveGarbageUsdRate(
@@ -11,20 +13,22 @@ export function resolveGarbageUsdRate(
   stored: string | number | null | undefined,
 ): string {
   if (stored != null && String(stored).trim() !== '') {
-    const parsed = Number(stored)
+    const parsed = Number(stored);
     if (Number.isFinite(parsed) && parsed > 0) {
-      return String(stored)
+      return String(stored);
     }
   }
-  return String(getDefaultGarbageUsdRate(quoteForm))
+  return String(getDefaultGarbageUsdRate(quoteForm));
 }
 
-export function resolveGarbageCbmAmount(stored: string | number | null | undefined): string {
+export function resolveGarbageCbmAmount(
+  stored: string | number | null | undefined,
+): string {
   if (stored != null && String(stored).trim() !== '') {
-    const parsed = Number(stored)
+    const parsed = Number(stored);
     if (Number.isFinite(parsed) && parsed > 0) {
-      return String(stored)
+      return String(stored);
     }
   }
-  return String(DEFAULT_GARBAGE_CBM_AMOUNT)
+  return String(DEFAULT_GARBAGE_CBM_AMOUNT);
 }

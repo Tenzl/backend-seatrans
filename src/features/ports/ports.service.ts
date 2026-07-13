@@ -12,11 +12,16 @@ import { PortDto } from './dto/port.dto';
 import { PortOptionDto } from './dto/port-option.dto';
 import { CreatePortDto } from './dto/create-port.dto';
 import type { ListPortsFilters } from './dto/list-ports-filters';
-import { ListPortsQueryDto, type PortSearchIn } from './dto/list-ports-query.dto';
+import {
+  ListPortsQueryDto,
+  type PortSearchIn,
+} from './dto/list-ports-query.dto';
 import { buildPaginatedResponse } from '../../shared/dto/pagination.dto';
 import { API_MAX_PAGE_SIZE } from '../../shared/dto/list-query.dto';
-import type { SelectQueryBuilder } from 'typeorm';
-import { normalizeProvinceAreaCode, PROVINCE_AREA_LABELS } from '../provinces/province-area';
+import {
+  normalizeProvinceAreaCode,
+  PROVINCE_AREA_LABELS,
+} from '../provinces/province-area';
 
 interface PortListParams {
   activeOnly?: boolean;
@@ -58,7 +63,9 @@ export class PortsService {
   }
 
   async listPorts(filters: ListPortsFilters = {}): Promise<PortDto[]> {
-    const limit = this.sanitizeLimit(filters.limit ?? PortsService.DEFAULT_LIST_LIMIT);
+    const limit = this.sanitizeLimit(
+      filters.limit ?? PortsService.DEFAULT_LIST_LIMIT,
+    );
     const ids = await this.getOrderedPortIds(
       {
         activeOnly: filters.activeOnly,
@@ -70,11 +77,15 @@ export class PortsService {
     return this.getPortsByOrderedIds(ids);
   }
 
-  async getAllPorts(limit = PortsService.DEFAULT_LIST_LIMIT): Promise<PortDto[]> {
+  async getAllPorts(
+    limit = PortsService.DEFAULT_LIST_LIMIT,
+  ): Promise<PortDto[]> {
     return this.listPorts({ limit });
   }
 
-  async getActivePorts(limit = PortsService.DEFAULT_LIST_LIMIT): Promise<PortDto[]> {
+  async getActivePorts(
+    limit = PortsService.DEFAULT_LIST_LIMIT,
+  ): Promise<PortDto[]> {
     return this.listPorts({ activeOnly: true, limit });
   }
 
@@ -83,8 +94,12 @@ export class PortsService {
     ids?: number[];
     limit?: number;
   }): Promise<PortOptionDto[]> {
-    const limit = this.sanitizeOptionsLimit(params.limit ?? PortsService.DEFAULT_OPTIONS_LIMIT);
-    const ids = (params.ids ?? []).filter((id) => Number.isInteger(id) && id > 0);
+    const limit = this.sanitizeOptionsLimit(
+      params.limit ?? PortsService.DEFAULT_OPTIONS_LIMIT,
+    );
+    const ids = (params.ids ?? []).filter(
+      (id) => Number.isInteger(id) && id > 0,
+    );
 
     const qb = this.portRepository
       .createQueryBuilder('port')
@@ -122,7 +137,9 @@ export class PortsService {
       order: { name: 'ASC' },
     });
 
-    return ports.slice(0, this.sanitizeLimit(limit)).map((port) => this.toDto(port));
+    return ports
+      .slice(0, this.sanitizeLimit(limit))
+      .map((port) => this.toDto(port));
   }
 
   async searchPorts(query?: string): Promise<PortDto[]> {
@@ -141,7 +158,10 @@ export class PortsService {
     return page.content;
   }
 
-  async searchPortsByProvince(provinceId: number, query?: string): Promise<PortDto[]> {
+  async searchPortsByProvince(
+    provinceId: number,
+    query?: string,
+  ): Promise<PortDto[]> {
     const normalizedQuery = query?.trim();
 
     const queryBuilder = this.portRepository
@@ -182,7 +202,10 @@ export class PortsService {
 
     const province = await this.resolveProvince(dto.provinceId);
 
-    const duplicate = await this.findDuplicatePort(normalizedName, province?.id ?? null);
+    const duplicate = await this.findDuplicatePort(
+      normalizedName,
+      province?.id ?? null,
+    );
     if (duplicate) {
       throw new ConflictException('Port already exists in this province scope');
     }
@@ -219,11 +242,15 @@ export class PortsService {
       throw new BadRequestException('Port name is required');
     }
 
-    const province = dto.provinceId === undefined
-      ? port.province
-      : await this.resolveProvince(dto.provinceId);
+    const province =
+      dto.provinceId === undefined
+        ? port.province
+        : await this.resolveProvince(dto.provinceId);
 
-    const duplicate = await this.findDuplicatePort(normalizedName, province?.id ?? null);
+    const duplicate = await this.findDuplicatePort(
+      normalizedName,
+      province?.id ?? null,
+    );
     if (duplicate && duplicate.id !== id) {
       throw new ConflictException('Port already exists in this province scope');
     }
@@ -284,7 +311,9 @@ export class PortsService {
   private toDto(port: Port): PortDto {
     // Legacy rows may still carry province_id = 0 until the DB cleanup runs.
     const provinceId = this.normalizeProvinceId(port.province?.id);
-    const provinceName = provinceId ? (port.province?.displayName ?? port.province?.name ?? null) : null;
+    const provinceName = provinceId
+      ? (port.province?.displayName ?? port.province?.name ?? null)
+      : null;
     const provinceArea = provinceId ? (port.province?.area ?? null) : null;
 
     return {
@@ -310,7 +339,10 @@ export class PortsService {
     return (value ?? '').trim().replace(/\s+/g, ' ');
   }
 
-  private normalizePortOfCall(providedPortOfCall: string | undefined, normalizedName: string): string {
+  private normalizePortOfCall(
+    providedPortOfCall: string | undefined,
+    normalizedName: string,
+  ): string {
     const normalizedProvided = providedPortOfCall?.trim();
     if (normalizedProvided) {
       return normalizedProvided.replace(/\s+/g, ' ').toUpperCase();
@@ -332,7 +364,11 @@ export class PortsService {
       LEFT JOIN provinces province ON province.id = port.province_id
       ${whereSql}
     `;
-    const rows = await this.portRepository.query(sql, values);
+    const rows = await this.portRepository.query<
+      Array<{
+        total?: number | string | null;
+      }>
+    >(sql, values);
     return Number(rows[0]?.total ?? 0);
   }
 
@@ -366,13 +402,18 @@ export class PortsService {
       OFFSET $${offsetParam}
     `;
 
-    const rows = await this.portRepository.query(sql, [...values, limit, offset]);
+    const rows = await this.portRepository.query<
+      Array<{ id: number | string }>
+    >(sql, [...values, limit, offset]);
     return rows
-      .map((row: { id: number | string }) => Number(row.id))
+      .map((row) => Number(row.id))
       .filter((id: number) => Number.isInteger(id) && id > 0);
   }
 
-  private buildPortListWhereClause(params: PortListParams): { whereSql: string; values: Array<string | number | boolean | number[]> } {
+  private buildPortListWhereClause(params: PortListParams): {
+    whereSql: string;
+    values: Array<string | number | boolean | number[]>;
+  } {
     const conditions: string[] = [];
     const values: Array<string | number | boolean | number[]> = [];
 
@@ -420,7 +461,10 @@ export class PortsService {
           `(LOWER(COALESCE(province.name, '')) LIKE $${values.length - 1} OR LOWER(COALESCE(province.display_name, '')) LIKE $${values.length})`,
         );
       } else {
-        const columnBySearchIn: Record<Exclude<PortSearchIn, 'area' | 'provinceName'>, string> = {
+        const columnBySearchIn: Record<
+          Exclude<PortSearchIn, 'area' | 'provinceName'>,
+          string
+        > = {
           name: 'port.name',
           portOfCall: 'port.port_of_call',
           code: 'port.code',
@@ -428,12 +472,15 @@ export class PortsService {
           countryCode: 'port.country_code',
         };
         values.push(term);
-        conditions.push(`LOWER(COALESCE(${columnBySearchIn[searchIn]}, '')) LIKE $${values.length}`);
+        conditions.push(
+          `LOWER(COALESCE(${columnBySearchIn[searchIn]}, '')) LIKE $${values.length}`,
+        );
       }
     }
 
     return {
-      whereSql: conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '',
+      whereSql:
+        conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '',
       values,
     };
   }
@@ -462,7 +509,9 @@ export class PortsService {
       return null;
     }
 
-    const province = await this.provinceRepository.findOne({ where: { id: normalizedProvinceId } });
+    const province = await this.provinceRepository.findOne({
+      where: { id: normalizedProvinceId },
+    });
     if (!province) {
       throw new BadRequestException('Province not found');
     }
@@ -478,7 +527,10 @@ export class PortsService {
     return provinceId as number;
   }
 
-  private async findDuplicatePort(name: string, provinceId: number | null): Promise<Port | null> {
+  private async findDuplicatePort(
+    name: string,
+    provinceId: number | null,
+  ): Promise<Port | null> {
     const queryBuilder = this.portRepository
       .createQueryBuilder('port')
       .leftJoinAndSelect('port.province', 'province')

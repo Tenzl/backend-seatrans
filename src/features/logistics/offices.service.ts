@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Office } from './entities/office.entity';
@@ -29,7 +33,9 @@ export class OfficesService {
       order: { createdAt: 'DESC' },
     });
 
-    return rows.slice(0, this.sanitizeLimit(limit)).map((item) => this.toDto(item));
+    return rows
+      .slice(0, this.sanitizeLimit(limit))
+      .map((item) => this.toDto(item));
   }
 
   async getActive(limit = OfficesService.DEFAULT_LIMIT): Promise<OfficeDto[]> {
@@ -39,7 +45,9 @@ export class OfficesService {
       order: { createdAt: 'DESC' },
     });
 
-    return rows.slice(0, this.sanitizeLimit(limit)).map((item) => this.toDto(item));
+    return rows
+      .slice(0, this.sanitizeLimit(limit))
+      .map((item) => this.toDto(item));
   }
 
   async create(dto: CreateOfficeDto): Promise<OfficeDto> {
@@ -72,7 +80,10 @@ export class OfficesService {
   }
 
   async update(id: number, dto: CreateOfficeDto): Promise<OfficeDto> {
-    const row = await this.officeRepository.findOne({ where: { id }, relations: { province: true } });
+    const row = await this.officeRepository.findOne({
+      where: { id },
+      relations: { province: true },
+    });
     if (!row) {
       throw new NotFoundException('Office not found');
     }

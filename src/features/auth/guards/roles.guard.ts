@@ -4,11 +4,42 @@ import { ROLES_KEY } from '../decorators/roles.decorator';
 import { RoleGroup } from '../enums/role-group.enum';
 
 function normalizeRoleName(role: string): string {
-  return role.trim().toUpperCase().replace(/^ROLE_/, '');
+  return role
+    .trim()
+    .toUpperCase()
+    .replace(/^ROLE_/, '');
 }
 
-function normalizeRoleGroup(group: string): string {
-  return group.trim().toUpperCase();
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function parseRoleGroup(value: unknown): RoleGroup | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toUpperCase();
+  if (normalized === 'INTERNAL') return RoleGroup.INTERNAL;
+  if (normalized === 'EXTERNAL') return RoleGroup.EXTERNAL;
+  return null;
+}
+
+function roleContext(value: unknown): {
+  roleNames: string[];
+  roleGroup: RoleGroup | null;
+} | null {
+  if (!isRecord(value)) return null;
+  const role = isRecord(value.role) ? value.role : null;
+  const roleNames = Array.isArray(value.roles)
+    ? value.roles.filter(
+        (candidate): candidate is string =>
+          typeof candidate === 'string' && candidate.trim().length > 0,
+      )
+    : typeof role?.name === 'string' && role.name.trim()
+      ? [role.name]
+      : [];
+  return {
+    roleNames,
+    roleGroup: parseRoleGroup(role?.roleGroup),
+  };
 }
 
 @Injectable()
@@ -16,40 +47,31 @@ export class RolesGuard implements CanActivate {
   constructor(private reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const requiredRoles = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
+    const requiredRoles = this.reflector.getAllAndOverride<string[]>(
+      ROLES_KEY,
+      [context.getHandler(), context.getClass()],
+    );
 
     if (!requiredRoles) {
       return true;
     }
 
-    const { user } = context.switchToHttp().getRequest();
+    const request = context.switchToHttp().getRequest<{ user?: unknown }>();
+    const user = roleContext(request.user);
     if (!user) {
       return false;
     }
 
-    const userRoleNames: string[] = Array.isArray(user.roles)
-      ? user.roles.filter(Boolean)
-      : user.role?.name
-        ? [user.role.name]
-        : [];
-    const userRoleGroup = typeof user.role?.roleGroup === 'string'
-      ? normalizeRoleGroup(user.role.roleGroup)
-      : null;
-
-    if (userRoleNames.length === 0 && !userRoleGroup) {
+    if (user.roleNames.length === 0 && !user.roleGroup) {
       return false;
     }
 
-    const normalizedUserRoles = userRoleNames.map(normalizeRoleName);
+    const normalizedUserRoles = user.roleNames.map(normalizeRoleName);
     const normalizedRequired = requiredRoles.map(normalizeRoleName);
 
     return normalizedRequired.some((required) => {
-      if (required === RoleGroup.INTERNAL || required === RoleGroup.EXTERNAL) {
-        return userRoleGroup === required;
-      }
+      const requiredGroup = parseRoleGroup(required);
+      if (requiredGroup) return user.roleGroup === requiredGroup;
       return normalizedUserRoles.includes(required);
     });
   }

@@ -33,7 +33,10 @@ export class PostsAdminController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  create(@Body() dto: PostRequestDto, @Req() req: { user?: { email?: string } }) {
+  create(
+    @Body() dto: PostRequestDto,
+    @Req() req: { user?: { email?: string } },
+  ) {
     return this.postsService.create(dto, req.user?.email);
   }
 

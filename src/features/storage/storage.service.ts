@@ -18,7 +18,11 @@ export class StorageService {
     }
   }
 
-  upload(prefix: string | undefined, filename: string, file: Express.Multer.File) {
+  upload(
+    prefix: string | undefined,
+    filename: string,
+    file: Express.Multer.File,
+  ) {
     if (!file?.buffer?.length) {
       throw new BadRequestException('File is required');
     }

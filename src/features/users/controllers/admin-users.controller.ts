@@ -85,7 +85,10 @@ export class AdminUsersController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
-  async remove(@Param('id', ParseIntPipe) id: number, @Req() req: StaffRequest) {
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: StaffRequest,
+  ) {
     const staffUserId = req.user?.id;
     if (!staffUserId) {
       throw new BadRequestException('User not authenticated');
@@ -99,4 +102,3 @@ export class AdminUsersController {
     return this.adminUsersService.reactivateUser(id);
   }
 }
-

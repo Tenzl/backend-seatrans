@@ -6,7 +6,9 @@ import {
 
 export type InquiryResponseAudience = 'user' | 'admin';
 
-function shippingAgencySharedFields(row: ShippingAgencyInquiryEntity): Record<string, unknown> {
+function shippingAgencySharedFields(
+  row: ShippingAgencyInquiryEntity,
+): Record<string, unknown> {
   return {
     toName: row.toName,
     mv: row.mv,
@@ -18,6 +20,7 @@ function shippingAgencySharedFields(row: ShippingAgencyInquiryEntity): Record<st
     cargoName: row.cargoName,
     cargoNameOther: row.cargoNameOther,
     cargoQuantity: row.cargoQuantity,
+    portId: row.portId,
     portOfCall: row.portOfCall,
     dischargeLoadingLocation: row.dischargeLoadingLocation,
     otherInfo: row.otherInfo,
@@ -33,7 +36,9 @@ function shippingAgencySharedFields(row: ShippingAgencyInquiryEntity): Record<st
   };
 }
 
-function shippingAgencyInternalEpdaFields(row: ShippingAgencyInquiryEntity): Record<string, unknown> {
+function shippingAgencyInternalEpdaFields(
+  row: ShippingAgencyInquiryEntity,
+): Record<string, unknown> {
   return {
     epdaDocumentDate: row.epdaDocumentDate,
     shipType: row.shipType,
@@ -49,6 +54,7 @@ function shippingAgencyInternalEpdaFields(row: ShippingAgencyInquiryEntity): Rec
     anchorageHours: row.anchorageHours,
     pilotage3rdMiles: row.pilotage3rdMiles,
     epdaSnapshot: row.epdaSnapshot,
+    epdaLockedAt: row.epdaLockedAt,
     quotedAt: row.quotedAt,
     quotedByUserId: row.quotedByUserId,
     createdSource: row.createdSource,

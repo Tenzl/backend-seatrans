@@ -7,7 +7,9 @@ import { EpdaParametersService } from './epda-parameters.service';
 import { EpdaParametersAdminController } from './epda-parameters-admin.controller';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([EpdaParameterSet, EpdaParameterChangeLog, Port])],
+  imports: [
+    TypeOrmModule.forFeature([EpdaParameterSet, EpdaParameterChangeLog, Port]),
+  ],
   controllers: [EpdaParametersAdminController],
   providers: [EpdaParametersService],
   exports: [EpdaParametersService],

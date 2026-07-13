@@ -57,6 +57,30 @@ $ npm run test:e2e
 $ npm run test:cov
 ```
 
+## Database migrations
+
+TypeORM migrations are never generated or applied through `synchronize`; keep
+`DB_SYNCHRONIZE=false`. The commands below build the backend, load `.env` when
+present, and connect using `DB_URL` (or the `DB_HOST`, `DB_PORT`,
+`DB_USERNAME`, `DB_PASSWORD`, and `DB_DATABASE` fallback variables).
+
+```bash
+# Inspect pending/applied migrations without changing the schema
+npm run db:migration:show
+
+# Apply all pending migrations
+npm run db:migration:run
+
+# Revert only the latest applied migration
+npm run db:migration:revert
+```
+
+Before production rollout, back up the database and run `db:migration:show`.
+Apply migrations once from the deployment job, then start application replicas
+with `DB_MIGRATIONS_RUN=false` to avoid each replica racing to migrate. The EPDA
+canonical-port/lock migration is
+`202607130001-AddShippingAgencyEpdaCanonicalPortAndLock`.
+
 ## Deployment
 
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.

@@ -101,9 +101,18 @@ export type PartialEpdaParameterValues = {
  * area → group → port (later wins). Stored as JSONB for flexibility.
  */
 @Entity('epda_parameter_set')
-@Index('uq_epda_param_area', ['area'], { unique: true, where: "scope = 'AREA'" })
-@Index('uq_epda_param_port', ['portId'], { unique: true, where: "scope = 'PORT'" })
-@Index('uq_epda_param_group', ['area', 'name'], { unique: true, where: "scope = 'GROUP'" })
+@Index('uq_epda_param_area', ['area'], {
+  unique: true,
+  where: "scope = 'AREA'",
+})
+@Index('uq_epda_param_port', ['portId'], {
+  unique: true,
+  where: "scope = 'PORT'",
+})
+@Index('uq_epda_param_group', ['area', 'name'], {
+  unique: true,
+  where: "scope = 'GROUP'",
+})
 export class EpdaParameterSet {
   @PrimaryGeneratedColumn()
   id!: number;

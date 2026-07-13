@@ -1,4 +1,12 @@
-import { IsBoolean, IsInt, IsNumberString, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsNumberString,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export class CreatePortDto {
   @IsString()

@@ -1,4 +1,10 @@
-import { IsObject, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
+import {
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { ConfirmedCustomerFieldChangeDto } from './confirmed-customer-field-change.dto';
 

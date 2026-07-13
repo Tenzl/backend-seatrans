@@ -28,7 +28,7 @@ export class AdminUsersService {
   async listRoles(roleGroup?: RoleGroup): Promise<AdminRoleOptionDto[]> {
     const roles = await this.roleRepository.find({
       where: roleGroup ? { roleGroup } : undefined,
-      order: { roleGroup: 'ASC' as any, name: 'ASC' as any },
+      order: { roleGroup: 'ASC', name: 'ASC' },
     });
     return roles.map((r) =>
       AdminRoleOptionDto.from({
@@ -57,17 +57,21 @@ export class AdminUsersService {
     const term = params.q?.trim();
     if (term) {
       qb.andWhere(
-        '(LOWER(user.email) LIKE :term OR LOWER(COALESCE(user.fullName, \'\')) LIKE :term OR LOWER(COALESCE(user.company, \'\')) LIKE :term)',
+        "(LOWER(user.email) LIKE :term OR LOWER(COALESCE(user.fullName, '')) LIKE :term OR LOWER(COALESCE(user.company, '')) LIKE :term)",
         { term: `%${term.toLowerCase()}%` },
       );
     }
 
     if (params.roleGroup) {
-      qb.andWhere('role.roleGroup = :roleGroup', { roleGroup: params.roleGroup });
+      qb.andWhere('role.roleGroup = :roleGroup', {
+        roleGroup: params.roleGroup,
+      });
     }
 
     if (params.roleName?.trim()) {
-      qb.andWhere('role.name = :roleName', { roleName: params.roleName.trim() });
+      qb.andWhere('role.name = :roleName', {
+        roleName: params.roleName.trim(),
+      });
     }
 
     const rows = await qb.getMany();
@@ -81,12 +85,21 @@ export class AdminUsersService {
         company: row.company ?? null,
         isActive: row.isActive,
         createdAt: row.createdAt,
-        role: row.role ? { id: row.role.id, name: row.role.name, roleGroup: row.role.roleGroup } : null,
+        role: row.role
+          ? {
+              id: row.role.id,
+              name: row.role.name,
+              roleGroup: row.role.roleGroup,
+            }
+          : null,
       }),
     );
   }
 
-  async createInternalUser(dto: CreateInternalUserDto, staffUserId: number): Promise<AdminUserRowDto> {
+  async createInternalUser(
+    dto: CreateInternalUserDto,
+    staffUserId: number,
+  ): Promise<AdminUserRowDto> {
     const email = dto.email.trim().toLowerCase();
     const existing = await this.userRepository.findOne({ where: { email } });
     if (existing) {
@@ -98,14 +111,16 @@ export class AdminUsersService {
     if (username) {
       const existingUsername = await this.userRepository
         .createQueryBuilder('user')
-        .where('LOWER(COALESCE(user.username, \'\')) = :username', { username })
+        .where("LOWER(COALESCE(user.username, '')) = :username", { username })
         .getOne();
       if (existingUsername) {
         throw new ConflictException('Username already exists');
       }
     }
 
-    const role = await this.roleRepository.findOne({ where: { id: dto.roleId } });
+    const role = await this.roleRepository.findOne({
+      where: { id: dto.roleId },
+    });
     if (!role) {
       throw new BadRequestException('Role not found');
     }
@@ -113,7 +128,9 @@ export class AdminUsersService {
       throw new BadRequestException('Only INTERNAL roles can be created here');
     }
 
-    const saltRounds = Number(this.configService.get<string>('BCRYPT_SALT_ROUNDS', '12'));
+    const saltRounds = Number(
+      this.configService.get<string>('BCRYPT_SALT_ROUNDS', '12'),
+    );
     const hashed = await bcrypt.hash(
       dto.password,
       Number.isFinite(saltRounds) && saltRounds >= 10 ? saltRounds : 12,
@@ -141,7 +158,13 @@ export class AdminUsersService {
       company: saved.company ?? null,
       isActive: saved.isActive,
       createdAt: saved.createdAt,
-      role: saved.role ? { id: saved.role.id, name: saved.role.name, roleGroup: saved.role.roleGroup } : null,
+      role: saved.role
+        ? {
+            id: saved.role.id,
+            name: saved.role.name,
+            roleGroup: saved.role.roleGroup,
+          }
+        : null,
     });
   }
 
@@ -195,12 +218,17 @@ export class AdminUsersService {
   }
 
   /** Admin sets a new password for any user. */
-  async resetPassword(userId: number, newPassword: string): Promise<{ id: number }> {
+  async resetPassword(
+    userId: number,
+    newPassword: string,
+  ): Promise<{ id: number }> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
       throw new NotFoundException('User not found');
     }
-    const saltRounds = Number(this.configService.get<string>('BCRYPT_SALT_ROUNDS', '12'));
+    const saltRounds = Number(
+      this.configService.get<string>('BCRYPT_SALT_ROUNDS', '12'),
+    );
     user.password = await bcrypt.hash(
       newPassword,
       Number.isFinite(saltRounds) && saltRounds >= 10 ? saltRounds : 12,
@@ -217,7 +245,10 @@ export class AdminUsersService {
    * integrity. Deactivating sets `isActive = false`, which blocks login and
    * invalidates existing sessions (enforced in AuthService.validate / login).
    */
-  async deleteUser(userId: number, staffUserId: number): Promise<{ id: number }> {
+  async deleteUser(
+    userId: number,
+    staffUserId: number,
+  ): Promise<{ id: number }> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
       throw new NotFoundException('User not found');
@@ -245,4 +276,3 @@ export class AdminUsersService {
     return { id: userId };
   }
 }
-

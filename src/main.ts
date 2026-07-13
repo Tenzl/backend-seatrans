@@ -8,7 +8,7 @@ import helmet from 'helmet';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  
+
   // Enable CORS
   const rawOrigins = process.env.CORS_ORIGINS ?? 'http://localhost:3000';
   const origins = rawOrigins
@@ -37,10 +37,12 @@ async function bootstrap() {
   );
 
   // Automatically validate Data Transfer Objects
-  app.useGlobalPipes(new ValidationPipe({
+  app.useGlobalPipes(
+    new ValidationPipe({
       whitelist: true,
       transform: true,
-  }));
+    }),
+  );
 
   // Bind global exception filter mirroring Java's GlobalExceptionHandler
   app.useGlobalFilters(new GlobalExceptionFilter());
@@ -54,4 +56,4 @@ async function bootstrap() {
   await app.listen(port, '0.0.0.0');
   console.log(`Application is running on port ${port}`);
 }
-bootstrap();
+void bootstrap();

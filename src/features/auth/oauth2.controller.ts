@@ -23,7 +23,9 @@ export class OAuth2Controller {
   @Get('google')
   initiateGoogleLogin() {
     const clientId = this.configService.get<string>('GOOGLE_CLIENT_ID')?.trim();
-    const redirectUri = this.configService.get<string>('GOOGLE_REDIRECT_URI')?.trim();
+    const redirectUri = this.configService
+      .get<string>('GOOGLE_REDIRECT_URI')
+      ?.trim();
 
     if (!clientId || !redirectUri) {
       throw new BadRequestException('Google OAuth is not configured');
@@ -53,9 +55,15 @@ export class OAuth2Controller {
         throw new Error('Missing authorization code');
       }
 
-      const clientId = this.configService.get<string>('GOOGLE_CLIENT_ID')?.trim();
-      const clientSecret = this.configService.get<string>('GOOGLE_CLIENT_SECRET')?.trim();
-      const redirectUri = this.configService.get<string>('GOOGLE_REDIRECT_URI')?.trim();
+      const clientId = this.configService
+        .get<string>('GOOGLE_CLIENT_ID')
+        ?.trim();
+      const clientSecret = this.configService
+        .get<string>('GOOGLE_CLIENT_SECRET')
+        ?.trim();
+      const redirectUri = this.configService
+        .get<string>('GOOGLE_REDIRECT_URI')
+        ?.trim();
 
       if (!clientId || !clientSecret || !redirectUri) {
         throw new Error('Google OAuth is not configured');
@@ -84,9 +92,12 @@ export class OAuth2Controller {
         throw new Error(tokenJson.error_description || 'Token exchange failed');
       }
 
-      const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-        headers: { Authorization: `Bearer ${tokenJson.access_token}` },
-      });
+      const userInfoRes = await fetch(
+        'https://www.googleapis.com/oauth2/v3/userinfo',
+        {
+          headers: { Authorization: `Bearer ${tokenJson.access_token}` },
+        },
+      );
 
       const userInfo = (await userInfoRes.json()) as {
         email?: string;
@@ -123,7 +134,9 @@ export class OAuth2Controller {
   }
 
   private resolveFrontendBase(): string {
-    const origins = (this.configService.get<string>('CORS_ORIGINS') ?? 'http://localhost:3000')
+    const origins = (
+      this.configService.get<string>('CORS_ORIGINS') ?? 'http://localhost:3000'
+    )
       .split(',')
       .map((origin) => origin.trim())
       .filter(Boolean);

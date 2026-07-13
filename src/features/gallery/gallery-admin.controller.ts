@@ -46,8 +46,13 @@ export class GalleryAdminController {
   ) {
     const fields = await validateDto(GalleryMultipartFieldsDto, body);
     const uploaderUserId = req.user?.id;
-    if (!uploaderUserId) throw new BadRequestException('User not authenticated');
-    return this.galleryService.uploadMultiple(files, fields.toCreateDto(), uploaderUserId);
+    if (!uploaderUserId)
+      throw new BadRequestException('User not authenticated');
+    return this.galleryService.uploadMultiple(
+      files,
+      fields.toCreateDto(),
+      uploaderUserId,
+    );
   }
 
   @Post()
@@ -79,20 +84,31 @@ export class GalleryAdminController {
     };
     const invalid = Object.entries(dto)
       .filter(([, v]) => !Number.isInteger(v) || v < 1)
-      .map(([field]) => ({ field, message: `${field} must be a positive integer` }));
+      .map(([field]) => ({
+        field,
+        message: `${field} must be a positive integer`,
+      }));
     if (invalid.length) {
-      throw new BadRequestException({ message: 'Request validation failed', details: invalid });
+      throw new BadRequestException({
+        message: 'Request validation failed',
+        details: invalid,
+      });
     }
     const uploaderUserId = req.user?.id;
-    if (!uploaderUserId) throw new BadRequestException('User not authenticated');
+    if (!uploaderUserId)
+      throw new BadRequestException('User not authenticated');
     return this.galleryService.uploadSingle(file, dto, uploaderUserId);
   }
 
   @Post('from-url')
   @HttpCode(HttpStatus.CREATED)
-  saveFromUrl(@Body() dto: CreateGalleryImageDto, @Req() req: Request & { user?: { id?: number } }) {
+  saveFromUrl(
+    @Body() dto: CreateGalleryImageDto,
+    @Req() req: Request & { user?: { id?: number } },
+  ) {
     const uploaderUserId = req.user?.id;
-    if (!uploaderUserId) throw new BadRequestException('User not authenticated');
+    if (!uploaderUserId)
+      throw new BadRequestException('User not authenticated');
     return this.galleryService.saveImageFromUrl(dto, uploaderUserId);
   }
 

@@ -7,12 +7,8 @@ import {
   Post,
   Put,
   Query,
-  UseGuards,
 } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
 import { OfficesService } from './offices.service';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
 import { CreateOfficeDto } from './dto/create-office.dto';
 import { AdminSection } from '../../shared/decorators/admin-section.decorator';
 

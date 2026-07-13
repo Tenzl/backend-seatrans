@@ -5,11 +5,9 @@ import {
   Delete,
   ForbiddenException,
   Get,
-  MaxFileSizeValidator,
   Param,
   ParseIntPipe,
   Post,
-  ParseFilePipe,
   Query,
   Req,
   UploadedFiles,
@@ -52,12 +50,15 @@ export class PublicInquiryController {
 
   @UseGuards(AuthGuard('jwt'))
   @UseInterceptors(
-    FileFieldsInterceptor([
-      { name: 'inquiry', maxCount: 1 },
-      { name: 'files', maxCount: 10 },
-    ], {
-      limits: { fileSize: 12 * 1024 * 1024, files: 11 },
-    }),
+    FileFieldsInterceptor(
+      [
+        { name: 'inquiry', maxCount: 1 },
+        { name: 'files', maxCount: 10 },
+      ],
+      {
+        limits: { fileSize: 12 * 1024 * 1024, files: 11 },
+      },
+    ),
   )
   @Post()
   async submitInquiry(
@@ -80,12 +81,19 @@ export class PublicInquiryController {
     const parsedInquiry = this.parseInquiryPayload(body, uploads.inquiry?.[0]);
     const payload = await validateDto(PublicInquiryRequestDto, parsedInquiry);
 
-    return this.inquiryService.submitInquiry(payload, uploads.files ?? [], currentUserId);
+    return this.inquiryService.submitInquiry(
+      payload,
+      uploads.files ?? [],
+      currentUserId,
+    );
   }
 
   @UseGuards(AuthGuard('jwt'))
   @Delete('batch')
-  async deleteMyInquiries(@Body() dto: DeleteInquiriesDto, @Req() req: AuthenticatedRequest) {
+  async deleteMyInquiries(
+    @Body() dto: DeleteInquiriesDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
     const currentUserId = req.user?.id;
     if (!currentUserId) {
       throw new ForbiddenException('Please log in to delete inquiries.');
@@ -100,7 +108,10 @@ export class PublicInquiryController {
   ): Record<string, unknown> {
     if (inquiryFile?.buffer?.length) {
       try {
-        return JSON.parse(inquiryFile.buffer.toString('utf-8')) as Record<string, unknown>;
+        return JSON.parse(inquiryFile.buffer.toString('utf-8')) as Record<
+          string,
+          unknown
+        >;
       } catch {
         throw new BadRequestException('Invalid inquiry payload format');
       }

@@ -10,16 +10,12 @@ import {
   Put,
   Query,
   Req,
-  UseGuards,
   UploadedFile,
   UseInterceptors,
   ParseFilePipe,
   MaxFileSizeValidator,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { AuthGuard } from '@nestjs/passport';
-import { RolesGuard } from '../../auth/guards/roles.guard';
-import { Roles } from '../../auth/decorators/roles.decorator';
 import { BookingPartnerService } from '../services/booking-partner.service';
 import { BookingPartnerImportService } from '../services/booking-partner-import.service';
 import { ListBookingPartnersDto } from '../dto/list-booking-partners.dto';
@@ -91,13 +87,20 @@ export class AdminBookingPartnerController {
     @Param('id', ParseIntPipe) id: number,
     @Query('includeArchived') includeArchived?: string,
   ) {
-    const shouldIncludeArchived = includeArchived == null ? true : includeArchived === 'true';
+    const shouldIncludeArchived =
+      includeArchived == null ? true : includeArchived === 'true';
     return this.bookingPartnerService.getDetail(id, shouldIncludeArchived);
   }
 
   @Post()
-  createPartner(@Body() dto: UpsertBookingPartnerDto, @Req() req: AuthenticatedRequest) {
-    return this.bookingPartnerService.createPartner(dto, this.currentActor(req));
+  createPartner(
+    @Body() dto: UpsertBookingPartnerDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.bookingPartnerService.createPartner(
+      dto,
+      this.currentActor(req),
+    );
   }
 
   @Put(':id')
@@ -106,7 +109,11 @@ export class AdminBookingPartnerController {
     @Body() dto: UpsertBookingPartnerDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    return this.bookingPartnerService.updatePartner(id, dto, this.currentActor(req));
+    return this.bookingPartnerService.updatePartner(
+      id,
+      dto,
+      this.currentActor(req),
+    );
   }
 
   @Patch(':id/customer-status')
@@ -115,7 +122,11 @@ export class AdminBookingPartnerController {
     @Body() dto: UpdateCustomerStatusDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    return this.bookingPartnerService.updateCustomerStatus(id, dto, this.currentActor(req));
+    return this.bookingPartnerService.updateCustomerStatus(
+      id,
+      dto,
+      this.currentActor(req),
+    );
   }
 
   @Delete()

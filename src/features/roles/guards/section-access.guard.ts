@@ -5,14 +5,33 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { SECTION_KEY } from '../decorators/section.decorator';
-import { SectionAccessService } from '../section-access.service';
+import {
+  SECTION_KEY,
+  SECTION_CHECK_SKIP,
+} from '../decorators/section.decorator';
+import { SectionAccessService, type UserLike } from '../section-access.service';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function toUserLike(value: unknown): UserLike | null {
+  if (!isRecord(value)) return null;
+  if (value.role == null) return { role: null };
+  if (!isRecord(value.role)) return null;
+
+  const id = value.role.id;
+  const name = value.role.name;
+  if (id != null && typeof id !== 'number') return null;
+  if (name != null && typeof name !== 'string') return null;
+  return { role: { id: id ?? null, name: name ?? null } };
+}
 
 /**
  * Enforces per-section access on top of the role guard. A handler/controller
  * tagged with @Section('key') is only reachable when the authenticated user's
  * role grants that section (admins always pass — see SectionAccessService).
- * Untagged handlers are unaffected.
+ * Untagged handlers / @SkipSectionCheck() are unaffected.
  */
 @Injectable()
 export class SectionAccessGuard implements CanActivate {
@@ -22,21 +41,27 @@ export class SectionAccessGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const section = this.reflector.getAllAndOverride<string>(SECTION_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
+    const raw = this.reflector.getAllAndOverride<string | string[] | null>(
+      SECTION_KEY,
+      [context.getHandler(), context.getClass()],
+    );
 
-    // No section tag → this guard imposes nothing (role guard still applies).
-    if (!section) return true;
+    if (raw == null || raw === SECTION_CHECK_SKIP) return true;
 
-    const { user } = context.switchToHttp().getRequest();
+    const sections = Array.isArray(raw) ? raw : [raw];
+    if (sections.length === 0 || sections.includes(SECTION_CHECK_SKIP))
+      return true;
+
+    const request = context.switchToHttp().getRequest<{ user?: unknown }>();
+    const user = toUserLike(request.user);
     if (!user) return false;
 
-    const allowed = await this.sectionAccess.canAccessSection(user, section);
-    if (!allowed) {
-      throw new ForbiddenException('You do not have access to this section');
+    for (const section of sections) {
+      if (await this.sectionAccess.canAccessSection(user, section)) {
+        return true;
+      }
     }
-    return true;
+
+    throw new ForbiddenException('You do not have access to this section');
   }
 }

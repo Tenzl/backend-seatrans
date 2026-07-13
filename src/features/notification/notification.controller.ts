@@ -21,7 +21,10 @@ export class NotificationController {
   constructor(private readonly notificationService: NotificationService) {}
 
   @Get()
-  list(@Query() query: ListNotificationsQueryDto, @Req() req: AuthenticatedRequest) {
+  list(
+    @Query() query: ListNotificationsQueryDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
     const userId = req.user?.id;
     if (!userId) {
       return { items: [], unreadCount: 0 };
@@ -35,7 +38,9 @@ export class NotificationController {
     if (!userId) {
       return { count: 0 };
     }
-    return this.notificationService.countUnread(userId).then((count) => ({ count }));
+    return this.notificationService
+      .countUnread(userId)
+      .then((count) => ({ count }));
   }
 
   @Patch('read-all')

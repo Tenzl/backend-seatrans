@@ -18,13 +18,17 @@ export class CategoriesService {
     private readonly categoryRepository: Repository<Category>,
   ) {}
 
-  async getAll(limit = CategoriesService.DEFAULT_LIMIT): Promise<CategoryResponseDto[]> {
+  async getAll(
+    limit = CategoriesService.DEFAULT_LIMIT,
+  ): Promise<CategoryResponseDto[]> {
     const rows = await this.categoryRepository.find({
       relations: { posts: true },
       order: { name: 'ASC' },
     });
 
-    return rows.slice(0, this.sanitizeLimit(limit)).map((item) => this.toDto(item));
+    return rows
+      .slice(0, this.sanitizeLimit(limit))
+      .map((item) => this.toDto(item));
   }
 
   async getById(id: number): Promise<CategoryResponseDto> {
@@ -42,12 +46,16 @@ export class CategoriesService {
     const name = dto.name?.trim();
     const slug = dto.slug?.trim().toLowerCase();
 
-    const duplicateName = await this.categoryRepository.findOne({ where: { name } });
+    const duplicateName = await this.categoryRepository.findOne({
+      where: { name },
+    });
     if (duplicateName) {
       throw new ConflictException('Category name already exists');
     }
 
-    const duplicateSlug = await this.categoryRepository.findOne({ where: { slug } });
+    const duplicateSlug = await this.categoryRepository.findOne({
+      where: { slug },
+    });
     if (duplicateSlug) {
       throw new ConflictException('Category slug already exists');
     }
@@ -62,8 +70,14 @@ export class CategoriesService {
     return this.toDto(saved);
   }
 
-  async update(id: number, dto: CategoryRequestDto): Promise<CategoryResponseDto> {
-    const row = await this.categoryRepository.findOne({ where: { id }, relations: { posts: true } });
+  async update(
+    id: number,
+    dto: CategoryRequestDto,
+  ): Promise<CategoryResponseDto> {
+    const row = await this.categoryRepository.findOne({
+      where: { id },
+      relations: { posts: true },
+    });
     if (!row) {
       throw new NotFoundException('Category not found');
     }
@@ -71,12 +85,16 @@ export class CategoriesService {
     const name = dto.name?.trim();
     const slug = dto.slug?.trim().toLowerCase();
 
-    const duplicateName = await this.categoryRepository.findOne({ where: { name } });
+    const duplicateName = await this.categoryRepository.findOne({
+      where: { name },
+    });
     if (duplicateName && duplicateName.id !== id) {
       throw new ConflictException('Category name already exists');
     }
 
-    const duplicateSlug = await this.categoryRepository.findOne({ where: { slug } });
+    const duplicateSlug = await this.categoryRepository.findOne({
+      where: { slug },
+    });
     if (duplicateSlug && duplicateSlug.id !== id) {
       throw new ConflictException('Category slug already exists');
     }

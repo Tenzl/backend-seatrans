@@ -39,4 +39,3 @@ export class AdminUserRowDto {
     return dto;
   }
 }
-

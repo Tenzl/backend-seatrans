@@ -14,7 +14,11 @@ export class NotificationSchemaBootstrap implements OnModuleInit {
   constructor(private readonly dataSource: DataSource) {}
 
   async onModuleInit(): Promise<void> {
-    const sqlPath = join(process.cwd(), '..', 'docs/sql/2026-05-29_notifications_postgres.sql');
+    const sqlPath = join(
+      process.cwd(),
+      '..',
+      'docs/sql/2026-05-29_notifications_postgres.sql',
+    );
 
     try {
       const sql = readFileSync(sqlPath, 'utf8');

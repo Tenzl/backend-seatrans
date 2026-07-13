@@ -37,7 +37,9 @@ export function isShortGoogleMapsUrl(url: string): boolean {
   );
 }
 
-export function parseGoogleMapsUrl(input: string | undefined | null): ParsedMapsCoordinates | null {
+export function parseGoogleMapsUrl(
+  input: string | undefined | null,
+): ParsedMapsCoordinates | null {
   if (!input) return null;
   const url = input.trim();
   if (!url) return null;
@@ -56,14 +58,18 @@ export function parseGoogleMapsUrl(input: string | undefined | null): ParsedMaps
     if (isValidCoordinate(lat, lng)) return { lat, lng };
   }
 
-  const queryMatch = url.match(/[?&](?:q|ll|query)=(-?\d+(?:\.\d+)?)%2C(-?\d+(?:\.\d+)?)/i);
+  const queryMatch = url.match(
+    /[?&](?:q|ll|query)=(-?\d+(?:\.\d+)?)%2C(-?\d+(?:\.\d+)?)/i,
+  );
   if (queryMatch) {
     const lat = parseFloat(queryMatch[1]);
     const lng = parseFloat(queryMatch[2]);
     if (isValidCoordinate(lat, lng)) return { lat, lng };
   }
 
-  const plainQueryMatch = url.match(/[?&](?:q|ll|query)=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  const plainQueryMatch = url.match(
+    /[?&](?:q|ll|query)=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/,
+  );
   if (plainQueryMatch) {
     const lat = parseFloat(plainQueryMatch[1]);
     const lng = parseFloat(plainQueryMatch[2]);
