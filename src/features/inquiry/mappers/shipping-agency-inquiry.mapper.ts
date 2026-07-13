@@ -28,6 +28,7 @@ function shippingAgencySharedFields(row: ShippingAgencyInquiryEntity): Record<st
     boatHireAmount: row.boatHireAmount,
     tallyFeeAmount: row.tallyFeeAmount,
     tugAssistanceAmount: row.tugAssistanceAmount,
+    shorecraneHireUsdPerMt: row.shorecraneHireUsdPerMt,
     quoteForm: row.quoteForm,
   };
 }
@@ -36,6 +37,7 @@ function shippingAgencyInternalEpdaFields(row: ShippingAgencyInquiryEntity): Rec
   return {
     epdaDocumentDate: row.epdaDocumentDate,
     shipType: row.shipType,
+    shipownerNationality: row.shipownerNationality,
     oceanFrtRateUsdPerMt: row.oceanFrtRateUsdPerMt,
     garbageCbmAmount: resolveGarbageCbmAmount(row.garbageCbmAmount),
     garbageUsdRate: resolveGarbageUsdRate(row.quoteForm, row.garbageUsdRate),

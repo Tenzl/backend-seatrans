@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsDateString,
@@ -9,6 +9,7 @@ import {
   IsString,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { ConfirmedCustomerFieldChangeDto } from './confirmed-customer-field-change.dto';
@@ -112,6 +113,17 @@ export class UpdateShippingAgencyEpdaDto {
   tugAssistanceAmount?: number;
 
   @IsOptional()
+  @Transform(({ value }) => {
+    if (value === null || value === undefined || value === '') return null
+    const n = Number(value)
+    return Number.isFinite(n) ? n : value
+  })
+  @ValidateIf((_, value) => value !== null && value !== undefined)
+  @IsNumber()
+  @Min(0)
+  shorecraneHireUsdPerMt?: number | null;
+
+  @IsOptional()
   @IsString()
   transportLs?: string;
 
@@ -149,6 +161,10 @@ export class UpdateShippingAgencyEpdaDto {
   @IsString()
   @MaxLength(64)
   shipType?: string;
+
+  @IsOptional()
+  @IsIn(['OVERSEAS', 'VIETNAMESE'])
+  shipownerNationality?: 'OVERSEAS' | 'VIETNAMESE';
 
   @IsOptional()
   @Type(() => Number)

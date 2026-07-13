@@ -56,6 +56,15 @@ export class ShippingAgencyInquiryEntity extends BaseInquiry {
   @Column({ name: 'tug_assistance_amount', type: 'decimal', precision: 15, scale: 2, nullable: true })
   tugAssistanceAmount!: string | null;
 
+  @Column({
+    name: 'shorecrane_hire_usd_per_mt',
+    type: 'decimal',
+    precision: 15,
+    scale: 4,
+    nullable: true,
+  })
+  shorecraneHireUsdPerMt!: string | null;
+
   @Column({ name: 'transport_ls', type: 'text', nullable: true })
   transportLs!: string | null;
 
@@ -83,6 +92,10 @@ export class ShippingAgencyInquiryEntity extends BaseInquiry {
 
   @Column({ name: 'ship_type', type: 'varchar', length: 64, nullable: true })
   shipType!: string | null;
+
+  /** OVERSEAS | VIETNAMESE — Vietnamese shipowners pay +8% VAT on selected tariff fees. */
+  @Column({ name: 'shipowner_nationality', type: 'varchar', length: 32, nullable: true })
+  shipownerNationality!: string | null;
 
   @Column({
     name: 'ocean_frt_rate_usd_per_mt',

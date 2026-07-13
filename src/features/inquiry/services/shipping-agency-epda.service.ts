@@ -92,6 +92,7 @@ export class ShippingAgencyEpdaService {
       dischargeLoadingLocation: dto.dischargeLoadingLocation.trim(),
       epdaDocumentDate: this.toDateOnly(dto.epdaDocumentDate),
       shipType: this.trimToNull(dto.shipType),
+      shipownerNationality: this.trimToNull(dto.shipownerNationality) ?? 'OVERSEAS',
       berthHours: this.toNumericString(dto.berthHours ?? 96),
       anchorageHours: this.toNumericString(dto.anchorageHours ?? 24),
       pilotage3rdMiles: this.toNumericString(
@@ -106,6 +107,7 @@ export class ShippingAgencyEpdaService {
       agencyFeeMode: this.trimToNull(dto.agencyFeeMode),
       agencyDiscountPercent: this.toNumericString(dto.agencyDiscountPercent),
       agencyLumpsumAmount: this.toNumericString(dto.agencyLumpsumAmount),
+      shorecraneHireUsdPerMt: this.toNumericString(dto.shorecraneHireUsdPerMt),
       epdaSnapshot: dto.epdaSnapshot ? this.validateSnapshot(dto.epdaSnapshot) : null,
     });
 
@@ -153,6 +155,9 @@ export class ShippingAgencyEpdaService {
     }
     if (dto.shipType !== undefined) {
       row.shipType = this.trimToNull(dto.shipType);
+    }
+    if (dto.shipownerNationality !== undefined) {
+      row.shipownerNationality = this.trimToNull(dto.shipownerNationality);
     }
     if (dto.oceanFrtRateUsdPerMt !== undefined) {
       row.oceanFrtRateUsdPerMt = this.toNumericString(dto.oceanFrtRateUsdPerMt);
@@ -307,6 +312,12 @@ export class ShippingAgencyEpdaService {
     }
     if (dto.tugAssistanceAmount !== undefined) {
       row.tugAssistanceAmount = this.toNumericString(dto.tugAssistanceAmount);
+    }
+    if (dto.shorecraneHireUsdPerMt !== undefined) {
+      row.shorecraneHireUsdPerMt =
+        dto.shorecraneHireUsdPerMt === null
+          ? null
+          : this.toNumericString(dto.shorecraneHireUsdPerMt);
     }
     if (dto.transportLs !== undefined) {
       row.transportLs = this.trimToNull(dto.transportLs);
@@ -483,6 +494,7 @@ export class ShippingAgencyEpdaService {
       'Pilotage miles': n(row.pilotage3rdMiles),
       'Document date': s(row.epdaDocumentDate),
       'Ship type': s(row.shipType),
+      'Shipowner nationality': s(row.shipownerNationality),
       'Ocean freight rate': n(row.oceanFrtRateUsdPerMt),
       'Garbage cbm': n(row.garbageCbmAmount),
       'Garbage USD rate': n(row.garbageUsdRate),
@@ -493,6 +505,7 @@ export class ShippingAgencyEpdaService {
       'Boat hire (agency)': n(row.boatHireAmount),
       'Tally fee': n(row.tallyFeeAmount),
       'Tug assistance': n(row.tugAssistanceAmount),
+      'Shorecrane-hire USD/mt': n(row.shorecraneHireUsdPerMt),
       'Transport (taxi/courier)': s(row.transportLs),
       'Boat hire (quarantine)': n(row.transportQuarantine),
     };

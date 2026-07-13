@@ -81,7 +81,7 @@ export function defaultValuesForArea(area?: string | null): EpdaParameterValues 
       { minLoa: 160, amount: 2180, label: '160 - <175m' },
       { minLoa: 175, amount: 2400, label: '175 - <190m' },
       { minLoa: 190, amount: 2600, label: '190 - <205m' },
-      { minLoa: 205, amount: 2800, label: '205 - <225m' },
+      { minLoa: 205, amount: 2800, label: '≥ 205m' },
     ],
     // Empty by default: the EPDA calc falls back to the coeff bag/equip/bulk rates
     // until an admin adds explicit per-cargo-type rates on the Parameter screen.
@@ -102,11 +102,11 @@ export function defaultValuesForArea(area?: string | null): EpdaParameterValues 
     ],
     moorUnmoorBuoyTiers: [],
     tugTiers: [
-      { minLoa: 0, amount: 1154, label: '80 - <90m' },
+      { minLoa: 0, amount: 1154, label: '0 - <90m' },
       { minLoa: 90, amount: 2308, label: '90 - <135m' },
       { minLoa: 135, amount: 3956, label: '135 - <175m' },
       { minLoa: 175, amount: 6792, label: '175 - <200m' },
-      { minLoa: 200, amount: 9916, label: 'over DWT' },
+      { minLoa: 200, amount: 9916, label: '≥ 200m' },
     ],
   };
 }

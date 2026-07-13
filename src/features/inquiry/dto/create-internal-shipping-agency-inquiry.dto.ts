@@ -94,6 +94,10 @@ export class CreateInternalShippingAgencyInquiryDto {
   shipType?: string;
 
   @IsOptional()
+  @IsIn(['OVERSEAS', 'VIETNAMESE'])
+  shipownerNationality?: 'OVERSEAS' | 'VIETNAMESE';
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
@@ -144,6 +148,12 @@ export class CreateInternalShippingAgencyInquiryDto {
   @Type(() => Number)
   @IsNumber()
   agencyLumpsumAmount?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  shorecraneHireUsdPerMt?: number;
 
   @IsOptional()
   @IsObject()
