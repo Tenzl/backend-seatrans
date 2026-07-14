@@ -644,6 +644,8 @@ export class ShippingAgencyEpdaService {
   }> {
     const serviceType = await this.requireShippingAgencyServiceType();
     const repository = manager.getRepository(ShippingAgencyInquiryEntity);
+    // Lock only the inquiry row. Postgres rejects FOR UPDATE on the nullable
+    // side of LEFT JOINs, so we must not lock joined tables.
     const row = await repository
       .createQueryBuilder('inquiry')
       .leftJoinAndSelect('inquiry.serviceType', 'serviceType')
@@ -651,10 +653,10 @@ export class ShippingAgencyEpdaService {
       .leftJoinAndSelect('inquiry.processedBy', 'processedBy')
       .leftJoinAndSelect('inquiry.quotedBy', 'quotedBy')
       .where('inquiry.id = :inquiryId', { inquiryId })
-      .andWhere('serviceType.id = :serviceTypeId', {
+      .andWhere('inquiry.serviceTypeId = :serviceTypeId', {
         serviceTypeId: serviceType.id,
       })
-      .setLock('pessimistic_write')
+      .setLock('pessimistic_write', undefined, ['inquiry'])
       .getOne();
 
     if (!row) throw new NotFoundException('Shipping agency inquiry not found');

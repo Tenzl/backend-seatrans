@@ -424,6 +424,8 @@ describe('ShippingAgencyEpdaService increment 1', () => {
     expect(transaction).toHaveBeenCalledTimes(1);
     expect(lockedQueryBuilder.setLock).toHaveBeenCalledWith(
       'pessimistic_write',
+      undefined,
+      ['inquiry'],
     );
     expect(transactionalRepository.save).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -468,6 +470,8 @@ describe('ShippingAgencyEpdaService increment 1', () => {
     expect(transaction).toHaveBeenCalledTimes(1);
     expect(lockedQueryBuilder.setLock).toHaveBeenCalledWith(
       'pessimistic_write',
+      undefined,
+      ['inquiry'],
     );
     expect(transactionalRepository.save).toHaveBeenCalledWith(
       expect.objectContaining({ epdaSnapshot: lockedSnapshot }),
@@ -514,6 +518,8 @@ describe('ShippingAgencyEpdaService increment 1', () => {
     expect(transaction).toHaveBeenCalledTimes(1);
     expect(lockedQueryBuilder.setLock).toHaveBeenCalledWith(
       'pessimistic_write',
+      undefined,
+      ['inquiry'],
     );
     expect(transactionalRepository.save).toHaveBeenCalledTimes(1);
     expect(transactionalRepository.save).toHaveBeenCalledWith(
@@ -687,6 +693,8 @@ describe('ShippingAgencyEpdaService increment 1', () => {
 
     expect(lockedQueryBuilder.setLock).toHaveBeenCalledWith(
       'pessimistic_write',
+      undefined,
+      ['inquiry'],
     );
     expect(transactionalRepository.save).not.toHaveBeenCalled();
   });
