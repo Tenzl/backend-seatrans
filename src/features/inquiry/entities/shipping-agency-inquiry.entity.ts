@@ -112,6 +112,14 @@ export class ShippingAgencyInquiryEntity extends BaseInquiry {
   })
   tugAssistanceAmount!: string | null;
 
+  /** 1 = one trip (in|out); 2 = two trips (in & out). Null treated as 2. */
+  @Column({
+    name: 'tug_assistance_trips',
+    type: 'smallint',
+    nullable: true,
+  })
+  tugAssistanceTrips!: number | null;
+
   @Column({
     name: 'shorecrane_hire_usd_per_mt',
     type: 'decimal',

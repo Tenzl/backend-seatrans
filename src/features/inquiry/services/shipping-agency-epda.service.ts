@@ -186,6 +186,7 @@ export class ShippingAgencyEpdaService {
         boatHireAmount: this.toNumericString(dto.boatHireAmount),
         tallyFeeAmount: this.toNumericString(dto.tallyFeeAmount),
         tugAssistanceAmount: this.toNumericString(dto.tugAssistanceAmount),
+        tugAssistanceTrips: dto.tugAssistanceTrips ?? 2,
         transportLs: this.trimToNull(dto.transportLs),
         transportQuarantine: this.trimToNull(dto.transportQuarantine),
         epdaDocumentDate: this.toDateOnly(dto.epdaDocumentDate),
@@ -588,6 +589,10 @@ export class ShippingAgencyEpdaService {
     }
     if (dto.tugAssistanceAmount !== undefined) {
       row.tugAssistanceAmount = this.toNumericString(dto.tugAssistanceAmount);
+    }
+    if (dto.tugAssistanceTrips !== undefined) {
+      row.tugAssistanceTrips =
+        dto.tugAssistanceTrips === null ? null : dto.tugAssistanceTrips;
     }
     if (dto.shorecraneHireUsdPerMt !== undefined) {
       row.shorecraneHireUsdPerMt =
@@ -1097,6 +1102,8 @@ export class ShippingAgencyEpdaService {
       'Boat hire (agency)': n(row.boatHireAmount),
       'Tally fee': n(row.tallyFeeAmount),
       'Tug assistance': n(row.tugAssistanceAmount),
+      'Tug assistance trips':
+        row.tugAssistanceTrips == null ? null : String(row.tugAssistanceTrips),
       'Shorecrane-hire USD/mt': n(row.shorecraneHireUsdPerMt),
       'Transport (taxi/courier)': s(row.transportLs),
       'Boat hire (quarantine)': n(row.transportQuarantine),

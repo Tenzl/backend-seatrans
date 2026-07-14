@@ -132,6 +132,11 @@ export class CreateInternalShippingAgencyInquiryDto {
   tugAssistanceAmount?: number;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsIn([1, 2])
+  tugAssistanceTrips?: 1 | 2;
+
+  @IsOptional()
   @IsString()
   transportLs?: string;
 

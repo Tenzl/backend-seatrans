@@ -127,6 +127,11 @@ export class UpdateShippingAgencyEpdaDto {
   tugAssistanceAmount?: number | null;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsIn([1, 2])
+  tugAssistanceTrips?: 1 | 2 | null;
+
+  @IsOptional()
   @Transform(({ value }: TransformFnParams) => {
     const input: unknown = value;
     if (input === null || input === undefined || input === '') return null;
