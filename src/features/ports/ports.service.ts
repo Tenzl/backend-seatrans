@@ -18,10 +18,7 @@ import {
 } from './dto/list-ports-query.dto';
 import { buildPaginatedResponse } from '../../shared/dto/pagination.dto';
 import { API_MAX_PAGE_SIZE } from '../../shared/dto/list-query.dto';
-import {
-  normalizeProvinceAreaCode,
-  PROVINCE_AREA_LABELS,
-} from '../provinces/province-area';
+import { normalizeProvinceAreaCode } from '../provinces/province-area';
 
 interface PortListParams {
   activeOnly?: boolean;
@@ -445,15 +442,7 @@ export class PortsService {
           values.push(areaCode);
           conditions.push(`province.area = $${values.length}`);
         } else {
-          const matchedCodes = Object.entries(PROVINCE_AREA_LABELS)
-            .filter(([, label]) => label.includes(search.toUpperCase()))
-            .map(([code]) => Number(code));
-          if (matchedCodes.length === 0) {
-            conditions.push('1 = 0');
-          } else {
-            values.push(matchedCodes);
-            conditions.push(`province.area = ANY($${values.length})`);
-          }
+          conditions.push('1 = 0');
         }
       } else if (searchIn === 'provinceName') {
         values.push(term, term);

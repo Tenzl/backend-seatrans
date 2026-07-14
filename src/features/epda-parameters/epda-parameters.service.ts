@@ -31,8 +31,8 @@ const AGENCY_FEE_TIERS = [
 
 /**
  * Built-in fallback defaults (mirror the FE quoteParameters defaults + the seed)
- * so the form always resolves even when no DB row exists. MIDDLE = QN template;
- * NORTHERN / SOUTHERN = HCM template.
+ * so the form always resolves even when no DB row exists. Area 2 uses the QN
+ * template; areas 1 and 3 use the HCM template.
  */
 export function defaultValuesForArea(
   area?: string | null,
@@ -169,21 +169,19 @@ export class EpdaParametersService {
     private readonly portRepo: Repository<Port>,
   ) {}
 
-  /** Record an edit on the Parameter screen (best-effort; never blocks the write). */
-  private async logChange(entry: {
-    scope: EpdaParameterScope;
-    area: string | null;
-    portId: number | null;
-    action: EpdaParameterChangeAction;
-    changedByUserId: number | null;
-    beforeValues: PartialEpdaParameterValues | null;
-    afterValues: PartialEpdaParameterValues | null;
-  }): Promise<void> {
-    try {
-      await this.logRepo.save(this.logRepo.create(entry));
-    } catch {
-      // Audit logging must not break the parameter save.
-    }
+  private async saveAudit(
+    repository: Repository<EpdaParameterChangeLog>,
+    entry: {
+      scope: EpdaParameterScope;
+      area: string | null;
+      portId: number | null;
+      action: EpdaParameterChangeAction;
+      changedByUserId: number | null;
+      beforeValues: PartialEpdaParameterValues | null;
+      afterValues: PartialEpdaParameterValues | null;
+    },
+  ): Promise<void> {
+    await repository.save(repository.create(entry));
   }
 
   listAll(): Promise<EpdaParameterSet[]> {
@@ -196,22 +194,31 @@ export class EpdaParametersService {
       );
   }
 
-  async getAreaSet(area: string): Promise<EpdaParameterSet | null> {
-    const aliases = getEpdaAreaAliases(area);
-    if (aliases.length === 0) return null;
-    const row = await this.repo
+  async getAreaSet(
+    area: string,
+    repository: Repository<EpdaParameterSet> = this.repo,
+  ): Promise<EpdaParameterSet | null> {
+    const canonicalArea = normalizeEpdaAreaKey(area);
+    if (!canonicalArea) {
+      throw new BadRequestException(`Invalid EPDA area: ${area}`);
+    }
+    const rows = await repository
       .createQueryBuilder('epda')
       .where(`epda.scope = 'AREA'`)
-      .andWhere('epda.area IN (:...aliases)', { aliases })
+      .andWhere('epda.area = :canonicalArea', { canonicalArea })
       .orderBy('epda.updatedAt', 'DESC')
-      .getOne();
+      .getMany();
+    const row = rows[0] ?? null;
     return row
       ? Object.assign(row, { area: normalizeEpdaAreaKey(row.area) })
       : null;
   }
 
-  getPortOverride(portId: number): Promise<EpdaParameterSet | null> {
-    return this.repo.findOne({ where: { scope: 'PORT', portId } });
+  getPortOverride(
+    portId: number,
+    repository: Repository<EpdaParameterSet> = this.repo,
+  ): Promise<EpdaParameterSet | null> {
+    return repository.findOne({ where: { scope: 'PORT', portId } });
   }
 
   async upsertArea(
@@ -221,33 +228,37 @@ export class EpdaParametersService {
   ): Promise<EpdaParameterSet> {
     const normalizedArea = normalizeEpdaAreaKey(area);
     if (!normalizedArea) throw new NotFoundException('Invalid area');
-    const existing = await this.getAreaSet(normalizedArea);
-    const before = existing ? existing.values : null;
-    const saved = existing
-      ? await this.repo.save(
-          Object.assign(existing, {
-            area: normalizedArea,
-            values: mergeValues(normalizedArea, existing.values, values),
-          }),
-        )
-      : await this.repo.save(
-          this.repo.create({
-            scope: 'AREA',
-            area: normalizedArea,
-            portId: null,
-            values: mergeValues(normalizedArea, values),
-          }),
-        );
-    await this.logChange({
-      scope: 'AREA',
-      area: normalizedArea,
-      portId: null,
-      action: 'UPSERT_AREA',
-      changedByUserId: actorUserId ?? null,
-      beforeValues: before,
-      afterValues: saved.values,
+    return this.repo.manager.transaction(async (manager) => {
+      const repository = manager.getRepository(EpdaParameterSet);
+      const auditRepository = manager.getRepository(EpdaParameterChangeLog);
+      const existing = await this.getAreaSet(normalizedArea, repository);
+      const before = existing ? existing.values : null;
+      const saved = existing
+        ? await repository.save(
+            Object.assign(existing, {
+              area: normalizedArea,
+              values: mergeValues(normalizedArea, existing.values, values),
+            }),
+          )
+        : await repository.save(
+            repository.create({
+              scope: 'AREA',
+              area: normalizedArea,
+              portId: null,
+              values: mergeValues(normalizedArea, values),
+            }),
+          );
+      await this.saveAudit(auditRepository, {
+        scope: 'AREA',
+        area: normalizedArea,
+        portId: null,
+        action: 'UPSERT_AREA',
+        changedByUserId: actorUserId ?? null,
+        beforeValues: before,
+        afterValues: saved.values,
+      });
+      return saved;
     });
-    return saved;
   }
 
   private async resolvePortArea(
@@ -268,60 +279,70 @@ export class EpdaParametersService {
     actorUserId?: number,
   ): Promise<EpdaParameterSet> {
     const area = await this.resolvePortArea(portId);
-    const existing = await this.getPortOverride(portId);
-    const before = existing ? existing.values : null;
-    const saved = existing
-      ? await this.repo.save(
-          Object.assign(existing, {
-            area,
-            // PUT semantics: the Parameter screen sends the complete partial
-            // override document. Omitted nested fields are intentionally unset.
-            values: this.replaceOverrideDocument(values),
-          }),
-        )
-      : await this.repo.save(
-          this.repo.create({
-            scope: 'PORT',
-            area,
-            portId,
-            values: this.replaceOverrideDocument(values),
-          }),
-        );
-    await this.logChange({
-      scope: 'PORT',
-      area,
-      portId,
-      action: 'UPSERT_PORT',
-      changedByUserId: actorUserId ?? null,
-      beforeValues: before,
-      afterValues: saved.values,
+    return this.repo.manager.transaction(async (manager) => {
+      const repository = manager.getRepository(EpdaParameterSet);
+      const auditRepository = manager.getRepository(EpdaParameterChangeLog);
+      const existing = await this.getPortOverride(portId, repository);
+      const before = existing ? existing.values : null;
+      const saved = existing
+        ? await repository.save(
+            Object.assign(existing, {
+              area,
+              // PUT semantics: the Parameter screen sends the complete partial
+              // override document. Omitted nested fields are intentionally unset.
+              values: this.replaceOverrideDocument(values),
+            }),
+          )
+        : await repository.save(
+            repository.create({
+              scope: 'PORT',
+              area,
+              portId,
+              values: this.replaceOverrideDocument(values),
+            }),
+          );
+      await this.saveAudit(auditRepository, {
+        scope: 'PORT',
+        area,
+        portId,
+        action: 'UPSERT_PORT',
+        changedByUserId: actorUserId ?? null,
+        beforeValues: before,
+        afterValues: saved.values,
+      });
+      return saved;
     });
-    return saved;
   }
 
   async deletePort(portId: number, actorUserId?: number): Promise<void> {
-    const existing = await this.getPortOverride(portId);
-    await this.repo.delete({ scope: 'PORT', portId });
-    await this.logChange({
-      scope: 'PORT',
-      area: existing?.area ?? null,
-      portId,
-      action: 'DELETE_PORT',
-      changedByUserId: actorUserId ?? null,
-      beforeValues: existing ? existing.values : null,
-      afterValues: null,
+    await this.repo.manager.transaction(async (manager) => {
+      const repository = manager.getRepository(EpdaParameterSet);
+      const auditRepository = manager.getRepository(EpdaParameterChangeLog);
+      const existing = await this.getPortOverride(portId, repository);
+      await repository.delete({ scope: 'PORT', portId });
+      await this.saveAudit(auditRepository, {
+        scope: 'PORT',
+        area: existing?.area ?? null,
+        portId,
+        action: 'DELETE_PORT',
+        changedByUserId: actorUserId ?? null,
+        beforeValues: existing ? existing.values : null,
+        afterValues: null,
+      });
     });
   }
 
   // ---------- port groups (named set of ports inside an area) ----------
 
   async listGroups(area: string): Promise<EpdaParameterSet[]> {
-    const aliases = getEpdaAreaAliases(area);
-    if (aliases.length === 0) return [];
+    const canonicalArea = normalizeEpdaAreaKey(area);
+    if (!canonicalArea) {
+      throw new BadRequestException(`Invalid EPDA area: ${area}`);
+    }
     const rows = await this.repo
       .createQueryBuilder('epda')
       .where(`epda.scope = 'GROUP'`)
-      .andWhere('epda.area IN (:...aliases)', { aliases })
+      .andWhere('epda.area = :canonicalArea', { canonicalArea })
       .orderBy('epda.name', 'ASC')
       .getMany();
     return rows.map((row) =>
@@ -350,10 +371,10 @@ export class EpdaParametersService {
   ): Promise<EpdaParameterSet> {
     const normalizedArea = normalizeEpdaAreaKey(area);
     if (!normalizedArea) throw new NotFoundException('Invalid area');
-    const saved = await this.repo.manager.transaction(async (manager) => {
+    return this.repo.manager.transaction(async (manager) => {
       await this.acquireGroupAreaLock(manager, normalizedArea);
       const repository = manager.getRepository(EpdaParameterSet);
-      return repository.save(
+      const saved = await repository.save(
         repository.create({
           scope: 'GROUP',
           area: normalizedArea,
@@ -363,17 +384,17 @@ export class EpdaParametersService {
           values: values ?? {},
         }),
       );
+      await this.saveAudit(manager.getRepository(EpdaParameterChangeLog), {
+        scope: 'GROUP',
+        area: normalizedArea,
+        portId: null,
+        action: 'UPSERT_GROUP',
+        changedByUserId: actorUserId ?? null,
+        beforeValues: null,
+        afterValues: saved.values,
+      });
+      return saved;
     });
-    await this.logChange({
-      scope: 'GROUP',
-      area: normalizedArea,
-      portId: null,
-      action: 'UPSERT_GROUP',
-      changedByUserId: actorUserId ?? null,
-      beforeValues: null,
-      afterValues: saved.values,
-    });
-    return saved;
   }
 
   async updateGroup(
@@ -381,48 +402,44 @@ export class EpdaParametersService {
     patch: { name?: string; values?: PartialEpdaParameterValues },
     actorUserId?: number,
   ): Promise<EpdaParameterSet> {
-    const { saved, before, groupArea } = await this.repo.manager.transaction(
-      async (manager) => {
-        const repository = manager.getRepository(EpdaParameterSet);
-        const initial = await repository.findOne({
-          where: { id, scope: 'GROUP' },
-        });
-        if (!initial) throw new NotFoundException(`Group ${id} not found`);
-        const groupArea = normalizeEpdaAreaKey(initial.area);
-        if (!groupArea) throw new BadRequestException('Group area is invalid');
-        await this.acquireGroupAreaLock(manager, groupArea);
+    return this.repo.manager.transaction(async (manager) => {
+      const repository = manager.getRepository(EpdaParameterSet);
+      const initial = await repository.findOne({
+        where: { id, scope: 'GROUP' },
+      });
+      if (!initial) throw new NotFoundException(`Group ${id} not found`);
+      const groupArea = normalizeEpdaAreaKey(initial.area);
+      if (!groupArea) throw new BadRequestException('Group area is invalid');
+      await this.acquireGroupAreaLock(manager, groupArea);
 
-        const current = await repository.findOne({
-          where: { id, scope: 'GROUP' },
-        });
-        if (!current) throw new NotFoundException(`Group ${id} not found`);
-        const before = current.values;
-        const metadataPatch: Partial<
-          Pick<EpdaParameterSet, 'name' | 'values'>
-        > = {};
-        if (patch.name !== undefined) metadataPatch.name = patch.name;
-        if (patch.values !== undefined) metadataPatch.values = patch.values;
-        if (Object.keys(metadataPatch).length) {
-          await repository.update({ id, scope: 'GROUP' }, metadataPatch);
-          Object.assign(current, metadataPatch);
-        }
-        return { saved: current, before, groupArea };
-      },
-    );
-    await this.logChange({
-      scope: 'GROUP',
-      area: groupArea,
-      portId: null,
-      action: 'UPSERT_GROUP',
-      changedByUserId: actorUserId ?? null,
-      beforeValues: before,
-      afterValues: saved.values,
+      const current = await repository.findOne({
+        where: { id, scope: 'GROUP' },
+      });
+      if (!current) throw new NotFoundException(`Group ${id} not found`);
+      const before = current.values;
+      const metadataPatch: Partial<Pick<EpdaParameterSet, 'name' | 'values'>> =
+        {};
+      if (patch.name !== undefined) metadataPatch.name = patch.name;
+      if (patch.values !== undefined) metadataPatch.values = patch.values;
+      if (Object.keys(metadataPatch).length) {
+        await repository.update({ id, scope: 'GROUP' }, metadataPatch);
+        Object.assign(current, metadataPatch);
+      }
+      await this.saveAudit(manager.getRepository(EpdaParameterChangeLog), {
+        scope: 'GROUP',
+        area: groupArea,
+        portId: null,
+        action: 'UPSERT_GROUP',
+        changedByUserId: actorUserId ?? null,
+        beforeValues: before,
+        afterValues: current.values,
+      });
+      return current;
     });
-    return saved;
   }
 
   async deleteGroup(id: number, actorUserId?: number): Promise<void> {
-    const group = await this.repo.manager.transaction(async (manager) => {
+    await this.repo.manager.transaction(async (manager) => {
       const repository = manager.getRepository(EpdaParameterSet);
       const initial = await repository.findOne({
         where: { id, scope: 'GROUP' },
@@ -436,17 +453,16 @@ export class EpdaParametersService {
       });
       if (!current) return null;
       await repository.delete({ id, scope: 'GROUP' });
+      await this.saveAudit(manager.getRepository(EpdaParameterChangeLog), {
+        scope: 'GROUP',
+        area: current.area,
+        portId: null,
+        action: 'DELETE_GROUP',
+        changedByUserId: actorUserId ?? null,
+        beforeValues: current.values,
+        afterValues: null,
+      });
       return current;
-    });
-    if (!group) return;
-    await this.logChange({
-      scope: 'GROUP',
-      area: group.area,
-      portId: null,
-      action: 'DELETE_GROUP',
-      changedByUserId: actorUserId ?? null,
-      beforeValues: group.values,
-      afterValues: null,
     });
   }
 
@@ -466,81 +482,75 @@ export class EpdaParametersService {
       );
     }
 
-    const { saved, groupArea } = await this.repo.manager.transaction(
-      async (manager) => {
-        const parameterRepo = manager.getRepository(EpdaParameterSet);
-        const transactionalPortRepo = manager.getRepository(Port);
-        let group = await parameterRepo.findOne({
-          where: { id, scope: 'GROUP' },
-        });
-        if (!group) throw new NotFoundException(`Group ${id} not found`);
-        const groupArea = normalizeEpdaAreaKey(group.area);
-        if (!groupArea) throw new BadRequestException('Group area is invalid');
+    return this.repo.manager.transaction(async (manager) => {
+      const parameterRepo = manager.getRepository(EpdaParameterSet);
+      const transactionalPortRepo = manager.getRepository(Port);
+      let group = await parameterRepo.findOne({
+        where: { id, scope: 'GROUP' },
+      });
+      if (!group) throw new NotFoundException(`Group ${id} not found`);
+      const groupArea = normalizeEpdaAreaKey(group.area);
+      if (!groupArea) throw new BadRequestException('Group area is invalid');
 
-        await this.acquireGroupAreaLock(manager, groupArea);
-        const lockedGroup = await parameterRepo.findOne({
-          where: { id, scope: 'GROUP' },
-        });
-        if (!lockedGroup) throw new NotFoundException(`Group ${id} not found`);
-        group = lockedGroup;
+      await this.acquireGroupAreaLock(manager, groupArea);
+      const lockedGroup = await parameterRepo.findOne({
+        where: { id, scope: 'GROUP' },
+      });
+      if (!lockedGroup) throw new NotFoundException(`Group ${id} not found`);
+      group = lockedGroup;
 
-        const ports = unique.length
-          ? await transactionalPortRepo.find({
-              where: { id: In(unique) },
-              relations: { province: true },
-            })
-          : [];
-        if (ports.length !== unique.length) {
-          const found = new Set(ports.map((port) => port.id));
-          const missing = unique.filter((portId) => !found.has(portId));
-          throw new BadRequestException(
-            `Ports not found: ${missing.join(', ')}`,
-          );
-        }
-        const wrongArea = ports.filter(
-          (port) =>
-            String(normalizeProvinceAreaCode(port.province?.area ?? null)) !==
-            groupArea,
+      const ports = unique.length
+        ? await transactionalPortRepo.find({
+            where: { id: In(unique) },
+            relations: { province: true },
+          })
+        : [];
+      if (ports.length !== unique.length) {
+        const found = new Set(ports.map((port) => port.id));
+        const missing = unique.filter((portId) => !found.has(portId));
+        throw new BadRequestException(`Ports not found: ${missing.join(', ')}`);
+      }
+      const wrongArea = ports.filter(
+        (port) =>
+          String(normalizeProvinceAreaCode(port.province?.area ?? null)) !==
+          groupArea,
+      );
+      if (wrongArea.length) {
+        throw new BadRequestException(
+          `Ports outside group area ${groupArea}: ${wrongArea.map((port) => port.id).join(', ')}`,
         );
-        if (wrongArea.length) {
-          throw new BadRequestException(
-            `Ports outside group area ${groupArea}: ${wrongArea.map((port) => port.id).join(', ')}`,
-          );
-        }
+      }
 
-        const aliases = getEpdaAreaAliases(groupArea);
-        const siblings = await parameterRepo.find({
-          where: { scope: 'GROUP', area: In(aliases) },
-        });
-        const changedSiblings = siblings
-          .filter((sibling) => sibling.id !== id)
-          .filter((sibling) =>
-            (sibling.memberPortIds ?? []).some((portId) =>
-              unique.includes(portId),
-            ),
-          );
-        for (const sibling of changedSiblings) {
-          sibling.memberPortIds = (sibling.memberPortIds ?? []).filter(
-            (portId) => !unique.includes(portId),
-          );
-        }
+      const siblings = await parameterRepo.find({
+        where: { scope: 'GROUP', area: groupArea },
+      });
+      const changedSiblings = siblings
+        .filter((sibling) => sibling.id !== id)
+        .filter((sibling) =>
+          (sibling.memberPortIds ?? []).some((portId) =>
+            unique.includes(portId),
+          ),
+        );
+      for (const sibling of changedSiblings) {
+        sibling.memberPortIds = (sibling.memberPortIds ?? []).filter(
+          (portId) => !unique.includes(portId),
+        );
+      }
 
-        group.memberPortIds = unique;
-        if (changedSiblings.length) await parameterRepo.save(changedSiblings);
-        const saved = await parameterRepo.save(group);
-        return { saved, groupArea };
-      },
-    );
-    await this.logChange({
-      scope: 'GROUP',
-      area: groupArea,
-      portId: null,
-      action: 'SET_GROUP_MEMBERS',
-      changedByUserId: actorUserId ?? null,
-      beforeValues: null,
-      afterValues: null,
+      group.memberPortIds = unique;
+      if (changedSiblings.length) await parameterRepo.save(changedSiblings);
+      const saved = await parameterRepo.save(group);
+      await this.saveAudit(manager.getRepository(EpdaParameterChangeLog), {
+        scope: 'GROUP',
+        area: groupArea,
+        portId: null,
+        action: 'SET_GROUP_MEMBERS',
+        changedByUserId: actorUserId ?? null,
+        beforeValues: null,
+        afterValues: null,
+      });
+      return saved;
     });
-    return saved;
   }
 
   private async acquireGroupAreaLock(
@@ -567,9 +577,11 @@ export class EpdaParametersService {
     if (opts.portId != null)
       qb.where('log.portId = :portId', { portId: opts.portId });
     else if (opts.area) {
-      const aliases = getEpdaAreaAliases(opts.area);
-      if (aliases.length === 0) return [];
-      qb.where('log.area IN (:...aliases)', { aliases });
+      const canonicalArea = normalizeEpdaAreaKey(opts.area);
+      if (!canonicalArea) {
+        throw new BadRequestException(`Invalid EPDA area: ${opts.area}`);
+      }
+      qb.where('log.area = :canonicalArea', { canonicalArea });
     }
     const rows = await qb.getMany();
 
@@ -647,19 +659,8 @@ export class EpdaParametersService {
 }
 
 function normalizeEpdaAreaKey(value?: string | null): '1' | '2' | '3' | null {
-  const code = normalizeProvinceAreaCode(value ?? null);
-  return code ? (String(code) as '1' | '2' | '3') : null;
-}
-
-function getEpdaAreaAliases(value?: string | null): string[] {
-  const normalized = normalizeEpdaAreaKey(value);
-  if (!normalized) return [];
-  switch (normalized) {
-    case '1':
-      return ['1', 'NORTHERN'];
-    case '2':
-      return ['2', 'MIDDLE'];
-    case '3':
-      return ['3', 'SOUTHERN'];
-  }
+  const normalized = value?.trim();
+  return normalized === '1' || normalized === '2' || normalized === '3'
+    ? normalized
+    : null;
 }

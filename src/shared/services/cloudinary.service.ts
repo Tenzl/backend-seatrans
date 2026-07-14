@@ -7,6 +7,8 @@ export interface CloudinaryUploadResult {
   publicId: string;
 }
 
+export type CloudinaryResourceType = 'image' | 'raw';
+
 function toError(error: unknown, fallbackMessage: string): Error {
   if (error instanceof Error) {
     return error;
@@ -118,15 +120,20 @@ export class CloudinaryService {
     };
   }
 
-  async deleteByPublicId(publicId: string): Promise<void> {
+  async deleteByPublicId(
+    publicId: string,
+    resourceType: CloudinaryResourceType = 'image',
+  ): Promise<void> {
     if (!publicId) {
       return;
     }
 
-    await cloudinary.uploader.destroy(publicId).catch((error: unknown) => {
-      throw new InternalServerErrorException(
-        `Cloudinary delete failed: ${toError(error, 'Unknown error').message}`,
-      );
-    });
+    await cloudinary.uploader
+      .destroy(publicId, { resource_type: resourceType })
+      .catch((error: unknown) => {
+        throw new InternalServerErrorException(
+          `Cloudinary delete failed: ${toError(error, 'Unknown error').message}`,
+        );
+      });
   }
 }

@@ -395,7 +395,7 @@ export class ServiceInquiryService {
   async softDeleteBatchByUser(
     userId: number,
     ids: number[],
-    serviceSlug?: string,
+    serviceSlug: string,
   ): Promise<{ deletedCount: number }> {
     const found = await this.findRowsAcrossRepos(ids, {
       includeDeleted: false,
@@ -501,8 +501,9 @@ export class ServiceInquiryService {
   async deleteBatchByUser(
     userId: number,
     ids: number[],
+    serviceSlug: string,
   ): Promise<{ deletedCount: number }> {
-    return this.softDeleteBatchByUser(userId, ids);
+    return this.softDeleteBatchByUser(userId, ids, serviceSlug);
   }
 
   /** @deprecated Use soft/hard delete methods explicitly. */

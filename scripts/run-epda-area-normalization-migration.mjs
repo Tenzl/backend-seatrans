@@ -1,75 +1,82 @@
-import { readFileSync, existsSync } from 'node:fs'
-import { dirname, join, isAbsolute, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import pg from 'pg'
+import { readFileSync, existsSync } from 'node:fs';
+import { dirname, join, isAbsolute, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import pg from 'pg';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const repoRoot = join(root, '..')
-const envPath = join(root, '.env')
-const sqlPath = join(repoRoot, 'docs/sql/2026-07-08_normalize_epda_parameter_areas_postgres.sql')
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const envPath = join(root, '.env');
+const sqlPath = join(root, 'scripts/sql/normalize-epda-areas-canonical.sql');
 
 function loadEnvFile(path) {
-  const content = readFileSync(path, 'utf8')
+  const content = readFileSync(path, 'utf8');
   for (const line of content.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith('#')) continue
-    const eq = trimmed.indexOf('=')
-    if (eq === -1) continue
-    const key = trimmed.slice(0, eq).trim()
-    let value = trimmed.slice(eq + 1).trim()
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
     if (
       (value.startsWith('"') && value.endsWith('"')) ||
       (value.startsWith("'") && value.endsWith("'"))
     ) {
-      value = value.slice(1, -1)
+      value = value.slice(1, -1);
     }
     if (process.env[key] === undefined) {
-      process.env[key] = value
+      process.env[key] = value;
     }
   }
 }
 
 function buildSsl() {
-  const dbUrl = process.env.DB_URL?.trim()
-  let sslModeFromUrl = null
+  const dbUrl = process.env.DB_URL?.trim();
+  let sslModeFromUrl = null;
   if (dbUrl) {
     try {
-      sslModeFromUrl = new URL(dbUrl).searchParams.get('sslmode')
+      sslModeFromUrl = new URL(dbUrl).searchParams.get('sslmode');
     } catch {
       /* ignore malformed URL */
     }
   }
 
-  const explicit = process.env.DB_SSL?.toLowerCase()
+  const explicit = process.env.DB_SSL?.toLowerCase();
   const requireFromUrl =
-    sslModeFromUrl && ['require', 'verify-ca', 'verify-full'].includes(sslModeFromUrl)
+    sslModeFromUrl &&
+    ['require', 'verify-ca', 'verify-full'].includes(sslModeFromUrl);
 
   const sslEnabled =
-    explicit === 'true' || explicit === '1' || explicit === 'require' || Boolean(requireFromUrl)
+    explicit === 'true' ||
+    explicit === '1' ||
+    explicit === 'require' ||
+    Boolean(requireFromUrl);
 
-  if (!sslEnabled) return undefined
+  if (!sslEnabled) return undefined;
 
-  const rejectRaw = (process.env.DB_SSL_REJECT_UNAUTHORIZED ?? 'false').toLowerCase()
-  const rejectUnauthorized = rejectRaw === 'true' || rejectRaw === '1'
+  const rejectRaw = (
+    process.env.DB_SSL_REJECT_UNAUTHORIZED ?? 'false'
+  ).toLowerCase();
+  const rejectUnauthorized = rejectRaw === 'true' || rejectRaw === '1';
 
-  const caPath = process.env.DB_SSL_CA_PATH?.trim()
+  const caPath = process.env.DB_SSL_CA_PATH?.trim();
   if (caPath) {
-    const absolute = isAbsolute(caPath) ? caPath : resolve(root, caPath)
+    const absolute = isAbsolute(caPath) ? caPath : resolve(root, caPath);
     if (existsSync(absolute)) {
-      return { rejectUnauthorized: true, ca: readFileSync(absolute, 'utf8') }
+      return { rejectUnauthorized: true, ca: readFileSync(absolute, 'utf8') };
     }
-    console.warn(`[migrate] DB_SSL_CA_PATH not found at ${absolute}, using rejectUnauthorized=${rejectUnauthorized}`)
+    console.warn(
+      `[migrate] DB_SSL_CA_PATH not found at ${absolute}, using rejectUnauthorized=${rejectUnauthorized}`,
+    );
   }
 
-  return { rejectUnauthorized }
+  return { rejectUnauthorized };
 }
 
 function buildClientConfig() {
-  const dbUrl = process.env.DB_URL?.trim()
-  const ssl = buildSsl()
+  const dbUrl = process.env.DB_URL?.trim();
+  const ssl = buildSsl();
 
   if (dbUrl) {
-    const parsed = new URL(dbUrl)
+    const parsed = new URL(dbUrl);
     return {
       host: parsed.hostname,
       port: Number(parsed.port) || 5432,
@@ -77,7 +84,7 @@ function buildClientConfig() {
       password: decodeURIComponent(parsed.password),
       database: parsed.pathname.replace(/^\//, ''),
       ssl,
-    }
+    };
   }
 
   return {
@@ -87,44 +94,44 @@ function buildClientConfig() {
     password: process.env.DB_PASSWORD ?? '',
     database: process.env.DB_DATABASE ?? 'seatrans',
     ssl,
-  }
+  };
 }
 
-loadEnvFile(envPath)
+loadEnvFile(envPath);
 
-const sql = readFileSync(sqlPath, 'utf8')
-const clientConfig = buildClientConfig()
-const client = new pg.Client(clientConfig)
+const sql = readFileSync(sqlPath, 'utf8');
+const clientConfig = buildClientConfig();
+const client = new pg.Client(clientConfig);
 
 try {
-  await client.connect()
+  await client.connect();
   console.log(
     `[migrate] connected -> host=${clientConfig.host} db=${clientConfig.database} ssl=${clientConfig.ssl ? 'on' : 'off'}`,
-  )
+  );
 
   const beforeSet = await client.query(
     `SELECT count(*)::int AS c
      FROM epda_parameter_set
-     WHERE upper(trim(area)) IN ('NORTHERN', 'MIDDLE', 'SOUTHERN')`,
-  )
+     WHERE upper(trim(area)) IN ('NORTH', 'NORTHERN', 'MIDDLE', 'SOUTH', 'SOUTHERN')`,
+  );
   const beforeLog = await client.query(
     `SELECT count(*)::int AS c
      FROM epda_parameter_change_logs
-     WHERE upper(trim(area)) IN ('NORTHERN', 'MIDDLE', 'SOUTHERN')`,
-  )
+     WHERE upper(trim(area)) IN ('NORTH', 'NORTHERN', 'MIDDLE', 'SOUTH', 'SOUTHERN')`,
+  );
 
-  await client.query(sql)
+  await client.query(sql);
 
   const afterSet = await client.query(
     `SELECT count(*)::int AS c
      FROM epda_parameter_set
-     WHERE upper(trim(area)) IN ('NORTHERN', 'MIDDLE', 'SOUTHERN')`,
-  )
+     WHERE upper(trim(area)) IN ('NORTH', 'NORTHERN', 'MIDDLE', 'SOUTH', 'SOUTHERN')`,
+  );
   const afterLog = await client.query(
     `SELECT count(*)::int AS c
      FROM epda_parameter_change_logs
-     WHERE upper(trim(area)) IN ('NORTHERN', 'MIDDLE', 'SOUTHERN')`,
-  )
+     WHERE upper(trim(area)) IN ('NORTH', 'NORTHERN', 'MIDDLE', 'SOUTH', 'SOUTHERN')`,
+  );
 
   console.log(
     JSON.stringify(
@@ -141,7 +148,7 @@ try {
       null,
       2,
     ),
-  )
+  );
 } finally {
-  await client.end()
+  await client.end();
 }

@@ -2,14 +2,22 @@ import {
   BadRequestException,
   Controller,
   Get,
+  HttpStatus,
   Logger,
   Query,
+  Req,
   Res,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { resolveGoogleFullName } from './dto/oauth-profile.dto';
+import { setAuthCookie } from './auth-cookie';
+import {
+  consumeOAuthState,
+  generateOAuthState,
+  setOAuthStateCookie,
+} from './oauth-state';
 
 @Controller('v1/auth/oauth2')
 export class OAuth2Controller {
@@ -21,7 +29,7 @@ export class OAuth2Controller {
   ) {}
 
   @Get('google')
-  initiateGoogleLogin() {
+  initiateGoogleLogin(@Res({ passthrough: true }) res: Response) {
     const clientId = this.configService.get<string>('GOOGLE_CLIENT_ID')?.trim();
     const redirectUri = this.configService
       .get<string>('GOOGLE_REDIRECT_URI')
@@ -31,11 +39,14 @@ export class OAuth2Controller {
       throw new BadRequestException('Google OAuth is not configured');
     }
 
+    const state = generateOAuthState();
+    setOAuthStateCookie(res, state);
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
       response_type: 'code',
       scope: 'profile email',
+      state,
     });
 
     return {
@@ -46,11 +57,15 @@ export class OAuth2Controller {
   @Get('callback/google')
   async handleGoogleCallback(
     @Query('code') code: string | undefined,
+    @Query('state') state: string | undefined,
+    @Req() req: Request,
     @Res() res: Response,
   ) {
-    const frontendBase = this.resolveFrontendBase();
-
+    const hasValidState = consumeOAuthState(req, res, state);
     try {
+      if (!hasValidState) {
+        throw new Error('Invalid OAuth state');
+      }
       if (!code?.trim()) {
         throw new Error('Missing authorization code');
       }
@@ -121,19 +136,29 @@ export class OAuth2Controller {
       });
 
       if (!user.isActive) {
-        return res.redirect(`${frontendBase}/login?error=account_disabled`);
+        return this.redirectToFrontend(res, '/login', 'account_disabled');
       }
 
       const auth = this.authService.buildAuthResponse(user);
-      const callbackUrl = `${frontendBase}/auth/callback?token=${encodeURIComponent(auth.token)}`;
-      return res.redirect(callbackUrl);
+      setAuthCookie(res, auth.token);
+      return this.redirectToFrontend(res, '/auth/callback');
     } catch (error) {
       this.logger.error('OAuth2 callback error', error);
-      return res.redirect(`${frontendBase}/login?error=oauth_failed`);
+      return this.redirectToFrontend(res, '/login', 'oauth_failed');
     }
   }
 
-  private resolveFrontendBase(): string {
+  private redirectToFrontend(
+    res: Response,
+    path: '/auth/callback' | '/login',
+    errorCode?: 'account_disabled' | 'oauth_failed',
+  ) {
+    const target = new URL(path, `${this.resolveFrontendOrigin()}/`);
+    if (errorCode) target.searchParams.set('error', errorCode);
+    return res.redirect(HttpStatus.SEE_OTHER, target.toString());
+  }
+
+  private resolveFrontendOrigin(): string {
     const origins = (
       this.configService.get<string>('CORS_ORIGINS') ?? 'http://localhost:3000'
     )
@@ -141,7 +166,21 @@ export class OAuth2Controller {
       .map((origin) => origin.trim())
       .filter(Boolean);
 
-    const frontendBase = origins[0] ?? 'http://localhost:3000';
-    return frontendBase.replace(/\/+$/, '');
+    for (const candidate of origins) {
+      try {
+        const url = new URL(candidate);
+        if (
+          (url.protocol === 'http:' || url.protocol === 'https:') &&
+          !url.username &&
+          !url.password
+        ) {
+          return url.origin;
+        }
+      } catch {
+        // Ignore malformed CORS entries and continue to the safe fixed fallback.
+      }
+    }
+
+    return 'http://localhost:3000';
   }
 }

@@ -22,6 +22,7 @@ import { AdminInquiryDocumentController } from './controllers/admin-inquiry-docu
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CloudinaryService } from '../../shared/services/cloudinary.service';
 import { NotificationModule } from '../notification/notification.module';
+import { EpdaParametersModule } from '../epda-parameters/epda-parameters.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { NotificationModule } from '../notification/notification.module';
       Port,
     ]),
     NotificationModule,
+    EpdaParametersModule,
   ],
   providers: [
     ServiceInquiryService,

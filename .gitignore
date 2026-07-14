@@ -76,7 +76,3 @@ $RECYCLE.BIN/
 .cache
 .eslintcache
 .stylelintcache
-
-# ===== One-off / debug scripts =====
-# Remove this line if you actually want to track fix_shipping.js
-fix_shipping.js

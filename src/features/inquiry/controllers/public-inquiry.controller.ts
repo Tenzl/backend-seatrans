@@ -21,6 +21,7 @@ import { ServiceInquiryService } from '../services/service-inquiry.service';
 import { ListInquiriesQueryDto } from '../dto/list-inquiries-query.dto';
 import { PublicInquiryRequestDto } from '../dto/public-inquiry-request.dto';
 import { DeleteInquiriesDto } from '../dto/delete-inquiries.dto';
+import { PublicDeleteInquiriesQueryDto } from '../dto/delete-inquiries-query.dto';
 import { validateDto } from '../../../shared/utils/validate-dto.util';
 
 type AuthenticatedRequest = Request & {
@@ -92,6 +93,7 @@ export class PublicInquiryController {
   @Delete('batch')
   async deleteMyInquiries(
     @Body() dto: DeleteInquiriesDto,
+    @Query() query: PublicDeleteInquiriesQueryDto,
     @Req() req: AuthenticatedRequest,
   ) {
     const currentUserId = req.user?.id;
@@ -99,7 +101,11 @@ export class PublicInquiryController {
       throw new ForbiddenException('Please log in to delete inquiries.');
     }
 
-    return this.inquiryService.deleteBatchByUser(currentUserId, dto.ids);
+    return this.inquiryService.softDeleteBatchByUser(
+      currentUserId,
+      dto.ids,
+      query.serviceSlug,
+    );
   }
 
   private parseInquiryPayload(

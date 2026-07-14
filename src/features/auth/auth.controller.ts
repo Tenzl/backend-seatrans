@@ -16,10 +16,11 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { AuthGuard } from '@nestjs/passport';
-import type { CookieOptions, Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import { SessionExchangeDto } from './dto/session-exchange.dto';
 import { SectionAccessService } from '../roles/section-access.service';
 import { User } from './entities/user.entity';
+import { clearAuthCookie, setAuthCookie } from './auth-cookie';
 
 type AuthenticatedRequest = Request & { user: User };
 
@@ -37,7 +38,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const auth = await this.authService.register(registerDto);
-    this.setAuthCookie(res, auth.token);
+    setAuthCookie(res, auth.token);
     return auth;
   }
 
@@ -48,7 +49,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const auth = await this.authService.login(loginDto);
-    this.setAuthCookie(res, auth.token);
+    setAuthCookie(res, auth.token);
     return auth;
   }
 
@@ -66,14 +67,14 @@ export class AuthController {
     if (!auth) {
       throw new UnauthorizedException('Invalid token');
     }
-    this.setAuthCookie(res, auth.token);
+    setAuthCookie(res, auth.token);
     return auth;
   }
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   logout(@Res({ passthrough: true }) res: Response) {
-    res.clearCookie('auth_token', this.cookieOptions());
+    clearAuthCookie(res);
     return { ok: true };
   }
 
@@ -91,20 +92,5 @@ export class AuthController {
   @Patch('me')
   async updateMe(@Req() req: AuthenticatedRequest, @Body() dto: UpdateMeDto) {
     return this.authService.updateMe(req.user.id, dto);
-  }
-
-  private setAuthCookie(res: Response, token: string) {
-    res.cookie('auth_token', token, this.cookieOptions());
-  }
-
-  private cookieOptions(): CookieOptions {
-    const isProd = process.env.NODE_ENV === 'production';
-    return {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: isProd ? 'none' : 'lax',
-      path: '/',
-      maxAge: 1000 * 60 * 60 * 24, // 1 day
-    };
   }
 }

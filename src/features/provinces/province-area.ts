@@ -2,15 +2,9 @@ export const PROVINCE_AREA_CODES = [1, 2, 3] as const;
 export type ProvinceAreaCode = (typeof PROVINCE_AREA_CODES)[number];
 
 export const PROVINCE_AREA_LABELS: Record<ProvinceAreaCode, string> = {
-  1: 'NORTHERN',
-  2: 'MIDDLE',
-  3: 'SOUTHERN',
-};
-
-const PROVINCE_AREA_LABEL_TO_CODE: Record<string, ProvinceAreaCode> = {
-  NORTHERN: 1,
-  MIDDLE: 2,
-  SOUTHERN: 3,
+  1: 'AREA 1',
+  2: 'AREA 2',
+  3: 'AREA 3',
 };
 
 export function normalizeProvinceAreaCode(
@@ -35,7 +29,7 @@ export function normalizeProvinceAreaCode(
     return Number(normalized) as ProvinceAreaCode;
   }
 
-  return PROVINCE_AREA_LABEL_TO_CODE[normalized] ?? null;
+  return null;
 }
 
 export function getProvinceAreaLabel(value?: number | null): string | null {

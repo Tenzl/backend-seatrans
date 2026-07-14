@@ -183,7 +183,10 @@ export class InquiryDocumentService {
   async deleteDocument(documentId: number): Promise<void> {
     const row = await this.getDocumentById(documentId);
 
-    await this.cloudinaryService.deleteByPublicId(row.cloudinaryPublicId ?? '');
+    await this.cloudinaryService.deleteByPublicId(
+      row.cloudinaryPublicId ?? '',
+      'raw',
+    );
     await this.inquiryDocumentRepository.remove(row);
   }
 
@@ -200,6 +203,7 @@ export class InquiryDocumentService {
     for (const row of rows) {
       await this.cloudinaryService.deleteByPublicId(
         row.cloudinaryPublicId ?? '',
+        'raw',
       );
       await this.inquiryDocumentRepository.remove(row);
     }
