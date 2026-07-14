@@ -45,7 +45,7 @@ export function defaultValuesForArea(
       pilotageThirdMiles: 17,
       qnPilotageMiles: 5,
     },
-    garbage: { atBerthUsd: 54, atBuoyUsd: 54, cbmAmount: 1 },
+    garbage: { atBerthUsd: 54, atBuoyUsd: 54 },
     quarantine: {
       shipUnitLowGrt: 95,
       shipUnitHighGrt: 110,
@@ -106,7 +106,7 @@ export function defaultValuesForArea(
   if (!isQn) return base;
   return {
     ...base,
-    garbage: { atBerthUsd: 17, atBuoyUsd: 17, cbmAmount: 1 },
+    garbage: { atBerthUsd: 17, atBuoyUsd: 17 },
     coeff: { ...base.coeff, navigationPerGrt: 0.058, clearanceFee: 100 },
     moorUnmoorBerthTiers: [
       { maxGrt: 499, amount: 32, label: '< 500' },

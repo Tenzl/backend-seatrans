@@ -182,11 +182,6 @@ export class CreateInternalShippingAgencyInquiryDto {
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  garbageCbmAmount?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
   @Min(0)
   garbageUsdRate?: number;
 

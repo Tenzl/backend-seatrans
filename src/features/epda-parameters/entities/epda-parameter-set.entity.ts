@@ -44,7 +44,6 @@ export interface EpdaParameterValues {
   garbage: {
     atBerthUsd: number;
     atBuoyUsd: number;
-    cbmAmount: number;
   };
   quarantine: {
     shipUnitLowGrt: number;

@@ -17,7 +17,6 @@ import { IssueShippingAgencyEpdaDto } from '../dto/issue-shipping-agency-epda.dt
 import { LockShippingAgencyEpdaDto } from '../dto/lock-shipping-agency-epda.dto';
 import { CreateInternalShippingAgencyInquiryDto } from '../dto/create-internal-shipping-agency-inquiry.dto';
 import {
-  DEFAULT_GARBAGE_CBM_AMOUNT,
   getDefaultGarbageUsdRate,
 } from '../constants/epda-garbage.defaults';
 import {
@@ -67,7 +66,6 @@ const SNAPSHOT_KEYS = new Set([
   'loading_term',
   'ocean_frt_rate_usd_per_mt',
   'garbage_usd_rate',
-  'garbage_cbm_amount',
   'at_anchorage',
   'at_berth',
   'total_a',
@@ -199,9 +197,6 @@ export class ShippingAgencyEpdaService {
           dto.pilotage3rdMiles ?? (canonicalQuoteForm === 'QN' ? 5 : 47),
         ),
         oceanFrtRateUsdPerMt: this.toNumericString(dto.oceanFrtRateUsdPerMt),
-        garbageCbmAmount: this.toNumericString(
-          dto.garbageCbmAmount ?? DEFAULT_GARBAGE_CBM_AMOUNT,
-        ),
         garbageUsdRate: this.toNumericString(
           dto.garbageUsdRate ?? getDefaultGarbageUsdRate(canonicalQuoteForm),
         ),
@@ -309,9 +304,6 @@ export class ShippingAgencyEpdaService {
     }
     if (dto.oceanFrtRateUsdPerMt !== undefined) {
       row.oceanFrtRateUsdPerMt = this.toNumericString(dto.oceanFrtRateUsdPerMt);
-    }
-    if (dto.garbageCbmAmount !== undefined) {
-      row.garbageCbmAmount = this.toNumericString(dto.garbageCbmAmount);
     }
     if (dto.garbageUsdRate !== undefined) {
       row.garbageUsdRate = this.toNumericString(dto.garbageUsdRate);
@@ -1093,7 +1085,6 @@ export class ShippingAgencyEpdaService {
       'Ship type': s(row.shipType),
       'Shipowner nationality': s(row.shipownerNationality),
       'Ocean freight rate': n(row.oceanFrtRateUsdPerMt),
-      'Garbage cbm': n(row.garbageCbmAmount),
       'Garbage USD rate': n(row.garbageUsdRate),
       'Quarantine cargo mode': s(row.quarantineCargoMode),
       'Agency fee mode': s(row.agencyFeeMode),

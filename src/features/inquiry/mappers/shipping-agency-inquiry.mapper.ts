@@ -1,8 +1,5 @@
 import { ShippingAgencyInquiryEntity } from '../entities/shipping-agency-inquiry.entity';
-import {
-  resolveGarbageCbmAmount,
-  resolveGarbageUsdRate,
-} from '../constants/epda-garbage.defaults';
+import { resolveGarbageUsdRate } from '../constants/epda-garbage.defaults';
 
 export type InquiryResponseAudience = 'user' | 'admin';
 
@@ -44,7 +41,6 @@ function shippingAgencyInternalEpdaFields(
     shipType: row.shipType,
     shipownerNationality: row.shipownerNationality,
     oceanFrtRateUsdPerMt: row.oceanFrtRateUsdPerMt,
-    garbageCbmAmount: resolveGarbageCbmAmount(row.garbageCbmAmount),
     garbageUsdRate: resolveGarbageUsdRate(row.quoteForm, row.garbageUsdRate),
     quarantineCargoMode: row.quarantineCargoMode,
     agencyFeeMode: row.agencyFeeMode,

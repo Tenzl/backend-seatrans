@@ -22,7 +22,6 @@ class HoursDto {
 class GarbageDto {
   @IsOptional() @IsNumber() atBerthUsd?: number;
   @IsOptional() @IsNumber() atBuoyUsd?: number;
-  @IsOptional() @IsNumber() cbmAmount?: number;
 }
 
 class QuarantineDto {

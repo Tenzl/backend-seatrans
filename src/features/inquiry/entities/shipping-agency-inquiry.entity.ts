@@ -194,15 +194,6 @@ export class ShippingAgencyInquiryEntity extends BaseInquiry {
   oceanFrtRateUsdPerMt!: string | null;
 
   @Column({
-    name: 'garbage_cbm_amount',
-    type: 'decimal',
-    precision: 15,
-    scale: 4,
-    nullable: true,
-  })
-  garbageCbmAmount!: string | null;
-
-  @Column({
     name: 'garbage_usd_rate',
     type: 'decimal',
     precision: 15,

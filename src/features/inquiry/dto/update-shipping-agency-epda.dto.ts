@@ -196,12 +196,6 @@ export class UpdateShippingAgencyEpdaDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  garbageCbmAmount?: number | null;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
   garbageUsdRate?: number | null;
 
   @IsOptional()
