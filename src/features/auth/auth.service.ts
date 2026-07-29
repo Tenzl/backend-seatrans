@@ -16,11 +16,40 @@ import { RegisterDto } from './dto/register.dto';
 import { ConfigService } from '@nestjs/config';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { OAuthUserProfile } from './dto/oauth-profile.dto';
+import {
+  loadSessionPolicyFromEnv,
+  remainingAbsoluteSeconds,
+  resolveAbsoluteSeconds,
+  shouldSlideSession,
+  toJwtExpiresIn,
+  type SessionJwtClaims,
+  type SessionPolicyConfig,
+} from './session-policy';
 
-type JwtSessionPayload = { sub?: string | number };
+export type AuthUserPayload = {
+  id: number;
+  email: string;
+  username: string | null;
+  fullName: string | null;
+  phone: string | null;
+  company: string | null;
+  role: string | undefined;
+  roleGroup: string | null | undefined;
+  oauthProvider: string | null;
+  emailVerified: boolean;
+};
+
+export type AuthSessionResponse = {
+  token: string;
+  type: 'Bearer';
+  user: AuthUserPayload;
+  cookieMaxAgeMs: number;
+};
 
 @Injectable()
 export class AuthService {
+  private readonly sessionPolicy: SessionPolicyConfig;
+
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
@@ -28,7 +57,12 @@ export class AuthService {
     private readonly roleRepository: Repository<Role>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
-  ) {}
+  ) {
+    this.sessionPolicy = loadSessionPolicyFromEnv({
+      get: (key, defaultValue) =>
+        this.configService.get<string>(key, defaultValue),
+    });
+  }
 
   async register(registerDto: RegisterDto) {
     const existingUser = await this.userRepository.findOne({
@@ -115,25 +149,97 @@ export class AuthService {
     user.lastLogin = new Date();
     await this.userRepository.save(user);
 
-    return this.buildAuthResponse(user);
+    return this.buildAuthResponse(user, {
+      remember: loginDto.remember === true,
+    });
   }
 
-  buildAuthResponse(user: User) {
-    const payload = {
+  /**
+   * Issue a cookie JWT. `auth_time` is fixed at login; sliding refresh reuses it.
+   * Token TTL = min(idle, remaining absolute) so activity cannot exceed the ceiling.
+   */
+  buildAuthResponse(
+    user: User,
+    options?: { remember?: boolean; authTime?: number },
+  ): AuthSessionResponse {
+    const now = Math.floor(Date.now() / 1000);
+    const remember = options?.remember === true;
+    const auth_time = options?.authTime ?? now;
+    const absoluteSeconds = resolveAbsoluteSeconds(this.sessionPolicy, {
+      remember,
+      roleGroup: user.role?.roleGroup,
+    });
+    const remainingAbsolute = remainingAbsoluteSeconds(
+      auth_time,
+      absoluteSeconds,
+      now,
+    );
+    if (remainingAbsolute <= 0) {
+      throw new UnauthorizedException('Session expired — please sign in again');
+    }
+
+    const expiresInSeconds = Math.min(
+      this.sessionPolicy.idleSeconds,
+      remainingAbsolute,
+    );
+    const roles = [user.role?.name].filter(
+      (name): name is string => typeof name === 'string' && name.length > 0,
+    );
+    const payload: SessionJwtClaims = {
       sub: user.id,
       email: user.email,
       roleGroup: user.role?.roleGroup,
-      roles: [user.role?.name].filter(Boolean),
+      roles,
+      auth_time,
+      remember,
     };
 
     return {
-      token: this.jwtService.sign(payload),
+      token: this.jwtService.sign(payload, {
+        expiresIn: toJwtExpiresIn(expiresInSeconds),
+      }),
       type: 'Bearer',
       user: this.toAuthUserPayload(user),
+      cookieMaxAgeMs: expiresInSeconds * 1000,
     };
   }
 
-  private toAuthUserPayload(user: User) {
+  isAbsoluteSessionExpired(claims: SessionJwtClaims, user: User): boolean {
+    const absoluteSeconds = resolveAbsoluteSeconds(this.sessionPolicy, {
+      remember: claims.remember,
+      roleGroup: user.role?.roleGroup ?? claims.roleGroup,
+    });
+    return (
+      remainingAbsoluteSeconds(claims.auth_time, absoluteSeconds) <= 0
+    );
+  }
+
+  /**
+   * Sliding refresh: when idle expiry is within slide-before window, re-sign
+   * with the same auth_time/remember (absolute ceiling unchanged).
+   */
+  maybeSlideSession(
+    user: User,
+    claims: SessionJwtClaims,
+  ): AuthSessionResponse | null {
+    if (this.isAbsoluteSessionExpired(claims, user)) {
+      return null;
+    }
+    if (
+      !shouldSlideSession(
+        claims.exp,
+        this.sessionPolicy.slideBeforeSeconds,
+      )
+    ) {
+      return null;
+    }
+    return this.buildAuthResponse(user, {
+      remember: claims.remember,
+      authTime: claims.auth_time,
+    });
+  }
+
+  private toAuthUserPayload(user: User): AuthUserPayload {
     return {
       id: user.id,
       email: user.email,
@@ -294,39 +400,6 @@ export class AuthService {
         COALESCE((SELECT MAX(id) FROM users), 1)
       )`,
     );
-  }
-
-  /**
-   * Transitional: validate an already-issued JWT and re-issue a cookie session.
-   * This supports legacy OAuth flows that delivered a token in the redirect URL.
-   */
-  async issueSessionFromToken(token: string) {
-    try {
-      const payload = this.jwtService.verify<JwtSessionPayload>(token);
-      const userId = Number(payload.sub);
-      if (!Number.isFinite(userId)) return null;
-
-      const user = await this.userRepository.findOne({
-        where: { id: userId },
-        relations: ['role'],
-      });
-      if (!user || !user.isActive) return null;
-
-      const sessionPayload = {
-        sub: user.id,
-        email: user.email,
-        roleGroup: user.role?.roleGroup,
-        roles: [user.role?.name].filter(Boolean),
-      };
-
-      return {
-        token: this.jwtService.sign(sessionPayload),
-        type: 'Bearer',
-        user: this.toAuthUserPayload(user),
-      };
-    } catch {
-      return null;
-    }
   }
 
   async validateUserContext(userId: number) {

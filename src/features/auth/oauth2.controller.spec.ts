@@ -190,11 +190,11 @@ describe('OAuth2Controller', () => {
         secure,
         sameSite: 'lax',
         path: '/',
-        maxAge: 1000 * 60 * 60 * 24,
+        maxAge: 1000 * 60 * 60,
       });
       expect(redirect).toHaveBeenCalledWith(
         303,
-        'https://www.example.test/auth/callback',
+        'https://www.example.test/',
       );
     },
   );

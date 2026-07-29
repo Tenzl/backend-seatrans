@@ -140,8 +140,9 @@ export class OAuth2Controller {
       }
 
       const auth = this.authService.buildAuthResponse(user);
-      setAuthCookie(res, auth.token);
-      return this.redirectToFrontend(res, '/auth/callback');
+      setAuthCookie(res, auth.token, auth.cookieMaxAgeMs);
+      // Cookie is already set; land on home — AuthProvider hydrates via GET /auth/me.
+      return this.redirectToFrontend(res, '/');
     } catch (error) {
       this.logger.error('OAuth2 callback error', error);
       return this.redirectToFrontend(res, '/login', 'oauth_failed');
@@ -150,7 +151,7 @@ export class OAuth2Controller {
 
   private redirectToFrontend(
     res: Response,
-    path: '/auth/callback' | '/login',
+    path: '/' | '/login',
     errorCode?: 'account_disabled' | 'oauth_failed',
   ) {
     const target = new URL(path, `${this.resolveFrontendOrigin()}/`);

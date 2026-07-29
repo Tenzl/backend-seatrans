@@ -9,7 +9,6 @@ import {
   UseGuards,
   Patch,
   Res,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -17,7 +16,6 @@ import { RegisterDto } from './dto/register.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request, Response } from 'express';
-import { SessionExchangeDto } from './dto/session-exchange.dto';
 import { SectionAccessService } from '../roles/section-access.service';
 import { User } from './entities/user.entity';
 import { clearAuthCookie, setAuthCookie } from './auth-cookie';
@@ -38,7 +36,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const auth = await this.authService.register(registerDto);
-    setAuthCookie(res, auth.token);
+    setAuthCookie(res, auth.token, auth.cookieMaxAgeMs);
     return auth;
   }
 
@@ -49,25 +47,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const auth = await this.authService.login(loginDto);
-    setAuthCookie(res, auth.token);
-    return auth;
-  }
-
-  /**
-   * Transitional endpoint: exchange a Bearer JWT for an HttpOnly cookie session.
-   * Used to support legacy OAuth callback flows that returned `?token=...` in the URL.
-   */
-  @Post('session')
-  @HttpCode(HttpStatus.OK)
-  async exchangeSession(
-    @Body() dto: SessionExchangeDto,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const auth = await this.authService.issueSessionFromToken(dto.token);
-    if (!auth) {
-      throw new UnauthorizedException('Invalid token');
-    }
-    setAuthCookie(res, auth.token);
+    setAuthCookie(res, auth.token, auth.cookieMaxAgeMs);
     return auth;
   }
 

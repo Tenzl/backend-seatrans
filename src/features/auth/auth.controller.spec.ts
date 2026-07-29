@@ -35,7 +35,7 @@ describe('AuthController', () => {
     ['production', true],
   ])('sets a SameSite=Lax HttpOnly cookie in %s', async (nodeEnv, secure) => {
     process.env.NODE_ENV = nodeEnv;
-    const auth = { token: 'signed-jwt' };
+    const auth = { token: 'signed-jwt', cookieMaxAgeMs: 1000 * 60 * 60 };
     authService.login.mockResolvedValue(auth);
     const cookie = jest.fn();
     const response = { cookie } as unknown as Response;
@@ -50,7 +50,7 @@ describe('AuthController', () => {
       secure,
       sameSite: 'lax',
       path: '/',
-      maxAge: 1000 * 60 * 60 * 24,
+      maxAge: 1000 * 60 * 60,
     });
   });
 });

@@ -19,6 +19,7 @@ import { UsersModule } from './features/users/users.module';
 import { NotificationModule } from './features/notification/notification.module';
 import { RolesModule } from './features/roles/roles.module';
 import { StorageModule } from './features/storage/storage.module';
+import { BookingDocumentsModule } from './features/booking-documents/booking-documents.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { StorageModule } from './features/storage/storage.module';
     NotificationModule,
     RolesModule,
     StorageModule,
+    BookingDocumentsModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
