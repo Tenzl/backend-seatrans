@@ -42,4 +42,38 @@ describe('BookingDocumentsAdminController', () => {
     );
     expect(response.send).toHaveBeenCalledWith(Buffer.from('%PDF-test'));
   });
+
+  it('creates a document record for the authenticated staff user', async () => {
+    const createRecord = jest.fn().mockResolvedValue({ id: 12 });
+    const controller = new BookingDocumentsAdminController({
+      createRecord,
+    } as unknown as BookingDocumentsService);
+
+    await controller.createRecord(
+      BookingDocumentType.DELIVERY_ORDER,
+      { doNumber: 'DO-012' },
+      { user: { id: 7 } } as never,
+    );
+
+    expect(createRecord).toHaveBeenCalledWith(
+      BookingDocumentType.DELIVERY_ORDER,
+      { doNumber: 'DO-012' },
+      7,
+    );
+  });
+
+  it('lists paginated document history', async () => {
+    const listRecords = jest.fn().mockResolvedValue({ content: [] });
+    const controller = new BookingDocumentsAdminController({
+      listRecords,
+    } as unknown as BookingDocumentsService);
+
+    await controller.history('booking', '2', '15');
+
+    expect(listRecords).toHaveBeenCalledWith(
+      BookingDocumentType.BOOKING_CONFIRMATION,
+      2,
+      15,
+    );
+  });
 });

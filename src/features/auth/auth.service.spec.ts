@@ -16,7 +16,12 @@ describe('AuthService', () => {
         { provide: getRepositoryToken(User), useValue: {} },
         { provide: getRepositoryToken(Role), useValue: {} },
         { provide: JwtService, useValue: {} },
-        { provide: ConfigService, useValue: {} },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((_key: string, defaultValue?: string) => defaultValue),
+          },
+        },
       ],
     }).compile();
 

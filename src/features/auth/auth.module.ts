@@ -11,10 +11,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { SessionSlidingInterceptor } from './session-sliding.interceptor';
-import {
-  loadSessionPolicyFromEnv,
-  toJwtExpiresIn,
-} from './session-policy';
+import { loadSessionPolicyFromEnv, toJwtExpiresIn } from './session-policy';
 
 @Module({
   imports: [
@@ -26,7 +23,9 @@ import {
       useFactory: (configService: ConfigService) => {
         const policy = loadSessionPolicyFromEnv({
           get: (key, defaultValue) =>
-            configService.get<string>(key, defaultValue),
+            defaultValue === undefined
+              ? configService.get<string>(key)
+              : configService.get<string>(key, defaultValue),
         });
         return {
           secret: configService.getOrThrow<string>('APP_JWT_SECRET'),

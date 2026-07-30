@@ -20,7 +20,10 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "db:migrate:epda-areas": "node scripts/run-epda-area-normalization-migration.mjs"
+    "db:migrate:epda-areas": "node scripts/run-epda-area-normalization-migration.mjs",
+    "db:migrate:epda-hardening": "node scripts/run-epda-parameter-hardening.mjs",
+    "db:migrate:epda-hardening:data": "node scripts/run-epda-parameter-hardening.mjs --phase=data",
+    "db:migrate:epda-hardening:validate": "node scripts/run-epda-parameter-hardening.mjs --phase=validate"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1081.0",

@@ -51,6 +51,28 @@ export class EpdaParameterChangeLog {
   @Column({ name: 'after_values', type: 'jsonb', nullable: true })
   afterValues!: PartialEpdaParameterValues | null;
 
+  @Column({ name: 'port_name', type: 'varchar', length: 100, nullable: true })
+  portName!: string | null;
+
+  @Column({
+    name: 'changed_by_name',
+    type: 'varchar',
+    length: 200,
+    nullable: true,
+  })
+  changedByName!: string | null;
+
+  @Column({
+    name: 'changed_by_email',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
+  changedByEmail!: string | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  details!: Record<string, unknown> | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 }

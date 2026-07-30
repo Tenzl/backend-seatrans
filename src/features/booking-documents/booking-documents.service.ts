@@ -1,10 +1,12 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import { plainToInstance } from 'class-transformer';
 import { validate, ValidationError } from 'class-validator';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import fontkit from '@pdf-lib/fontkit';
 import { PDFDocument, PDFFont, PDFImage, PDFPage, rgb } from 'pdf-lib';
+import { Repository } from 'typeorm';
 import {
   BOOKING_DOCUMENT_FILENAMES,
   BOOKING_DOCUMENT_TEMPLATES,
@@ -13,6 +15,7 @@ import { ArrivalNoticePreviewDto } from './dto/arrival-notice-preview.dto';
 import { BookingConfirmationPreviewDto } from './dto/booking-confirmation-preview.dto';
 import { CargoRowDto } from './dto/cargo-row.dto';
 import { DeliveryOrderPreviewDto } from './dto/delivery-order-preview.dto';
+import { BookingDocumentRecord } from './entities/booking-document-record.entity';
 import { BookingDocumentType } from './enums/booking-document-type.enum';
 
 type PreviewDto =
@@ -50,6 +53,47 @@ const BLACK = rgb(0, 0, 0);
 
 @Injectable()
 export class BookingDocumentsService {
+  constructor(
+    @InjectRepository(BookingDocumentRecord)
+    private readonly recordRepository: Repository<BookingDocumentRecord>,
+  ) {}
+
+  async createRecord(
+    type: BookingDocumentType,
+    payload: unknown,
+    createdByUserId: number,
+  ) {
+    const dto = await this.validatePayload(type, payload);
+    const snapshot = JSON.parse(JSON.stringify(dto)) as Record<string, unknown>;
+    const record = this.recordRepository.create({
+      documentType: type,
+      referenceNumber: this.referenceNumber(type, dto),
+      payload: snapshot,
+      createdByUserId,
+    });
+    return this.toRecordResponse(await this.recordRepository.save(record));
+  }
+
+  async listRecords(type?: BookingDocumentType, page = 0, size = 10) {
+    const safePage = Math.max(0, page);
+    const safeSize = Math.min(50, Math.max(1, size));
+    const [records, totalElements] = await this.recordRepository.findAndCount({
+      where: type ? { documentType: type } : {},
+      relations: { createdBy: true },
+      order: { createdAt: 'DESC', id: 'DESC' },
+      skip: safePage * safeSize,
+      take: safeSize,
+    });
+
+    return {
+      content: records.map((record) => this.toRecordResponse(record)),
+      totalElements,
+      totalPages: totalElements === 0 ? 0 : Math.ceil(totalElements / safeSize),
+      size: safeSize,
+      number: safePage,
+    };
+  }
+
   async createPreview(
     type: BookingDocumentType,
     payload: unknown,
@@ -129,6 +173,43 @@ export class BookingDocumentsService {
       });
     }
     return dto;
+  }
+
+  private referenceNumber(
+    type: BookingDocumentType,
+    dto: PreviewDto,
+  ): string | null {
+    let value: string | undefined;
+    switch (type) {
+      case BookingDocumentType.ARRIVAL_NOTICE:
+        value = (dto as ArrivalNoticePreviewDto).anNumber;
+        break;
+      case BookingDocumentType.BOOKING_CONFIRMATION:
+        value = (dto as BookingConfirmationPreviewDto).bookingNumber;
+        break;
+      case BookingDocumentType.DELIVERY_ORDER:
+        value = (dto as DeliveryOrderPreviewDto).doNumber;
+        break;
+    }
+    return value?.trim() || null;
+  }
+
+  private toRecordResponse(record: BookingDocumentRecord) {
+    return {
+      id: record.id,
+      documentType: record.documentType,
+      referenceNumber: record.referenceNumber,
+      payload: record.payload,
+      createdByUserId: record.createdByUserId,
+      createdAt: record.createdAt.toISOString(),
+      createdBy: record.createdBy
+        ? {
+            id: record.createdBy.id,
+            fullName: record.createdBy.fullName ?? null,
+            email: record.createdBy.email ?? null,
+          }
+        : null,
+    };
   }
 
   private flattenValidationErrors(

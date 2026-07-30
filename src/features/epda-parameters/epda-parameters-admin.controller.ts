@@ -12,6 +12,8 @@ import {
   Query,
   Req,
   UseGuards,
+  UsePipes,
+  ValidationPipe,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
@@ -40,6 +42,13 @@ const OPTIONAL_INTEGER = new ParseIntPipe({ optional: true });
 @Controller('v1/admin/epda-parameters')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Roles(RoleGroup.INTERNAL)
+@UsePipes(
+  new ValidationPipe({
+    transform: true,
+    whitelist: true,
+    forbidNonWhitelisted: true,
+  }),
+)
 export class EpdaParametersAdminController {
   constructor(private readonly service: EpdaParametersService) {}
 
@@ -87,7 +96,12 @@ export class EpdaParametersAdminController {
     @Body() dto: UpsertEpdaParameterSetDto,
     @Req() req: StaffRequest,
   ) {
-    return this.service.upsertArea(area, dto.values ?? {}, req.user?.id);
+    return this.service.upsertArea(
+      area,
+      dto.values ?? {},
+      req.user?.id,
+      dto.expectedVersion,
+    );
   }
 
   @Get('port/:portId')
@@ -103,7 +117,12 @@ export class EpdaParametersAdminController {
     @Body() dto: UpsertEpdaParameterSetDto,
     @Req() req: StaffRequest,
   ) {
-    return this.service.upsertPort(portId, dto.values ?? {}, req.user?.id);
+    return this.service.upsertPort(
+      portId,
+      dto.values ?? {},
+      req.user?.id,
+      dto.expectedVersion,
+    );
   }
 
   @Delete('port/:portId')
@@ -112,9 +131,11 @@ export class EpdaParametersAdminController {
   @Section('epda-parameter')
   async deletePort(
     @Param('portId', REQUIRED_INTEGER) portId: number,
+    @Query('expectedVersion', OPTIONAL_INTEGER)
+    expectedVersion: number | undefined,
     @Req() req: StaffRequest,
   ): Promise<void> {
-    await this.service.deletePort(portId, req.user?.id);
+    await this.service.deletePort(portId, req.user?.id, expectedVersion);
   }
 
   @Get('groups')
@@ -151,6 +172,7 @@ export class EpdaParametersAdminController {
       id,
       { name: dto.name, values: dto.values },
       req.user?.id,
+      dto.expectedVersion,
     );
   }
 
@@ -162,7 +184,12 @@ export class EpdaParametersAdminController {
     @Body() dto: SetGroupMembersDto,
     @Req() req: StaffRequest,
   ) {
-    return this.service.setGroupMembers(id, dto.portIds, req.user?.id);
+    return this.service.setGroupMembers(
+      id,
+      dto.portIds,
+      req.user?.id,
+      dto.expectedVersion,
+    );
   }
 
   @Delete('groups/:id')
@@ -171,8 +198,10 @@ export class EpdaParametersAdminController {
   @Section('epda-parameter')
   async deleteGroup(
     @Param('id', REQUIRED_INTEGER) id: number,
+    @Query('expectedVersion', OPTIONAL_INTEGER)
+    expectedVersion: number | undefined,
     @Req() req: StaffRequest,
   ): Promise<void> {
-    await this.service.deleteGroup(id, req.user?.id);
+    await this.service.deleteGroup(id, req.user?.id, expectedVersion);
   }
 }

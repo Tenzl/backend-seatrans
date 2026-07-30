@@ -19,6 +19,8 @@ import {
 import { buildPaginatedResponse } from '../../shared/dto/pagination.dto';
 import { API_MAX_PAGE_SIZE } from '../../shared/dto/list-query.dto';
 import { normalizeProvinceAreaCode } from '../provinces/province-area';
+import { EpdaParameterGroupMember } from '../epda-parameters/entities/epda-parameter-group-member.entity';
+import { EpdaParameterSet } from '../epda-parameters/entities/epda-parameter-set.entity';
 
 interface PortListParams {
   activeOnly?: boolean;
@@ -40,6 +42,10 @@ export class PortsService {
     private readonly portRepository: Repository<Port>,
     @InjectRepository(Province)
     private readonly provinceRepository: Repository<Province>,
+    @InjectRepository(EpdaParameterGroupMember)
+    private readonly epdaGroupMemberRepository: Repository<EpdaParameterGroupMember>,
+    @InjectRepository(EpdaParameterSet)
+    private readonly epdaParameterSetRepository: Repository<EpdaParameterSet>,
   ) {}
 
   async listPortsPage(query: ListPortsQueryDto) {
@@ -243,6 +249,33 @@ export class PortsService {
       dto.provinceId === undefined
         ? port.province
         : await this.resolveProvince(dto.provinceId);
+    const currentArea = normalizeProvinceAreaCode(port.province?.area ?? null);
+    const nextArea = normalizeProvinceAreaCode(province?.area ?? null);
+    if (currentArea !== nextArea) {
+      const membership = await this.epdaGroupMemberRepository.findOne({
+        where: { portId: id },
+        relations: { group: true },
+      });
+      const legacyGroup = membership
+        ? null
+        : await this.epdaParameterSetRepository
+            .createQueryBuilder('parameterSet')
+            .where(`parameterSet.scope = 'GROUP'`)
+            .andWhere('parameterSet.memberPortIds @> :portIds::jsonb', {
+              portIds: JSON.stringify([id]),
+            })
+            .getOne();
+      if (membership || legacyGroup) {
+        throw new ConflictException(
+          `Port belongs to EPDA group ${
+            membership?.group?.name ??
+            membership?.groupId ??
+            legacyGroup?.name ??
+            legacyGroup?.id
+          }; remove it from the group before changing area`,
+        );
+      }
+    }
 
     const duplicate = await this.findDuplicatePort(
       normalizedName,

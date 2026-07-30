@@ -5,10 +5,16 @@ import { EpdaParameterChangeLog } from './entities/epda-parameter-change-log.ent
 import { Port } from '../ports/entities/port.entity';
 import { EpdaParametersService } from './epda-parameters.service';
 import { EpdaParametersAdminController } from './epda-parameters-admin.controller';
+import { EpdaParameterGroupMember } from './entities/epda-parameter-group-member.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([EpdaParameterSet, EpdaParameterChangeLog, Port]),
+    TypeOrmModule.forFeature([
+      EpdaParameterSet,
+      EpdaParameterChangeLog,
+      EpdaParameterGroupMember,
+      Port,
+    ]),
   ],
   controllers: [EpdaParametersAdminController],
   providers: [EpdaParametersService],

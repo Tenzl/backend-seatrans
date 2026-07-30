@@ -5,9 +5,98 @@ import { BookingDocumentType } from './enums/booking-document-type.enum';
 
 describe('BookingDocumentsService', () => {
   let service: BookingDocumentsService;
+  const recordRepository = {
+    create: jest.fn((value: object) => value),
+    save: jest.fn(),
+    findAndCount: jest.fn(),
+  };
 
   beforeEach(() => {
-    service = new BookingDocumentsService();
+    jest.clearAllMocks();
+    service = new BookingDocumentsService(recordRepository as never);
+  });
+
+  it('creates an immutable history record from the validated payload', async () => {
+    recordRepository.save.mockImplementation(
+      (record: object): Promise<object> =>
+        Promise.resolve({
+          ...record,
+          id: 41,
+          createdAt: new Date('2026-07-29T10:00:00.000Z'),
+        }),
+    );
+
+    const result = await service.createRecord(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      { anNumber: 'AN-001' },
+      9,
+    );
+
+    expect(recordRepository.create).toHaveBeenCalledWith({
+      documentType: BookingDocumentType.ARRIVAL_NOTICE,
+      referenceNumber: 'AN-001',
+      payload: { anNumber: 'AN-001' },
+      createdByUserId: 9,
+    });
+    expect(result).toMatchObject({
+      id: 41,
+      documentType: BookingDocumentType.ARRIVAL_NOTICE,
+      referenceNumber: 'AN-001',
+      payload: { anNumber: 'AN-001' },
+      createdByUserId: 9,
+      createdAt: '2026-07-29T10:00:00.000Z',
+    });
+  });
+
+  it('returns paginated records newest first', async () => {
+    recordRepository.findAndCount.mockResolvedValue([
+      [
+        {
+          id: 8,
+          documentType: BookingDocumentType.DELIVERY_ORDER,
+          referenceNumber: 'DO-008',
+          payload: { doNumber: 'DO-008' },
+          createdByUserId: 3,
+          createdAt: new Date('2026-07-29T09:00:00.000Z'),
+          createdBy: {
+            id: 3,
+            fullName: 'Operator',
+            email: 'operator@seatrans.test',
+          },
+        },
+      ],
+      1,
+    ]);
+
+    const result = await service.listRecords(
+      BookingDocumentType.DELIVERY_ORDER,
+      0,
+      10,
+    );
+
+    expect(recordRepository.findAndCount).toHaveBeenCalledWith({
+      where: { documentType: BookingDocumentType.DELIVERY_ORDER },
+      relations: { createdBy: true },
+      order: { createdAt: 'DESC', id: 'DESC' },
+      skip: 0,
+      take: 10,
+    });
+    expect(result).toMatchObject({
+      totalElements: 1,
+      totalPages: 1,
+      size: 10,
+      number: 0,
+      content: [
+        {
+          id: 8,
+          referenceNumber: 'DO-008',
+          createdBy: {
+            id: 3,
+            fullName: 'Operator',
+          },
+        },
+      ],
+    });
   });
 
   it.each([

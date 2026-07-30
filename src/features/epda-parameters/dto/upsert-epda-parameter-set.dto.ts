@@ -7,72 +7,75 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
+  Min,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
 
 class HoursDto {
-  @IsOptional() @IsNumber() berthHours?: number;
-  @IsOptional() @IsNumber() anchorageHours?: number;
-  @IsOptional() @IsNumber() pilotageThirdMiles?: number;
-  @IsOptional() @IsNumber() qnPilotageMiles?: number;
+  @IsOptional() @IsNumber() @Min(0) berthHours?: number;
+  @IsOptional() @IsNumber() @Min(0) anchorageHours?: number;
+  @IsOptional() @IsNumber() @Min(0) pilotageThirdMiles?: number;
+  @IsOptional() @IsNumber() @Min(0) qnPilotageMiles?: number;
 }
 
 class GarbageDto {
-  @IsOptional() @IsNumber() atBerthUsd?: number;
-  @IsOptional() @IsNumber() atBuoyUsd?: number;
+  @IsOptional() @IsNumber() @Min(0) atBerthUsd?: number;
+  @IsOptional() @IsNumber() @Min(0) atBuoyUsd?: number;
 }
 
 class QuarantineDto {
-  @IsOptional() @IsNumber() shipUnitLowGrt?: number;
-  @IsOptional() @IsNumber() shipUnitHighGrt?: number;
-  @IsOptional() @IsNumber() shipThresholdGrt?: number;
-  @IsOptional() @IsNumber() cargoPerTrip?: number;
+  @IsOptional() @IsNumber() @Min(0) shipUnitLowGrt?: number;
+  @IsOptional() @IsNumber() @Min(0) shipUnitHighGrt?: number;
+  @IsOptional() @IsNumber() @Min(0) shipThresholdGrt?: number;
+  @IsOptional() @IsNumber() @Min(0) cargoPerTrip?: number;
 }
 
 class CoeffDto {
-  @IsOptional() @IsNumber() tonnagePerGrt?: number;
-  @IsOptional() @IsNumber() navigationPerGrt?: number;
-  @IsOptional() @IsNumber() tankerFactor?: number;
-  @IsOptional() @IsNumber() bulkFactor?: number;
-  @IsOptional() @IsNumber() berthDuePerGrtHour?: number;
-  @IsOptional() @IsNumber() buoyDuePerGrtHour?: number;
-  @IsOptional() @IsNumber() anchoragePerGrtHour?: number;
-  @IsOptional() @IsNumber() clearanceFee?: number;
-  @IsOptional() @IsNumber() oceanFrtDefaultRate?: number;
-  @IsOptional() @IsNumber() oceanFrtTaxRate?: number;
-  @IsOptional() @IsNumber() pilotageLeg1Rate?: number;
-  @IsOptional() @IsNumber() pilotageLeg1Miles?: number;
-  @IsOptional() @IsNumber() pilotageLeg2Rate?: number;
-  @IsOptional() @IsNumber() pilotageLeg2Miles?: number;
-  @IsOptional() @IsNumber() pilotageLeg3Rate?: number;
-  @IsOptional() @IsNumber() pilotageSingleRate?: number;
-  @IsOptional() @IsNumber() pilotageMinAmount?: number;
-  @IsOptional() @IsNumber() cargoAgencyBagRate?: number;
-  @IsOptional() @IsNumber() cargoAgencyEquipRate?: number;
-  @IsOptional() @IsNumber() cargoAgencyBulkRate?: number;
+  @IsOptional() @IsNumber() @Min(0) tonnagePerGrt?: number;
+  @IsOptional() @IsNumber() @Min(0) navigationPerGrt?: number;
+  @IsOptional() @IsNumber() @Min(0) @Max(1) tankerFactor?: number;
+  @IsOptional() @IsNumber() @Min(0) @Max(1) bulkFactor?: number;
+  @IsOptional() @IsNumber() @Min(0) berthDuePerGrtHour?: number;
+  @IsOptional() @IsNumber() @Min(0) buoyDuePerGrtHour?: number;
+  @IsOptional() @IsNumber() @Min(0) anchoragePerGrtHour?: number;
+  @IsOptional() @IsNumber() @Min(0) clearanceFee?: number;
+  @IsOptional() @IsNumber() @Min(0) oceanFrtDefaultRate?: number;
+  @IsOptional() @IsNumber() @Min(0) @Max(1) oceanFrtTaxRate?: number;
+  @IsOptional() @IsNumber() @Min(0) pilotageLeg1Rate?: number;
+  @IsOptional() @IsNumber() @Min(0) pilotageLeg1Miles?: number;
+  @IsOptional() @IsNumber() @Min(0) pilotageLeg2Rate?: number;
+  @IsOptional() @IsNumber() @Min(0) pilotageLeg2Miles?: number;
+  @IsOptional() @IsNumber() @Min(0) pilotageLeg3Rate?: number;
+  @IsOptional() @IsNumber() @Min(0) pilotageSingleRate?: number;
+  @IsOptional() @IsNumber() @Min(0) pilotageMinAmount?: number;
+  @IsOptional() @IsNumber() @Min(0) cargoAgencyBagRate?: number;
+  @IsOptional() @IsNumber() @Min(0) cargoAgencyEquipRate?: number;
+  @IsOptional() @IsNumber() @Min(0) cargoAgencyBulkRate?: number;
 }
 
 class GrtTierDto {
   // `null` allowed for the open-ended top tier; validate as number only when not null.
   @ValidateIf((tier: GrtTierDto) => tier.maxGrt !== null)
   @IsNumber()
+  @Min(0)
   maxGrt!: number | null;
-  @IsNumber() amount!: number;
-  @IsString() label!: string;
+  @IsNumber() @Min(0) amount!: number;
+  @IsString() @IsNotEmpty() @MaxLength(100) label!: string;
 }
 
 class LoaTierDto {
-  @IsNumber() minLoa!: number;
-  @IsNumber() amount!: number;
-  @IsString() label!: string;
+  @IsNumber() @Min(0) minLoa!: number;
+  @IsNumber() @Min(0) amount!: number;
+  @IsString() @IsNotEmpty() @MaxLength(100) label!: string;
 }
 
 class CargoAgencyRateDto {
-  @IsString() code!: string;
-  @IsString() label!: string;
-  @IsNumber() rate!: number;
+  @IsString() @IsNotEmpty() @MaxLength(50) code!: string;
+  @IsString() @IsNotEmpty() @MaxLength(100) label!: string;
+  @IsNumber() @Min(0) rate!: number;
 }
 
 export class EpdaParameterValuesDto {
@@ -120,6 +123,11 @@ export class UpsertEpdaParameterSetDto {
   @ValidateNested()
   @Type(() => EpdaParameterValuesDto)
   values?: EpdaParameterValuesDto;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  expectedVersion?: number | null;
 }
 
 /** Create a new port group inside an area. */
@@ -152,6 +160,11 @@ export class UpdateEpdaParameterGroupDto {
   @ValidateNested()
   @Type(() => EpdaParameterValuesDto)
   values?: EpdaParameterValuesDto;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  expectedVersion?: number | null;
 }
 
 /** Replace a group's member port list. */
@@ -161,4 +174,9 @@ export class SetGroupMembersDto {
   @IsInt({ each: true })
   @Type(() => Number)
   portIds!: number[];
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  expectedVersion?: number | null;
 }

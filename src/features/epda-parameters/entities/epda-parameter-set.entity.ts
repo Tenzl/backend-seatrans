@@ -4,6 +4,7 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  VersionColumn,
   Index,
 } from 'typeorm';
 
@@ -119,7 +120,7 @@ export class EpdaParameterSet {
   @Column({ type: 'varchar', length: 10 })
   scope!: EpdaParameterScope;
 
-  /** Area for AREA rows; owning area for GROUP/PORT rows (for grouping/fallback). */
+  /** AREA/GROUP owning area. PORT rows store null and derive area via port → province. */
   @Column({ type: 'varchar', length: 50, nullable: true })
   area!: string | null;
 
@@ -130,13 +131,16 @@ export class EpdaParameterSet {
   @Column({ type: 'varchar', length: 100, nullable: true })
   name!: string | null;
 
-  /** Port ids that belong to this group (GROUP rows only). A port is in ≤ 1 group/area. */
+  /** Legacy dual-write during rollout; normalized membership is the source of truth. */
   @Column({ name: 'member_port_ids', type: 'jsonb', nullable: true })
   memberPortIds!: number[] | null;
 
   /** Full set for AREA rows; partial (only overridden fields) for GROUP/PORT rows. */
   @Column({ type: 'jsonb' })
   values!: PartialEpdaParameterValues;
+
+  @VersionColumn({ type: 'int', default: 1 })
+  version!: number;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

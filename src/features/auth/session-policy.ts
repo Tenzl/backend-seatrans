@@ -7,8 +7,6 @@
  * - Remember (EXTERNAL only): longer absolute ceiling when login sent remember=true.
  */
 
-export type JwtExpirationInput = number | `${number}${string}`;
-
 const DURATION_RE =
   /^(\d+(?:\.\d+)?)\s*(years?|yrs?|y|weeks?|w|days?|d|hours?|hrs?|hr|h|minutes?|mins?|min|m|seconds?|secs?|sec|s|milliseconds?|msecs?|msec|ms)?$/i;
 
@@ -68,7 +66,7 @@ export function parseDurationToSeconds(
   return seconds > 0 ? seconds : fallbackSeconds;
 }
 
-export function toJwtExpiresIn(seconds: number): JwtExpirationInput {
+export function toJwtExpiresIn(seconds: number): number {
   return Math.max(1, Math.floor(seconds));
 }
 

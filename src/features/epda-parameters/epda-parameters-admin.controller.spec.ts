@@ -29,9 +29,11 @@ describe('EpdaParametersAdminController numeric parsing', () => {
     ['getPort', 0],
     ['upsertPort', 0],
     ['deletePort', 0],
+    ['deletePort', 1],
     ['updateGroup', 0],
     ['setGroupMembers', 0],
     ['deleteGroup', 0],
+    ['deleteGroup', 1],
     ['getEffective', 1],
     ['listChangeLogs', 1],
     ['listChangeLogs', 2],
@@ -48,6 +50,12 @@ describe('EpdaParametersAdminController numeric parsing', () => {
         undefined as unknown as string,
         queryMetadata,
       ),
+    ).resolves.toBeUndefined();
+    await expect(
+      numericPipe('deletePort', 1).transform(undefined as unknown as string, {
+        type: 'query',
+        data: 'expectedVersion',
+      }),
     ).resolves.toBeUndefined();
   });
 });

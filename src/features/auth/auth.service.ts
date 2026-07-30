@@ -60,7 +60,9 @@ export class AuthService {
   ) {
     this.sessionPolicy = loadSessionPolicyFromEnv({
       get: (key, defaultValue) =>
-        this.configService.get<string>(key, defaultValue),
+        defaultValue === undefined
+          ? this.configService.get<string>(key)
+          : this.configService.get<string>(key, defaultValue),
     });
   }
 
@@ -209,9 +211,7 @@ export class AuthService {
       remember: claims.remember,
       roleGroup: user.role?.roleGroup ?? claims.roleGroup,
     });
-    return (
-      remainingAbsoluteSeconds(claims.auth_time, absoluteSeconds) <= 0
-    );
+    return remainingAbsoluteSeconds(claims.auth_time, absoluteSeconds) <= 0;
   }
 
   /**
@@ -226,10 +226,7 @@ export class AuthService {
       return null;
     }
     if (
-      !shouldSlideSession(
-        claims.exp,
-        this.sessionPolicy.slideBeforeSeconds,
-      )
+      !shouldSlideSession(claims.exp, this.sessionPolicy.slideBeforeSeconds)
     ) {
       return null;
     }
