@@ -59,6 +59,10 @@ export class BookingDocumentsService {
     return this.historyService.lock(id, actorUserId);
   }
 
+  async unlockRecord(id: number, actorUserId: number) {
+    return this.historyService.unlock(id, actorUserId);
+  }
+
   async archiveRecord(id: number, actorUserId: number) {
     return this.historyService.archive(id, actorUserId);
   }

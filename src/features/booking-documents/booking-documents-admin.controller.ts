@@ -19,6 +19,7 @@ import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { PermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
 import { AdminSection } from '../../shared/decorators/admin-section.decorator';
+import { ApiAdminOnly } from '../../shared/decorators/api-admin.decorator';
 import { BookingDocumentsService } from './booking-documents.service';
 import { BOOKING_DOCUMENT_SECTION } from './constants/booking-document.constants';
 import { BookingDocumentType } from './enums/booking-document-type.enum';
@@ -90,6 +91,19 @@ export class BookingDocumentsAdminController {
     @Req() request: AuthenticatedRequest,
   ) {
     return this.bookingDocuments.lockRecord(
+      id,
+      this.requireActorUserId(request),
+    );
+  }
+
+  /** Admin-only: clear lock so staff can edit the form again. */
+  @Post('records/:id/unlock')
+  @ApiAdminOnly()
+  unlockRecord(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.bookingDocuments.unlockRecord(
       id,
       this.requireActorUserId(request),
     );

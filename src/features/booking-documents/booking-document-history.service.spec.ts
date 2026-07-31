@@ -126,6 +126,38 @@ describe('BookingDocumentHistoryService lifecycle', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('unlocks a locked record so updates succeed again', async () => {
+    const created = await service.createRecord(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      { anNumber: 'AN-U' },
+      4,
+    );
+    await service.lockRecord(created.id, 4);
+
+    const unlocked = await service.unlockRecord(created.id, 9);
+    expect(unlocked.lockedAt).toBeNull();
+    expect(unlocked.updatedByUserId).toBe(9);
+
+    const updated = await service.updateRecord(
+      created.id,
+      { anNumber: 'AN-U2' },
+      9,
+    );
+    expect(updated.referenceNumber).toBe('AN-U2');
+  });
+
+  it('rejects unlock when the record is not locked', async () => {
+    const created = await service.createRecord(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      { anNumber: 'AN-NU' },
+      4,
+    );
+
+    await expect(service.unlockRecord(created.id, 4)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+  });
+
   it('rejects duplicate lock', async () => {
     const created = await service.createRecord(
       BookingDocumentType.ARRIVAL_NOTICE,

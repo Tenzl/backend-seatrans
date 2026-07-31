@@ -11,6 +11,7 @@ import {
   PermanentDeleteAuditSpec,
 } from '../../shared/audit/destructive-action-audit.interceptor';
 import { AdminBookingPartnerController } from '../booking/controllers/admin-booking-partner.controller';
+import { BookingDocumentsAdminController } from '../booking-documents/booking-documents-admin.controller';
 import { CommoditiesAdminController } from '../commodities/commodities-admin.controller';
 import { GalleryAdminController } from '../gallery/gallery-admin.controller';
 import { EpdaParametersAdminController } from '../epda-parameters/epda-parameters-admin.controller';
@@ -109,4 +110,12 @@ describe('privileged authorization contract', () => {
       expect(audit).toMatchObject({ resourceType });
     },
   );
+
+  it('reserves booking-document unlock for ROLE_ADMIN', () => {
+    const roles = reflector.getAllAndOverride<string[]>(ROLES_KEY, [
+      BookingDocumentsAdminController.prototype.unlockRecord,
+      BookingDocumentsAdminController,
+    ]);
+    expect(roles).toEqual(['ROLE_ADMIN']);
+  });
 });

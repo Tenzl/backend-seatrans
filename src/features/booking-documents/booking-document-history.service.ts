@@ -87,6 +87,17 @@ export class BookingDocumentHistoryService {
     return this.toResponse(await this.recordRepository.save(record));
   }
 
+  /** Clears lock so the form can be edited again. Caller must enforce ROLE_ADMIN. */
+  async unlock(id: number, actorUserId: number) {
+    const record = await this.findActiveOrFail(id);
+    if (!record.lockedAt) {
+      throw new ConflictException('Document record is not locked');
+    }
+    record.lockedAt = null;
+    record.updatedByUserId = actorUserId;
+    return this.toResponse(await this.recordRepository.save(record));
+  }
+
   async archive(id: number, actorUserId: number) {
     const record = await this.findActiveOrFail(id);
     record.deletedAt = new Date();
