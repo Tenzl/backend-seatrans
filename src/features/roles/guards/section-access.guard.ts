@@ -22,9 +22,17 @@ function toUserLike(value: unknown): UserLike | null {
 
   const id = value.role.id;
   const name = value.role.name;
+  const roleGroup = value.role.roleGroup;
   if (id != null && typeof id !== 'number') return null;
   if (name != null && typeof name !== 'string') return null;
-  return { role: { id: id ?? null, name: name ?? null } };
+  if (roleGroup != null && typeof roleGroup !== 'string') return null;
+  return {
+    role: {
+      id: id ?? null,
+      name: name ?? null,
+      roleGroup: roleGroup ?? null,
+    },
+  };
 }
 
 /**

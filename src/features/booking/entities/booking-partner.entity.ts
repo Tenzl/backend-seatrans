@@ -168,6 +168,10 @@ export class BookingPartner {
   @Column({ name: 'deleted_at', type: 'timestamp', nullable: true })
   deletedAt!: Date | null;
 
+  /** When set, partner edits are frozen (EPDA-style lock; no unlock). */
+  @Column({ name: 'locked_at', type: 'timestamptz', nullable: true })
+  lockedAt!: Date | null;
+
   @OneToOne(() => BookingShipping, (shipping) => shipping.bookingPartner)
   shipping!: BookingShipping | null;
 }

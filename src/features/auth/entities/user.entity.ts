@@ -6,6 +6,8 @@ import {
   UpdateDateColumn,
   ManyToOne,
   JoinColumn,
+  BeforeInsert,
+  BeforeUpdate,
 } from 'typeorm';
 import { Role } from './role.entity';
 import { RoleGroup } from '../enums/role-group.enum';
@@ -45,11 +47,21 @@ export class User {
   @Column({ name: 'last_login', type: 'timestamp', nullable: true })
   lastLogin!: Date;
 
-  @Column({ name: 'oauth_provider', length: 50, nullable: true })
-  oauthProvider!: string; // 'google', 'facebook', etc.
+  @Column({
+    name: 'oauth_provider',
+    type: 'varchar',
+    length: 50,
+    nullable: true,
+  })
+  oauthProvider!: string | null; // 'google', 'facebook', etc.
 
-  @Column({ name: 'oauth_provider_id', length: 255, nullable: true })
-  oauthProviderId!: string;
+  @Column({
+    name: 'oauth_provider_id',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
+  oauthProviderId!: string | null;
 
   @Column({ name: 'email_verified', default: false })
   emailVerified!: boolean;
@@ -64,6 +76,34 @@ export class User {
   @ManyToOne(() => User, { nullable: true })
   @JoinColumn({ name: 'created_by_user_id' })
   createdByUser!: User | null;
+
+  /**
+   * Keep the stored value canonical so the ordinary unique index also prevents
+   * case-variant duplicates for every repository.save() caller.
+   */
+  @BeforeInsert()
+  @BeforeUpdate()
+  normalizeIdentityFields(): void {
+    this.email = this.email.trim().toLowerCase();
+    if (typeof this.username === 'string') {
+      const username = this.username.trim().toLowerCase();
+      this.username = username || null;
+    }
+    const oauthProvider =
+      typeof this.oauthProvider === 'string'
+        ? this.oauthProvider.trim().toLowerCase()
+        : null;
+    const oauthProviderId =
+      typeof this.oauthProviderId === 'string'
+        ? this.oauthProviderId.trim()
+        : null;
+    // OAuth provider and subject form one identity. A partial or blank pair
+    // means that this is a password account, not an indexable OAuth identity.
+    this.oauthProvider =
+      oauthProvider && oauthProviderId ? oauthProvider : null;
+    this.oauthProviderId =
+      oauthProvider && oauthProviderId ? oauthProviderId : null;
+  }
 
   hasRole(roleName: string): boolean {
     return this.role?.name === roleName;

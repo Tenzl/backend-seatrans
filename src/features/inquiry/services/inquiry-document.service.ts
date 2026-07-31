@@ -1,11 +1,12 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { InquiryDocument } from '../entities/inquiry-document.entity';
 import { BaseInquiry } from '../entities/base-inquiry.entity';
 import { ShippingAgencyInquiryEntity } from '../entities/shipping-agency-inquiry.entity';
@@ -20,6 +21,8 @@ import { User } from '../../auth/entities/user.entity';
 
 @Injectable()
 export class InquiryDocumentService {
+  private readonly logger = new Logger(InquiryDocumentService.name);
+
   /** Normalized service slug → per-service inquiry repository. */
   private readonly inquiryRepos: Record<string, Repository<BaseInquiry>>;
 
@@ -75,26 +78,42 @@ export class InquiryDocumentService {
       `inquiries/${inquirySlug}`,
     );
 
-    const row = this.inquiryDocumentRepository.create({
-      serviceSlug: inquirySlug,
-      targetId,
-      documentType,
-      fileName: upload.publicId,
-      originalFileName: file.originalname,
-      filePath: upload.secureUrl,
-      fileSize: String(file.size),
-      mimeType: file.mimetype || null,
-      description: this.trimToNull(description),
-      cloudinaryUrl: upload.secureUrl,
-      cloudinaryPublicId: upload.publicId,
-      uploadedBy: uploader,
-      version: 1,
-      checksum: createHash('sha256').update(file.buffer).digest('hex'),
-      isActive: true,
-    });
+    try {
+      const row = this.inquiryDocumentRepository.create({
+        serviceSlug: inquirySlug,
+        targetId,
+        documentType,
+        fileName: upload.publicId,
+        originalFileName: file.originalname,
+        filePath: upload.secureUrl,
+        fileSize: String(file.size),
+        mimeType: file.mimetype || null,
+        description: this.trimToNull(description),
+        cloudinaryUrl: upload.secureUrl,
+        cloudinaryPublicId: upload.publicId,
+        uploadedBy: uploader,
+        version: 1,
+        checksum: createHash('sha256').update(file.buffer).digest('hex'),
+        isActive: true,
+      });
 
-    const saved = await this.inquiryDocumentRepository.save(row);
-    return this.toDto(saved);
+      const saved = await this.inquiryDocumentRepository.save(row);
+      return this.toDto(saved);
+    } catch (error) {
+      // The object exists before its metadata row is written. Compensate the
+      // external side effect so a database error does not leak stored files.
+      try {
+        await this.cloudinaryService.deleteByPublicId(upload.publicId, 'raw');
+      } catch (cleanupError) {
+        this.logger.error(
+          `Could not remove orphaned inquiry upload ${upload.publicId}`,
+          cleanupError instanceof Error
+            ? cleanupError.stack
+            : String(cleanupError),
+        );
+      }
+      throw error;
+    }
   }
 
   async saveAttachmentsForInquiry(
@@ -102,15 +121,36 @@ export class InquiryDocumentService {
     files: Express.Multer.File[],
     uploaderUserId: number,
   ): Promise<void> {
-    for (const file of files) {
-      await this.uploadDocument(
-        this.toServiceSlug(inquiry.serviceType.name),
-        inquiry.id,
-        InquiryDocumentType.OTHER,
-        file,
-        undefined,
-        uploaderUserId,
-      );
+    const persistedDocumentIds: number[] = [];
+
+    try {
+      for (const file of files) {
+        const saved = await this.uploadDocument(
+          this.toServiceSlug(inquiry.serviceType.name),
+          inquiry.id,
+          InquiryDocumentType.OTHER,
+          file,
+          undefined,
+          uploaderUserId,
+        );
+        persistedDocumentIds.push(saved.id);
+      }
+    } catch (error) {
+      // Treat the submitted attachment set as one unit from the customer's
+      // perspective: if one file fails, remove every earlier file in the set.
+      for (const documentId of persistedDocumentIds.reverse()) {
+        try {
+          await this.deleteDocument(documentId);
+        } catch (cleanupError) {
+          this.logger.error(
+            `Could not roll back inquiry document ${documentId}`,
+            cleanupError instanceof Error
+              ? cleanupError.stack
+              : String(cleanupError),
+          );
+        }
+      }
+      throw error;
     }
   }
 
@@ -196,16 +236,46 @@ export class InquiryDocumentService {
    * targetId match is safe.
    */
   async hardDeleteByInquiry(inquiryId: number): Promise<void> {
-    const rows = await this.inquiryDocumentRepository.find({
+    const publicIds = await this.inquiryDocumentRepository.manager.transaction(
+      (manager) => this.removeMetadataByInquiry(inquiryId, manager),
+    );
+    await this.deleteStoredObjectsBestEffort(publicIds);
+  }
+
+  /**
+   * Remove document metadata inside the caller's database transaction.
+   * External object deletion deliberately happens only after that transaction
+   * commits, because Cloudinary cannot participate in a PostgreSQL rollback.
+   */
+  async removeMetadataByInquiry(
+    inquiryId: number,
+    manager: EntityManager,
+  ): Promise<string[]> {
+    const repository = manager.getRepository(InquiryDocument);
+    const rows = await repository.find({
       where: { targetId: inquiryId },
     });
+    await repository.delete({ targetId: inquiryId });
+    return rows
+      .map((row) => row.cloudinaryPublicId?.trim())
+      .filter((publicId): publicId is string => Boolean(publicId));
+  }
 
-    for (const row of rows) {
-      await this.cloudinaryService.deleteByPublicId(
-        row.cloudinaryPublicId ?? '',
-        'raw',
-      );
-      await this.inquiryDocumentRepository.remove(row);
+  /**
+   * Best-effort post-commit cleanup. Database integrity wins over storage
+   * cleanup; failures are visible in logs and the delete operation stays
+   * idempotent so an operational retry can safely remove leftover objects.
+   */
+  async deleteStoredObjectsBestEffort(publicIds: string[]): Promise<void> {
+    for (const publicId of new Set(publicIds)) {
+      try {
+        await this.cloudinaryService.deleteByPublicId(publicId, 'raw');
+      } catch (error) {
+        this.logger.error(
+          `Could not remove deleted inquiry object ${publicId}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
     }
   }
 

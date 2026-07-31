@@ -9,6 +9,7 @@ import {
   Put,
 } from '@nestjs/common';
 import { ApiAdmin } from '../../shared/decorators/api-admin.decorator';
+import { PermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
 import { ProvincesService } from './provinces.service';
 import { CreateProvinceDto } from './dto/create-province.dto';
 import { ProvinceDto } from './dto/province.dto';
@@ -33,6 +34,10 @@ export class ProvincesAdminController {
   }
 
   @Delete(':id')
+  @PermanentDelete({
+    resourceType: 'province',
+    idSource: { kind: 'param', key: 'id' },
+  })
   @HttpCode(HttpStatus.NO_CONTENT)
   deleteProvince(@Param('id') id: string): Promise<void> {
     return this.provincesService.deleteProvince(Number(id));

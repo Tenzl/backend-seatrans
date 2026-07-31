@@ -11,6 +11,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiAdmin } from '../../shared/decorators/api-admin.decorator';
+import { PermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
 import { LimitQueryDto } from '../../shared/dto/list-query.dto';
 import { ServiceTypesService } from './service-types.service';
 import { CreateServiceTypeDto } from './dto/create-service-type.dto';
@@ -51,7 +52,10 @@ export class ServiceTypesController {
     return this.serviceTypesService.update(Number(id), dto);
   }
 
-  @ApiAdmin()
+  @PermanentDelete({
+    resourceType: 'service_type',
+    idSource: { kind: 'param', key: 'id' },
+  })
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id') id: string) {

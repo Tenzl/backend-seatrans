@@ -14,7 +14,6 @@ import { ServiceInquiryService } from './services/service-inquiry.service';
 import { ShippingAgencyEpdaService } from './services/shipping-agency-epda.service';
 import { InquiryDocumentService } from './services/inquiry-document.service';
 import { InquiryFieldChangeService } from './services/inquiry-field-change.service';
-import { InquirySchemaBootstrap } from './inquiry.schema-bootstrap';
 import { PublicInquiryController } from './controllers/public-inquiry.controller';
 import { AdminInquiryController } from './controllers/admin-inquiry.controller';
 import { InquiryDocumentController } from './controllers/inquiry-document.controller';
@@ -23,6 +22,9 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { CloudinaryService } from '../../shared/services/cloudinary.service';
 import { NotificationModule } from '../notification/notification.module';
 import { EpdaParametersModule } from '../epda-parameters/epda-parameters.module';
+import { InquiryRepositoryRegistry } from './services/inquiry-repository.registry';
+import { InquiryQueryService } from './services/inquiry-query.service';
+import { ShippingAgencyEpdaSnapshotService } from './services/shipping-agency-epda-snapshot.service';
 
 @Module({
   imports: [
@@ -42,11 +44,13 @@ import { EpdaParametersModule } from '../epda-parameters/epda-parameters.module'
     EpdaParametersModule,
   ],
   providers: [
+    InquiryRepositoryRegistry,
+    InquiryQueryService,
     ServiceInquiryService,
+    ShippingAgencyEpdaSnapshotService,
     ShippingAgencyEpdaService,
     InquiryDocumentService,
     InquiryFieldChangeService,
-    InquirySchemaBootstrap,
     RolesGuard,
     CloudinaryService,
   ],

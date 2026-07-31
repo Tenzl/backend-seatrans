@@ -4,20 +4,60 @@ import {
   ArgumentsHost,
   HttpException,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
-import { Response } from 'express';
+import type { Request, Response } from 'express';
 import { ApiResponse } from '../dto/api-response';
 import {
   type ApiErrorBody,
   type ApiFieldError,
   httpStatusToErrorCode,
 } from '../dto/api-error.dto';
+import {
+  redactSensitiveText,
+  safeErrorForLog,
+} from '../logging/safe-error-log';
+
+function sanitizeFieldErrors(value: unknown): ApiFieldError[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const details: ApiFieldError[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const record = entry as Record<string, unknown>;
+    const field = record.field;
+    const message = record.message;
+    const code = record.code;
+    if (typeof field !== 'string' || typeof message !== 'string') continue;
+    details.push({
+      field,
+      message,
+      ...(typeof code === 'string' ? { code } : {}),
+    });
+  }
+  return details.length ? details : undefined;
+}
+
+function publicServerErrorMessage(status: number): string {
+  if (status === 503) {
+    return 'Service temporarily unavailable';
+  }
+  if (status === 504) {
+    return 'Upstream service timed out';
+  }
+  if (status === 502) {
+    return 'Upstream service unavailable';
+  }
+  return 'Internal server error';
+}
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(GlobalExceptionFilter.name);
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
+    const request = ctx.getRequest<Request>();
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = 'Internal server error';
@@ -33,7 +73,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         const rawDetails = body.details;
 
         if (Array.isArray(rawDetails)) {
-          details = rawDetails as ApiFieldError[];
+          details = sanitizeFieldErrors(rawDetails);
           message =
             typeof rawMessage === 'string'
               ? rawMessage
@@ -67,14 +107,25 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         message = exception.message;
       }
     } else if (exception instanceof Error) {
-      // Never expose raw error messages from unexpected exceptions.
-      // Reserve detailed context for server logs only.
       status = HttpStatus.INTERNAL_SERVER_ERROR;
       message = 'Internal server error';
     }
 
-    if (status === HttpStatus.INTERNAL_SERVER_ERROR) {
-      console.error('[GlobalExceptionFilter]', exception);
+    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      const method = request?.method ?? 'UNKNOWN';
+      const path = (
+        request?.path ??
+        request?.originalUrl ??
+        request?.url ??
+        'unknown'
+      ).split('?')[0];
+      const safeError = safeErrorForLog(exception);
+      const summary = redactSensitiveText(
+        `${method} ${path} -> ${status} ${safeError.message}`,
+      );
+      this.logger.error(summary, safeError.stack);
+      message = publicServerErrorMessage(status);
+      details = undefined;
     }
 
     const code = httpStatusToErrorCode(status);

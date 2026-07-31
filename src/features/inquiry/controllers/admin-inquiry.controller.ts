@@ -16,6 +16,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { ApiAdmin } from '../../../shared/decorators/api-admin.decorator';
+import { PermanentDelete } from '../../../shared/decorators/permanent-delete.decorator';
 import { isAdminRoleName } from '../../roles/section-access.service';
 import { ServiceInquiryService } from '../services/service-inquiry.service';
 import { ShippingAgencyEpdaService } from '../services/shipping-agency-epda.service';
@@ -68,15 +69,27 @@ export class AdminInquiryController {
     }
 
     const serviceSlug = query.serviceSlug?.trim() || undefined;
-    if (isAdminRoleName(req.user?.role?.name)) {
-      return this.inquiryService.hardDeleteBatchByAdmin(dto.ids, serviceSlug);
-    }
-
     return this.inquiryService.softDeleteBatch(
       dto.ids,
       actorUserId,
       serviceSlug,
     );
+  }
+
+  @Delete('batch/permanent')
+  @PermanentDelete({
+    resourceType: 'inquiry_batch',
+    detailSources: [
+      { kind: 'body', key: 'ids', label: 'resourceIds' },
+      { kind: 'query', key: 'serviceSlug' },
+    ],
+  })
+  hardDeleteBatch(
+    @Body() dto: DeleteInquiriesDto,
+    @Query() query: DeleteInquiriesQueryDto,
+  ) {
+    const serviceSlug = query.serviceSlug?.trim() || undefined;
+    return this.inquiryService.hardDeleteBatchByAdmin(dto.ids, serviceSlug);
   }
 
   @Post('batch/restore')
@@ -237,11 +250,20 @@ export class AdminInquiryController {
       throw new BadRequestException('User not authenticated');
     }
 
-    if (isAdminRoleName(req.user?.role?.name)) {
-      return this.inquiryService.hardDeleteByServiceAndId(serviceType, id);
-    }
-
     return this.inquiryService.softDeleteBatch([id], actorUserId, serviceType);
+  }
+
+  @Delete(':serviceType/:id/permanent')
+  @PermanentDelete({
+    resourceType: 'inquiry',
+    idSource: { kind: 'param', key: 'id' },
+  })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  hardRemove(
+    @Param('serviceType') serviceType: string,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.inquiryService.hardDeleteByServiceAndId(serviceType, id);
   }
 
   @Post(':serviceType/:id/restore')

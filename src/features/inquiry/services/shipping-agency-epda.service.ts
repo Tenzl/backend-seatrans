@@ -16,9 +16,7 @@ import { UpdateShippingAgencyEpdaDto } from '../dto/update-shipping-agency-epda.
 import { IssueShippingAgencyEpdaDto } from '../dto/issue-shipping-agency-epda.dto';
 import { LockShippingAgencyEpdaDto } from '../dto/lock-shipping-agency-epda.dto';
 import { CreateInternalShippingAgencyInquiryDto } from '../dto/create-internal-shipping-agency-inquiry.dto';
-import {
-  getDefaultGarbageUsdRate,
-} from '../constants/epda-garbage.defaults';
+import { getDefaultGarbageUsdRate } from '../constants/epda-garbage.defaults';
 import {
   InquiryResponseAudience,
   mapShippingAgencyInquiryFields,
@@ -32,69 +30,13 @@ import {
   EPDA_QUOTE_FORM_BY_AREA,
   type EpdaQuoteForm,
 } from '../constants/epda-quote-form';
-import { EpdaParametersService } from '../../epda-parameters/epda-parameters.service';
+import {
+  diffEpdaFieldSnapshots,
+  epdaFieldSnapshot,
+} from './shipping-agency-epda-audit';
+import { ShippingAgencyEpdaSnapshotService } from './shipping-agency-epda-snapshot.service';
 
-const MAX_SNAPSHOT_BYTES = 256 * 1024;
 const SERVICE_SHIPPING_AGENCY = 'SHIPPING AGENCY';
-const SNAPSHOT_ROW_KEYS = new Set([
-  'no',
-  'item',
-  'details',
-  'add',
-  'remark',
-  'amount',
-  'mergeItemDetails',
-]);
-const SNAPSHOT_ROW_COLLECTION_KEYS = new Set(['AA_ROWS', 'BB_ROWS']);
-const SNAPSHOT_TOTAL_KEYS = new Set(['total_a', 'total_b', 'grand_total']);
-const SNAPSHOT_KEYS = new Set([
-  'to_shipowner',
-  'shipowner_nationality',
-  'date',
-  'ref',
-  'mv',
-  'dwt',
-  'grt',
-  'loa',
-  'eta',
-  'cargo_qty_mt',
-  'cargo_name_upper',
-  'cargo_type',
-  'ship_type',
-  'purpose_of_calling',
-  'port_upper',
-  'loading_term',
-  'ocean_frt_rate_usd_per_mt',
-  'garbage_usd_rate',
-  'at_anchorage',
-  'at_berth',
-  'total_a',
-  'total_b',
-  'grand_total',
-  'bank_name',
-  'bank_address',
-  'beneficiary',
-  'usd_account',
-  'swift',
-  'berth_hours',
-  'buoy_due_hours',
-  'anchorage_hours',
-  'transport_quarantine',
-  'quarantine_cargo_trips',
-  'transport_ls',
-  'boat_hire_entry',
-  'agency_fee_mode',
-  'agency_discount_percent',
-  'agency_lumpsum_amount',
-  'tally_fee',
-  'tug_assistance',
-  'shorecrane_hire_usd_per_mt',
-  'pilotage_miles',
-  'pilotage_third_miles',
-  'AA_ROWS',
-  'BB_ROWS',
-  'params',
-]);
 
 @Injectable()
 export class ShippingAgencyEpdaService {
@@ -111,7 +53,7 @@ export class ShippingAgencyEpdaService {
     private readonly portRepository: Repository<Port>,
     private readonly notificationService: NotificationService,
     private readonly fieldChangeService: InquiryFieldChangeService,
-    private readonly epdaParametersService: EpdaParametersService,
+    private readonly snapshotService: ShippingAgencyEpdaSnapshotService,
   ) {}
 
   async createInternalInquiry(
@@ -216,13 +158,11 @@ export class ShippingAgencyEpdaService {
         saved.id,
         actorUserId,
         InquiryFieldChangeAction.EPDA_CREATE,
-        Object.entries(this.epdaFieldSnapshot(saved)).map(
-          ([field, newValue]) => ({
-            field,
-            previousValue: null,
-            newValue,
-          }),
-        ),
+        Object.entries(epdaFieldSnapshot(saved)).map(([field, newValue]) => ({
+          field,
+          previousValue: null,
+          newValue,
+        })),
         manager,
       );
       return this.toAdminInquiryPayload(saved);
@@ -269,7 +209,7 @@ export class ShippingAgencyEpdaService {
   }> {
     this.assertEpdaUnlocked(row);
     const canonicalPort = await this.validateCanonicalPortUpdate(row, dto);
-    const before = this.epdaFieldSnapshot(row);
+    const before = epdaFieldSnapshot(row);
     this.applyCustomerVisibleUpdates(row, dto);
     if (canonicalPort) row.portOfCall = canonicalPort.portOfCall;
 
@@ -340,7 +280,7 @@ export class ShippingAgencyEpdaService {
       saved.id,
       actorUserId,
       InquiryFieldChangeAction.EPDA_SAVE_DRAFT,
-      this.diffSnapshots(before, this.epdaFieldSnapshot(saved)),
+      diffEpdaFieldSnapshots(before, epdaFieldSnapshot(saved)),
       manager,
     );
 
@@ -399,12 +339,18 @@ export class ShippingAgencyEpdaService {
     previousStatus: string;
   }> {
     const previousStatus = row.status;
-    const requestedSnapshot = await this.buildAuthoritativeSnapshot(
-      row,
-      dto.epdaSnapshot,
-    );
+    const requestedSnapshot =
+      await this.snapshotService.buildAuthoritativeSnapshot(
+        row,
+        dto.epdaSnapshot,
+      );
     if (row.epdaLockedAt) {
-      if (!this.snapshotsEqual(row.epdaSnapshot, requestedSnapshot)) {
+      if (
+        !this.snapshotService.snapshotsEqual(
+          row.epdaSnapshot,
+          requestedSnapshot,
+        )
+      ) {
         throw new ConflictException(
           'EPDA is locked with a different tariff snapshot',
         );
@@ -469,7 +415,7 @@ export class ShippingAgencyEpdaService {
       throw new ConflictException('EPDA is already locked');
     }
     const previousLocked = row.epdaLockedAt;
-    row.epdaSnapshot = await this.buildAuthoritativeSnapshot(
+    row.epdaSnapshot = await this.snapshotService.buildAuthoritativeSnapshot(
       row,
       dto.epdaSnapshot,
     );
@@ -779,163 +725,6 @@ export class ShippingAgencyEpdaService {
     return value.trim().replace(/\s+/g, ' ').toUpperCase();
   }
 
-  private validateSnapshot(
-    snapshot: Record<string, unknown>,
-  ): Record<string, unknown> {
-    let serialized: string;
-    try {
-      serialized = JSON.stringify(snapshot);
-    } catch {
-      throw new BadRequestException('epdaSnapshot must be JSON-serializable');
-    }
-
-    if (Buffer.byteLength(serialized, 'utf8') > MAX_SNAPSHOT_BYTES) {
-      throw new BadRequestException(
-        `epdaSnapshot exceeds maximum size of ${MAX_SNAPSHOT_BYTES} bytes`,
-      );
-    }
-
-    return snapshot;
-  }
-
-  /**
-   * Tariff parameters are server-owned. The client must calculate its quote
-   * from the same effective values the server currently resolves; otherwise
-   * freezing the remaining quote fields would persist a stale calculation.
-   */
-  private async buildAuthoritativeSnapshot(
-    row: ShippingAgencyInquiryEntity,
-    requestedSnapshot: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> {
-    const requested = this.validateSnapshot(requestedSnapshot);
-    this.validateSnapshotShape(requested);
-    if (!this.isJsonObject(requested.params)) {
-      throw new BadRequestException(
-        'EPDA snapshot params must be a parameter object',
-      );
-    }
-
-    if (row.epdaLockedAt) {
-      return requested;
-    }
-
-    if (!Number.isInteger(row.portId) || (row.portId ?? 0) <= 0) {
-      throw new BadRequestException(
-        'A canonical portId is required to freeze EPDA tariff parameters',
-      );
-    }
-    const effectiveParams = await this.epdaParametersService.getEffective(
-      undefined,
-      row.portId as number,
-    );
-    if (!this.jsonValuesEqual(requested.params, effectiveParams)) {
-      throw new ConflictException(
-        'EPDA tariff parameters are stale; refresh effective parameters and recalculate the quote',
-      );
-    }
-    return this.validateSnapshot({
-      ...requested,
-      params: structuredClone(effectiveParams),
-    });
-  }
-
-  private isJsonObject(value: unknown): value is Record<string, unknown> {
-    return value !== null && typeof value === 'object' && !Array.isArray(value);
-  }
-
-  private jsonValuesEqual(left: unknown, right: unknown): boolean {
-    return (
-      JSON.stringify(this.sortSnapshot(left)) ===
-      JSON.stringify(this.sortSnapshot(right))
-    );
-  }
-
-  private validateSnapshotShape(snapshot: Record<string, unknown>): void {
-    for (const [key, value] of Object.entries(snapshot)) {
-      if (!SNAPSHOT_KEYS.has(key)) {
-        throw new BadRequestException(
-          `Unsupported EPDA snapshot field: ${key}`,
-        );
-      }
-      if (key === 'params') continue;
-      if (SNAPSHOT_ROW_COLLECTION_KEYS.has(key)) {
-        this.validateSnapshotRows(key, value);
-        continue;
-      }
-      if (SNAPSHOT_TOTAL_KEYS.has(key)) {
-        this.assertNonNegativeFiniteAmount(key, value);
-        continue;
-      }
-      if (
-        value !== null &&
-        value !== undefined &&
-        typeof value !== 'string' &&
-        typeof value !== 'number' &&
-        typeof value !== 'boolean'
-      ) {
-        throw new BadRequestException(
-          `EPDA snapshot field ${key} must be a primitive value`,
-        );
-      }
-      if (typeof value === 'number' && !Number.isFinite(value)) {
-        throw new BadRequestException(
-          `EPDA snapshot field ${key} must be finite`,
-        );
-      }
-    }
-  }
-
-  private validateSnapshotRows(key: string, value: unknown): void {
-    if (!Array.isArray(value) || value.length > 200) {
-      throw new BadRequestException(
-        `EPDA snapshot field ${key} must contain at most 200 rows`,
-      );
-    }
-    value.forEach((entry, index) => {
-      if (!this.isJsonObject(entry)) {
-        throw new BadRequestException(`${key}[${index}] must be an object`);
-      }
-      for (const [rowKey, rowValue] of Object.entries(entry)) {
-        if (!SNAPSHOT_ROW_KEYS.has(rowKey)) {
-          throw new BadRequestException(
-            `Unsupported EPDA snapshot row field: ${key}[${index}].${rowKey}`,
-          );
-        }
-        if (rowKey === 'amount') {
-          this.assertNonNegativeFiniteAmount(
-            `${key}[${index}].amount`,
-            rowValue,
-          );
-        } else if (
-          rowValue !== null &&
-          rowValue !== undefined &&
-          typeof rowValue !== 'string' &&
-          typeof rowValue !== 'number' &&
-          typeof rowValue !== 'boolean'
-        ) {
-          throw new BadRequestException(
-            `EPDA snapshot row field ${key}[${index}].${rowKey} must be primitive`,
-          );
-        }
-      }
-    });
-  }
-
-  private assertNonNegativeFiniteAmount(path: string, value: unknown): void {
-    if (value === null || value === undefined || value === '') return;
-    const numeric =
-      typeof value === 'number'
-        ? value
-        : typeof value === 'string'
-          ? Number(value.replace(/,/g, '').trim())
-          : Number.NaN;
-    if (!Number.isFinite(numeric) || numeric < 0) {
-      throw new BadRequestException(
-        `EPDA snapshot amount ${path} must be finite and non-negative`,
-      );
-    }
-  }
-
   private async generateCode(
     repository: Repository<ShippingAgencyInquiryEntity> = this
       .inquiryRepository,
@@ -1028,120 +817,5 @@ export class ShippingAgencyEpdaService {
       return null;
     }
     return String(value);
-  }
-
-  /** All audited EPDA fields of a row as readable label → string value. */
-  private epdaFieldSnapshot(
-    row: ShippingAgencyInquiryEntity,
-  ): Record<string, string | null> {
-    const s = (v: unknown): string | null => {
-      if (v === null || v === undefined) return null;
-      if (v instanceof Date) return v.toISOString().slice(0, 10);
-      let serialized: string;
-      if (typeof v === 'string') serialized = v;
-      else if (
-        typeof v === 'number' ||
-        typeof v === 'boolean' ||
-        typeof v === 'bigint'
-      ) {
-        serialized = v.toString();
-      } else if (typeof v === 'object') {
-        serialized = JSON.stringify(v);
-      } else {
-        return null;
-      }
-      const str = serialized.trim();
-      return str.length ? str : null;
-    };
-    // Numeric fields: compare/display by value, not raw DB text. Postgres numeric
-    // serializes as "54.0000"/"12000.00" — strip the trailing zeros so a format-only
-    // difference (e.g. "54.0000" vs "54") is NOT recorded as a change.
-    const n = (v: unknown): string | null => {
-      const str = s(v);
-      if (str === null) return null;
-      const num = Number(str);
-      return Number.isFinite(num) ? String(num) : str;
-    };
-    return {
-      'Ship owner': s(row.toName),
-      Vessel: s(row.mv),
-      GRT: n(row.grt),
-      DWT: n(row.dwt),
-      LOA: n(row.loa),
-      ETA: s(row.eta),
-      'Cargo type': s(row.cargoType),
-      'Cargo name': s(row.cargoName),
-      'Cargo name (other)': s(row.cargoNameOther),
-      Quantity: n(row.cargoQuantity),
-      'Freight tax type': s(row.frtTaxType),
-      'Purpose of calling': s(row.purposeOfCalling),
-      'Port of call': s(row.portOfCall),
-      'Discharge/loading at': s(row.dischargeLoadingLocation),
-      'Quote form': s(row.quoteForm),
-      'Berth hours': n(row.berthHours),
-      'Anchorage hours': n(row.anchorageHours),
-      'Pilotage miles': n(row.pilotage3rdMiles),
-      'Document date': s(row.epdaDocumentDate),
-      'Ship type': s(row.shipType),
-      'Shipowner nationality': s(row.shipownerNationality),
-      'Ocean freight rate': n(row.oceanFrtRateUsdPerMt),
-      'Garbage USD rate': n(row.garbageUsdRate),
-      'Quarantine cargo mode': s(row.quarantineCargoMode),
-      'Agency fee mode': s(row.agencyFeeMode),
-      'Agency discount %': n(row.agencyDiscountPercent),
-      'Agency lumpsum': n(row.agencyLumpsumAmount),
-      'Boat hire (agency)': n(row.boatHireAmount),
-      'Tally fee': n(row.tallyFeeAmount),
-      'Tug assistance': n(row.tugAssistanceAmount),
-      'Tug assistance trips':
-        row.tugAssistanceTrips == null ? null : String(row.tugAssistanceTrips),
-      'Shorecrane-hire USD/mt': n(row.shorecraneHireUsdPerMt),
-      'Transport (taxi/courier)': s(row.transportLs),
-      'Boat hire (quarantine)': n(row.transportQuarantine),
-    };
-  }
-
-  private diffSnapshots(
-    before: Record<string, string | null>,
-    after: Record<string, string | null>,
-  ): Array<{
-    field: string;
-    previousValue: string | null;
-    newValue: string | null;
-  }> {
-    const changes: Array<{
-      field: string;
-      previousValue: string | null;
-      newValue: string | null;
-    }> = [];
-    for (const field of Object.keys(after)) {
-      const prev = before[field] ?? null;
-      const next = after[field] ?? null;
-      if (prev !== next)
-        changes.push({ field, previousValue: prev, newValue: next });
-    }
-    return changes;
-  }
-
-  private snapshotsEqual(
-    left: Record<string, unknown> | null,
-    right: Record<string, unknown>,
-  ): boolean {
-    if (left === null) return false;
-    return (
-      JSON.stringify(this.sortSnapshot(left)) ===
-      JSON.stringify(this.sortSnapshot(right))
-    );
-  }
-
-  private sortSnapshot(value: unknown): unknown {
-    if (Array.isArray(value))
-      return value.map((entry) => this.sortSnapshot(entry));
-    if (value === null || typeof value !== 'object') return value;
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, entry]) => [key, this.sortSnapshot(entry)]),
-    );
   }
 }

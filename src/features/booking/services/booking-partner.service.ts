@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -29,6 +30,12 @@ import { buildPaginatedResponse } from '../../../shared/dto/pagination.dto';
 import { PartnerOptionDto } from '../dto/partner-option.dto';
 import { PartnerAdditionType } from '../enums/partner-addition-type.enum';
 import { UpdateCustomerStatusDto } from '../dto/update-customer-status.dto';
+import { BookingPartnerFieldChangeAction } from '../entities/booking-partner-field-change-log.entity';
+import {
+  diffPartnerFieldSnapshots,
+  partnerFieldSnapshot,
+} from './booking-partner-audit';
+import { BookingPartnerFieldChangeService } from './booking-partner-field-change.service';
 
 @Injectable()
 export class BookingPartnerService {
@@ -36,12 +43,11 @@ export class BookingPartnerService {
   private static readonly MAX_PAGE_SIZE = 100;
   private static readonly DEFAULT_OPTIONS_LIMIT = 30;
   private static readonly MAX_OPTIONS_LIMIT = 50;
-  private sequenceTableEnsured = false;
-
   constructor(
     @InjectRepository(BookingPartner)
     private readonly partnerRepository: Repository<BookingPartner>,
     private readonly dataSource: DataSource,
+    private readonly fieldChangeService: BookingPartnerFieldChangeService,
   ) {}
 
   async listPartnerOptions(
@@ -144,6 +150,7 @@ export class BookingPartnerService {
   async createPartner(
     dto: UpsertBookingPartnerDto,
     actor: string,
+    actorUserId?: number,
   ): Promise<BookingPartnerDetailResponseDto> {
     this.validatePartnerInput(dto);
 
@@ -160,6 +167,21 @@ export class BookingPartnerService {
       partner.updatedBy = actor;
 
       const saved = await repository.save(partner);
+      if (actorUserId != null) {
+        await this.fieldChangeService.logFieldChanges(
+          saved.id,
+          actorUserId,
+          BookingPartnerFieldChangeAction.PARTNER_CREATE,
+          Object.entries(partnerFieldSnapshot(saved)).map(
+            ([field, newValue]) => ({
+              field,
+              previousValue: null,
+              newValue,
+            }),
+          ),
+          manager,
+        );
+      }
       return this.toDetailResponse(saved);
     });
   }
@@ -239,48 +261,130 @@ export class BookingPartnerService {
     id: number,
     dto: UpsertBookingPartnerDto,
     actor: string,
+    actorUserId?: number,
   ): Promise<BookingPartnerDetailResponseDto> {
     this.validatePartnerInput(dto);
 
-    const row = await this.partnerRepository.findOne({
-      where: {
-        id,
-        deletedAt: IsNull(),
-      },
+    return this.dataSource.transaction(async (manager) => {
+      const repository = manager.getRepository(BookingPartner);
+      const row = await repository.findOne({
+        where: {
+          id,
+          deletedAt: IsNull(),
+        },
+      });
+
+      if (!row) {
+        throw new NotFoundException('Partner not found');
+      }
+
+      this.assertPartnerUnlocked(row);
+      const before = partnerFieldSnapshot(row);
+      this.assignUpsertFields(row, dto);
+      row.updatedBy = actor;
+
+      const saved = await repository.save(row);
+      if (actorUserId != null) {
+        await this.fieldChangeService.logFieldChanges(
+          saved.id,
+          actorUserId,
+          BookingPartnerFieldChangeAction.PARTNER_UPDATE,
+          diffPartnerFieldSnapshots(before, partnerFieldSnapshot(saved)),
+          manager,
+        );
+      }
+      return this.toDetailResponse(saved);
     });
-
-    if (!row) {
-      throw new NotFoundException('Partner not found');
-    }
-
-    this.assignUpsertFields(row, dto);
-    row.updatedBy = actor;
-
-    const saved = await this.partnerRepository.save(row);
-    return this.toDetailResponse(saved);
   }
 
   async updateCustomerStatus(
     id: number,
     dto: UpdateCustomerStatusDto,
     actor: string,
+    actorUserId?: number,
   ): Promise<BookingPartnerDetailResponseDto> {
-    const row = await this.partnerRepository.findOne({
-      where: {
-        id,
-        deletedAt: IsNull(),
-      },
+    return this.dataSource.transaction(async (manager) => {
+      const repository = manager.getRepository(BookingPartner);
+      const row = await repository.findOne({
+        where: {
+          id,
+          deletedAt: IsNull(),
+        },
+      });
+
+      if (!row) {
+        throw new NotFoundException('Partner not found');
+      }
+
+      this.assertPartnerUnlocked(row);
+      const before = partnerFieldSnapshot(row);
+      row.customerStatus = dto.customerStatus;
+      row.updatedBy = actor;
+
+      const saved = await repository.save(row);
+      if (actorUserId != null) {
+        await this.fieldChangeService.logFieldChanges(
+          saved.id,
+          actorUserId,
+          BookingPartnerFieldChangeAction.PARTNER_UPDATE,
+          diffPartnerFieldSnapshots(before, partnerFieldSnapshot(saved)),
+          manager,
+        );
+      }
+      return this.toDetailResponse(saved);
     });
+  }
 
-    if (!row) {
-      throw new NotFoundException('Partner not found');
-    }
+  /**
+   * Freeze partner edits (EPDA-style). Unlock is not supported.
+   */
+  async lockPartner(
+    id: number,
+    actor: string,
+    actorUserId: number,
+  ): Promise<BookingPartnerDetailResponseDto> {
+    return this.dataSource.transaction(async (manager) => {
+      const repository = manager.getRepository(BookingPartner);
+      const row = await repository.findOne({
+        where: {
+          id,
+          deletedAt: IsNull(),
+        },
+      });
 
-    row.customerStatus = dto.customerStatus;
-    row.updatedBy = actor;
+      if (!row) {
+        throw new NotFoundException('Partner not found');
+      }
 
-    const saved = await this.partnerRepository.save(row);
-    return this.toDetailResponse(saved);
+      if (row.lockedAt) {
+        throw new ConflictException('Partner is already locked');
+      }
+
+      const previousLocked = row.lockedAt;
+      row.lockedAt = new Date();
+      row.updatedBy = actor;
+
+      const saved = await repository.save(row);
+      await this.fieldChangeService.logFieldChanges(
+        saved.id,
+        actorUserId,
+        BookingPartnerFieldChangeAction.PARTNER_LOCK,
+        [
+          {
+            field: 'Partner locked',
+            previousValue: previousLocked ? String(previousLocked) : null,
+            newValue: saved.lockedAt ? String(saved.lockedAt) : null,
+          },
+        ],
+        manager,
+      );
+      return this.toDetailResponse(saved);
+    });
+  }
+
+  async listFieldChangeLogs(partnerId: number, page = 0, size = 6) {
+    await this.getDetail(partnerId, true);
+    return this.fieldChangeService.listForPartner(partnerId, page, size);
   }
 
   async delete(id: number): Promise<void> {
@@ -297,12 +401,26 @@ export class BookingPartnerService {
    * so a fresh dataset can be imported. TRUNCATE ... CASCADE clears dependent
    * tables regardless of their FK onDelete config, and resets identities.
    */
-  async deleteAll(): Promise<{ deleted: number }> {
-    const deleted = await this.partnerRepository.count();
-    await this.dataSource.query(
-      'TRUNCATE TABLE booking_partners RESTART IDENTITY CASCADE',
-    );
-    return { deleted };
+  async deleteAll(expectedCount: number): Promise<{ deleted: number }> {
+    return this.dataSource.transaction(async (manager) => {
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        'seatrans:booking-partners:delete-all',
+      ]);
+      const countRows = await manager.query<Array<{ count: number | string }>>(
+        'SELECT count(*)::integer AS count FROM booking_partners',
+      );
+      const deleted = Number(countRows[0]?.count ?? 0);
+      if (deleted !== expectedCount) {
+        throw new ConflictException(
+          `Partner count changed: expected ${expectedCount}, found ${deleted}`,
+        );
+      }
+
+      await manager.query(
+        'TRUNCATE TABLE booking_partners RESTART IDENTITY CASCADE',
+      );
+      return { deleted };
+    });
   }
 
   private applyFilters(
@@ -493,7 +611,16 @@ export class BookingPartnerService {
       updatedBy: partner.updatedBy,
       updatedAt: partner.updatedAt,
       deletedAt: partner.deletedAt,
+      lockedAt: partner.lockedAt,
     };
+  }
+
+  private assertPartnerUnlocked(row: BookingPartner): void {
+    if (row.lockedAt) {
+      throw new ConflictException(
+        'Partner is locked. Unlock is not supported — create a new partner to change fields.',
+      );
+    }
   }
 
   private validatePartnerInput(dto: UpsertBookingPartnerDto): void {
@@ -579,8 +706,6 @@ export class BookingPartnerService {
     count: number,
   ): Promise<string[]> {
     if (count <= 0) return [];
-    await this.ensureSequenceTable(manager);
-
     const datePart = this.currentDatePart();
 
     await manager.query(
@@ -604,20 +729,5 @@ export class BookingPartnerService {
       ids.push(`CUS-${datePart}-${String(value).padStart(6, '0')}`);
     }
     return ids;
-  }
-
-  private async ensureSequenceTable(manager: EntityManager): Promise<void> {
-    if (this.sequenceTableEnsured) {
-      return;
-    }
-
-    await manager.query(`
-      CREATE TABLE IF NOT EXISTS customer_id_sequences (
-        sequence_date CHAR(6) PRIMARY KEY,
-        current_value BIGINT NOT NULL
-      )
-    `);
-
-    this.sequenceTableEnsured = true;
   }
 }

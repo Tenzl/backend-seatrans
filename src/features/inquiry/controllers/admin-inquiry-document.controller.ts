@@ -17,6 +17,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request } from 'express';
 import { ApiAdmin } from '../../../shared/decorators/api-admin.decorator';
+import { PermanentDelete } from '../../../shared/decorators/permanent-delete.decorator';
 import { validateDto } from '../../../shared/utils/validate-dto.util';
 import { InquiryDocumentService } from '../services/inquiry-document.service';
 import { UploadInquiryDocumentDto } from '../dto/upload-inquiry-document.dto';
@@ -61,6 +62,10 @@ export class AdminInquiryDocumentController {
   }
 
   @Delete(':documentId')
+  @PermanentDelete({
+    resourceType: 'inquiry_document',
+    idSource: { kind: 'param', key: 'documentId' },
+  })
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteDocument(
     @Param('serviceSlug') serviceSlug: string,

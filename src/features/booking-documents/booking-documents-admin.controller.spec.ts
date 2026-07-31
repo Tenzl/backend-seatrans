@@ -76,4 +76,45 @@ describe('BookingDocumentsAdminController', () => {
       15,
     );
   });
+
+  it('loads a single document record by id', async () => {
+    const getRecord = jest.fn().mockResolvedValue({ id: 9 });
+    const controller = new BookingDocumentsAdminController({
+      getRecord,
+    } as unknown as BookingDocumentsService);
+
+    await controller.getRecord(9);
+    expect(getRecord).toHaveBeenCalledWith(9);
+  });
+
+  it('updates, locks, archives, and permanently deletes records', async () => {
+    const updateRecord = jest.fn().mockResolvedValue({ id: 3 });
+    const lockRecord = jest.fn().mockResolvedValue({ id: 3, lockedAt: 'x' });
+    const archiveRecord = jest.fn().mockResolvedValue(undefined);
+    const permanentDeleteRecord = jest.fn().mockResolvedValue(undefined);
+    const controller = new BookingDocumentsAdminController({
+      updateRecord,
+      lockRecord,
+      archiveRecord,
+      permanentDeleteRecord,
+    } as unknown as BookingDocumentsService);
+
+    await controller.updateRecord(
+      3,
+      { anNumber: 'AN-3', status: 'COMPLETED' },
+      { user: { id: 2 } } as never,
+    );
+    await controller.lockRecord(3, { user: { id: 2 } } as never);
+    await controller.archiveRecord(3, { user: { id: 2 } } as never);
+    await controller.permanentDeleteRecord(3);
+
+    expect(updateRecord).toHaveBeenCalledWith(
+      3,
+      { anNumber: 'AN-3', status: 'COMPLETED' },
+      2,
+    );
+    expect(lockRecord).toHaveBeenCalledWith(3, 2);
+    expect(archiveRecord).toHaveBeenCalledWith(3, 2);
+    expect(permanentDeleteRecord).toHaveBeenCalledWith(3);
+  });
 });

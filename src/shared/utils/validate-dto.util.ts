@@ -2,7 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate, ValidationError } from 'class-validator';
 
-function flattenValidationErrors(
+export function flattenValidationErrors(
   errors: ValidationError[],
   parent = '',
 ): Array<{ field: string; message: string }> {
@@ -37,7 +37,7 @@ export async function validateDto<T extends object>(
 
   const errors = await validate(instance, {
     whitelist: true,
-    forbidNonWhitelisted: false,
+    forbidNonWhitelisted: true,
   });
 
   if (errors.length > 0) {

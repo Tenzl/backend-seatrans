@@ -6,8 +6,12 @@ import type { User } from './entities/user.entity';
 import type { SessionJwtClaims } from './session-policy';
 
 describe('AuthService session sliding', () => {
+  const sign = jest.fn((payload: SessionJwtClaims) => {
+    void payload;
+    return 'new-token';
+  });
   const jwtService = {
-    sign: jest.fn().mockReturnValue('new-token'),
+    sign,
   };
   const configService = {
     get: jest.fn((key: string, defaultValue?: string) => {
@@ -52,7 +56,11 @@ describe('AuthService session sliding', () => {
     expect(result).not.toBeNull();
     expect(result?.token).toBe('new-token');
     expect(jwtService.sign).toHaveBeenCalled();
-    const signedPayload = jwtService.sign.mock.calls.at(-1)?.[0] as SessionJwtClaims;
+    const signedPayload = sign.mock.calls.at(-1)?.[0];
+    expect(signedPayload).toBeDefined();
+    if (!signedPayload) {
+      throw new Error('Expected the session to be signed');
+    }
     expect(signedPayload.auth_time).toBe(claims.auth_time);
   });
 

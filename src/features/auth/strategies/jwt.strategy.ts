@@ -30,8 +30,7 @@ function toSessionClaims(payload: Record<string, unknown>): SessionJwtClaims {
   return {
     sub,
     email: typeof payload.email === 'string' ? payload.email : '',
-    roleGroup:
-      typeof payload.roleGroup === 'string' ? payload.roleGroup : null,
+    roleGroup: typeof payload.roleGroup === 'string' ? payload.roleGroup : null,
     roles,
     auth_time: Number.isFinite(auth_time) ? auth_time : 0,
     remember: payload.remember === true,
@@ -43,7 +42,7 @@ function toSessionClaims(payload: Record<string, unknown>): SessionJwtClaims {
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
-    private readonly configService: ConfigService,
+    configService: ConfigService,
     private readonly authService: AuthService,
   ) {
     super({

@@ -5,7 +5,6 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import sanitizeHtml from 'sanitize-html';
 import { PostEntity } from './entities/post.entity';
 import { Category } from './entities/category.entity';
 import { User } from '../auth/entities/user.entity';
@@ -15,6 +14,7 @@ import { CategoryResponseDto } from './dto/category-response.dto';
 import { CloudinaryService } from '../../shared/services/cloudinary.service';
 import { buildPaginatedResponse } from '../../shared/dto/pagination.dto';
 import { PublishedPostsQueryDto } from './dto/published-posts-query.dto';
+import { sanitizePostContent } from './sanitize-post-content';
 
 @Injectable()
 export class PostsService {
@@ -163,7 +163,7 @@ export class PostsService {
 
     const row = this.postRepository.create({
       title: dto.title.trim(),
-      content: this.sanitizeContent(dto.content),
+      content: sanitizePostContent(dto.content),
       summary: dto.summary?.trim() || null,
       author,
       categories,
@@ -194,7 +194,7 @@ export class PostsService {
     const nextPublicId = dto.thumbnailPublicId?.trim() || null;
 
     row.title = dto.title.trim();
-    row.content = this.sanitizeContent(dto.content);
+    row.content = sanitizePostContent(dto.content);
     row.summary = dto.summary?.trim() || null;
     row.categories = categories;
     row.thumbnailUrl = dto.thumbnailUrl?.trim() || null;
@@ -229,29 +229,6 @@ export class PostsService {
 
     await this.cloudinaryService.deleteByPublicId(row.thumbnailPublicId ?? '');
     await this.postRepository.delete(id);
-  }
-
-  private sanitizeContent(content: string): string {
-    return sanitizeHtml(content ?? '', {
-      allowedTags: sanitizeHtml.defaults.allowedTags.concat([
-        'img',
-        'h1',
-        'h2',
-        'h3',
-        'h4',
-        'h5',
-        'h6',
-        'span',
-      ]),
-      allowedAttributes: {
-        ...sanitizeHtml.defaults.allowedAttributes,
-        img: ['src', 'alt', 'title', 'width', 'height'],
-        a: ['href', 'name', 'target', 'rel'],
-        // Disallow inline styles to reduce XSS gadget surface.
-      },
-      // Disallow `data:` URLs — they are a common XSS / content-smuggling vector.
-      allowedSchemes: ['http', 'https', 'mailto'],
-    });
   }
 
   private async resolveCategories(categoryIds?: number[]): Promise<Category[]> {

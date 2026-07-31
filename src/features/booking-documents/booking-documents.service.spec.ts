@@ -1,7 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
 import { PDFDocument } from 'pdf-lib';
+import { BookingDocumentHistoryService } from './booking-document-history.service';
+import { BookingDocumentPayloadValidator } from './booking-document-payload.validator';
 import { BookingDocumentsService } from './booking-documents.service';
 import { BookingDocumentType } from './enums/booking-document-type.enum';
+import { BookingDocumentPdfRenderer } from './rendering/booking-document-pdf.renderer';
 
 describe('BookingDocumentsService', () => {
   let service: BookingDocumentsService;
@@ -13,7 +16,11 @@ describe('BookingDocumentsService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new BookingDocumentsService(recordRepository as never);
+    service = new BookingDocumentsService(
+      new BookingDocumentPayloadValidator(),
+      new BookingDocumentHistoryService(recordRepository as never),
+      new BookingDocumentPdfRenderer(),
+    );
   });
 
   it('creates an immutable history record from the validated payload', async () => {
@@ -23,6 +30,9 @@ describe('BookingDocumentsService', () => {
           ...record,
           id: 41,
           createdAt: new Date('2026-07-29T10:00:00.000Z'),
+          updatedAt: new Date('2026-07-29T10:00:00.000Z'),
+          lockedAt: null,
+          deletedAt: null,
         }),
     );
 
@@ -36,13 +46,16 @@ describe('BookingDocumentsService', () => {
       documentType: BookingDocumentType.ARRIVAL_NOTICE,
       referenceNumber: 'AN-001',
       payload: { anNumber: 'AN-001' },
+      status: 'PROCESSING',
       createdByUserId: 9,
+      updatedByUserId: 9,
     });
     expect(result).toMatchObject({
       id: 41,
       documentType: BookingDocumentType.ARRIVAL_NOTICE,
       referenceNumber: 'AN-001',
       payload: { anNumber: 'AN-001' },
+      status: 'PROCESSING',
       createdByUserId: 9,
       createdAt: '2026-07-29T10:00:00.000Z',
     });
@@ -56,8 +69,12 @@ describe('BookingDocumentsService', () => {
           documentType: BookingDocumentType.DELIVERY_ORDER,
           referenceNumber: 'DO-008',
           payload: { doNumber: 'DO-008' },
+          status: 'COMPLETED',
           createdByUserId: 3,
           createdAt: new Date('2026-07-29T09:00:00.000Z'),
+          updatedAt: new Date('2026-07-29T09:00:00.000Z'),
+          lockedAt: null,
+          deletedAt: null,
           createdBy: {
             id: 3,
             fullName: 'Operator',
@@ -74,13 +91,17 @@ describe('BookingDocumentsService', () => {
       10,
     );
 
-    expect(recordRepository.findAndCount).toHaveBeenCalledWith({
-      where: { documentType: BookingDocumentType.DELIVERY_ORDER },
-      relations: { createdBy: true },
-      order: { createdAt: 'DESC', id: 'DESC' },
-      skip: 0,
-      take: 10,
-    });
+    expect(recordRepository.findAndCount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          documentType: BookingDocumentType.DELIVERY_ORDER,
+        }),
+        relations: { createdBy: true },
+        order: { createdAt: 'DESC', id: 'DESC' },
+        skip: 0,
+        take: 10,
+      }),
+    );
     expect(result).toMatchObject({
       totalElements: 1,
       totalPages: 1,
@@ -90,6 +111,7 @@ describe('BookingDocumentsService', () => {
         {
           id: 8,
           referenceNumber: 'DO-008',
+          status: 'COMPLETED',
           createdBy: {
             id: 3,
             fullName: 'Operator',

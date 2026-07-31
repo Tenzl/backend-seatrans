@@ -20,10 +20,14 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "db:migrate:epda-areas": "node scripts/run-epda-area-normalization-migration.mjs",
     "db:migrate:epda-hardening": "node scripts/run-epda-parameter-hardening.mjs",
     "db:migrate:epda-hardening:data": "node scripts/run-epda-parameter-hardening.mjs --phase=data",
-    "db:migrate:epda-hardening:validate": "node scripts/run-epda-parameter-hardening.mjs --phase=validate"
+    "db:migrate:epda-hardening:validate": "node scripts/run-epda-parameter-hardening.mjs --phase=validate",
+    "db:migrate:runtime-schema": "node scripts/run-runtime-schema-migration.mjs",
+    "db:migrate:relational-integrity": "node scripts/run-relational-integrity-expand.mjs",
+    "db:migrate:roles-name-uniqueness": "node scripts/run-roles-name-uniqueness-migration.mjs",
+    "db:migrate:users-identity": "node scripts/run-users-identity-uniqueness-migration.mjs",
+    "db:migrate:customer-id-sequences": "node scripts/run-customer-id-sequences-migration.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1081.0",
@@ -53,8 +57,8 @@
     "pg": "^8.20.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "sanitize-html": "^2.17.2",
-    "typeorm": "^0.3.28"
+    "sanitize-html": "2.17.5",
+    "typeorm": "^0.3.31"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
@@ -87,9 +91,20 @@
     "typescript-eslint": "^8.20.0"
   },
   "overrides": {
+    "archiver": "5.3.2",
+    "archiver-utils": {
+      "glob": "13.0.6"
+    },
+    "body-parser": "2.3.0",
     "exceljs": {
       "uuid": "^11.1.1"
-    }
+    },
+    "fast-uri": "3.1.4",
+    "readdir-glob": "3.0.0",
+    "typeorm": {
+      "glob": "13.0.6"
+    },
+    "unzipper": "0.12.5"
   },
   "jest": {
     "moduleFileExtensions": [

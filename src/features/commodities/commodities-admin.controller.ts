@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiAdmin } from '../../shared/decorators/api-admin.decorator';
 import { AdminSection } from '../../shared/decorators/admin-section.decorator';
+import { PermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
 import { LimitQueryDto } from '../../shared/dto/list-query.dto';
 import { CommoditiesService } from './commodities.service';
 import { CommodityDto } from './dto/commodity.dto';
@@ -50,8 +51,11 @@ export class CommoditiesAdminController {
     return this.commoditiesService.update(Number(id), dto);
   }
 
-  @AdminSection('data-cargo')
   @Delete(':id')
+  @PermanentDelete({
+    resourceType: 'commodity',
+    idSource: { kind: 'param', key: 'id' },
+  })
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id') id: string): Promise<void> {
     return this.commoditiesService.delete(Number(id));

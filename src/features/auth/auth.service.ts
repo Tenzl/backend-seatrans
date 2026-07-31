@@ -3,6 +3,7 @@ import {
   UnauthorizedException,
   ConflictException,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -16,6 +17,7 @@ import { RegisterDto } from './dto/register.dto';
 import { ConfigService } from '@nestjs/config';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { OAuthUserProfile } from './dto/oauth-profile.dto';
+import { RoleGroup } from './enums/role-group.enum';
 import {
   loadSessionPolicyFromEnv,
   remainingAbsoluteSeconds,
@@ -39,9 +41,8 @@ export type AuthUserPayload = {
   emailVerified: boolean;
 };
 
-export type AuthSessionResponse = {
+export type IssuedAuthSession = {
   token: string;
-  type: 'Bearer';
   user: AuthUserPayload;
   cookieMaxAgeMs: number;
 };
@@ -67,9 +68,8 @@ export class AuthService {
   }
 
   async register(registerDto: RegisterDto) {
-    const existingUser = await this.userRepository.findOne({
-      where: { email: registerDto.email },
-    });
+    const normalizedEmail = this.normalizeEmail(registerDto.email);
+    const existingUser = await this.findUserByNormalizedEmail(normalizedEmail);
 
     if (existingUser) {
       throw new ConflictException('Email already exists');
@@ -87,6 +87,10 @@ export class AuthService {
       }
     }
 
+    const defaultRole = await this.requireExternalRole(
+      'DEFAULT_USER_ROLE',
+      'ROLE_CUSTOMER',
+    );
     const saltRounds = Number(
       this.configService.get<string>('BCRYPT_SALT_ROUNDS', '12'),
     );
@@ -97,27 +101,27 @@ export class AuthService {
 
     const newUser = this.userRepository.create({
       ...registerDto,
+      email: normalizedEmail,
       username,
       password: hashedPassword,
+      role: defaultRole,
     });
 
-    // Handle role lookup, etc.
-    const defaultRoleName = this.configService.get<string>(
-      'DEFAULT_USER_ROLE',
-      'ROLE_USER',
-    );
-    const defaultRole = await this.roleRepository.findOne({
-      where: { name: defaultRoleName },
-    });
-    if (defaultRole) {
-      newUser.role = defaultRole;
+    try {
+      await this.userRepository.save(newUser);
+    } catch (error) {
+      if (this.isUsersEmailConflict(error)) {
+        throw new ConflictException('Email already exists');
+      }
+      if (this.isUsersUsernameConflict(error)) {
+        throw new ConflictException('Username already exists');
+      }
+      throw error;
     }
 
-    await this.userRepository.save(newUser);
-
     return this.login({
-      identifier: registerDto.email,
-      password: registerDto.password, // Raw password needed here to get the token
+      identifier: normalizedEmail,
+      password: registerDto.password,
     });
   }
 
@@ -163,7 +167,7 @@ export class AuthService {
   buildAuthResponse(
     user: User,
     options?: { remember?: boolean; authTime?: number },
-  ): AuthSessionResponse {
+  ): IssuedAuthSession {
     const now = Math.floor(Date.now() / 1000);
     const remember = options?.remember === true;
     const auth_time = options?.authTime ?? now;
@@ -200,7 +204,6 @@ export class AuthService {
       token: this.jwtService.sign(payload, {
         expiresIn: toJwtExpiresIn(expiresInSeconds),
       }),
-      type: 'Bearer',
       user: this.toAuthUserPayload(user),
       cookieMaxAgeMs: expiresInSeconds * 1000,
     };
@@ -221,7 +224,7 @@ export class AuthService {
   maybeSlideSession(
     user: User,
     claims: SessionJwtClaims,
-  ): AuthSessionResponse | null {
+  ): IssuedAuthSession | null {
     if (this.isAbsoluteSessionExpired(claims, user)) {
       return null;
     }
@@ -256,7 +259,11 @@ export class AuthService {
   }
 
   async findOrCreateOAuthUser(profile: OAuthUserProfile): Promise<User> {
-    const normalizedEmail = profile.email.trim().toLowerCase();
+    if (profile.emailVerified !== true) {
+      throw new UnauthorizedException('OAuth email is not verified');
+    }
+
+    const normalizedEmail = this.normalizeEmail(profile.email);
     const fullName = profile.fullName?.trim() || normalizedEmail.split('@')[0];
 
     let user = await this.userRepository.findOne({
@@ -271,11 +278,7 @@ export class AuthService {
       return this.applyOAuthLogin(user, profile, normalizedEmail, fullName);
     }
 
-    user = await this.userRepository
-      .createQueryBuilder('user')
-      .leftJoinAndSelect('user.role', 'role')
-      .where('LOWER(user.email) = :email', { email: normalizedEmail })
-      .getOne();
+    user = await this.findUserByNormalizedEmail(normalizedEmail);
 
     if (user) {
       user.oauthProvider = profile.provider;
@@ -292,11 +295,10 @@ export class AuthService {
     );
 
     const oauthRoleName =
-      this.configService.get<string>('DEFAULT_OAUTH_ROLE', 'ROLE_CUSTOMER') ||
-      this.configService.get<string>('DEFAULT_USER_ROLE', 'ROLE_USER');
-    const oauthRole = await this.roleRepository.findOne({
-      where: { name: oauthRoleName },
-    });
+      this.configService.get<string>('DEFAULT_OAUTH_ROLE')?.trim() ||
+      this.configService.get<string>('DEFAULT_USER_ROLE')?.trim() ||
+      'ROLE_CUSTOMER';
+    const oauthRole = await this.requireExternalRoleByName(oauthRoleName);
 
     const newUser = this.userRepository.create({
       email: normalizedEmail,
@@ -306,7 +308,7 @@ export class AuthService {
       emailVerified: profile.emailVerified,
       oauthProvider: profile.provider,
       oauthProviderId: profile.providerId,
-      role: oauthRole ?? undefined,
+      role: oauthRole,
     });
 
     return this.saveOAuthUser(newUser, normalizedEmail);
@@ -364,6 +366,41 @@ export class AuthService {
     }
   }
 
+  private normalizeEmail(email: string): string {
+    return email.trim().toLowerCase();
+  }
+
+  private findUserByNormalizedEmail(
+    normalizedEmail: string,
+  ): Promise<User | null> {
+    return this.userRepository
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.role', 'role')
+      .where('LOWER(user.email) = :email', { email: normalizedEmail })
+      .getOne();
+  }
+
+  private async requireExternalRole(
+    configKey: 'DEFAULT_USER_ROLE',
+    fallbackName: string,
+  ): Promise<Role> {
+    const roleName =
+      this.configService.get<string>(configKey)?.trim() || fallbackName;
+    return this.requireExternalRoleByName(roleName);
+  }
+
+  private async requireExternalRoleByName(roleName: string): Promise<Role> {
+    const role = await this.roleRepository.findOne({
+      where: { name: roleName, roleGroup: RoleGroup.EXTERNAL },
+    });
+    if (!role) {
+      throw new ServiceUnavailableException(
+        'Public account registration is temporarily unavailable',
+      );
+    }
+    return role;
+  }
+
   private isUsersPrimaryKeyConflict(error: unknown): boolean {
     return this.isPostgresUniqueViolation(
       error,
@@ -377,6 +414,15 @@ export class AuthService {
       this.isPostgresUniqueViolation(error) &&
       (pgError.constraint?.includes('email') === true ||
         pgError.detail?.includes('(email)') === true)
+    );
+  }
+
+  private isUsersUsernameConflict(error: unknown): boolean {
+    const pgError = error as { constraint?: string; detail?: string };
+    return (
+      this.isPostgresUniqueViolation(error) &&
+      (pgError.constraint?.includes('username') === true ||
+        pgError.detail?.includes('(username)') === true)
     );
   }
 

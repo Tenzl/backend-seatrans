@@ -2,10 +2,12 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, IsNull, Not, Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { BaseInquiry } from '../entities/base-inquiry.entity';
 import { ShippingAgencyInquiryEntity } from '../entities/shipping-agency-inquiry.entity';
 import { CharteringBrokerageInquiryEntity } from '../entities/chartering-brokerage-inquiry.entity';
@@ -26,55 +28,25 @@ import { UpdateInquiryFormDto } from '../dto/update-inquiry-form.dto';
 import { UpdateInquiryHoursDto } from '../dto/update-inquiry-hours.dto';
 import { InquiryDocumentService } from './inquiry-document.service';
 import { InquiryCreatedSource } from '../enums/inquiry-created-source.enum';
-import {
-  InquiryResponseAudience,
-  mapShippingAgencyInquiryFields,
-} from '../mappers/shipping-agency-inquiry.mapper';
 import { NotificationService } from '../../notification/notification.service';
 import { buildCustomerSubmittedSnapshot } from '../utils/customer-submitted-snapshot.util';
+import { InquiryRepositoryRegistry } from './inquiry-repository.registry';
+import { InquiryQueryService } from './inquiry-query.service';
 
 @Injectable()
 export class ServiceInquiryService {
-  private static readonly SERVICE_SHIPPING_AGENCY = 'SHIPPING AGENCY';
-  private static readonly SERVICE_CHARTERING = 'CHARTERING';
-  private static readonly SERVICE_FREIGHT_FORWARDING = 'FREIGHT FORWARDING';
-  private static readonly SERVICE_LOGISTICS = 'LOGISTICS';
-  private static readonly SERVICE_SPECIAL_REQUEST = 'SPECIAL REQUEST';
-
-  private static readonly DEFAULT_PAGE_SIZE = 20;
-  private static readonly MAX_PAGE_SIZE = 100;
-
-  /** Normalized service slug → per-service inquiry repository. */
-  private readonly repos: Record<string, Repository<BaseInquiry>>;
+  private readonly logger = new Logger(ServiceInquiryService.name);
 
   constructor(
-    @InjectRepository(ShippingAgencyInquiryEntity)
-    private readonly shippingAgencyRepo: Repository<ShippingAgencyInquiryEntity>,
-    @InjectRepository(CharteringBrokerageInquiryEntity)
-    private readonly charteringRepo: Repository<CharteringBrokerageInquiryEntity>,
-    @InjectRepository(FreightForwardingInquiryEntity)
-    private readonly freightRepo: Repository<FreightForwardingInquiryEntity>,
-    @InjectRepository(TotalLogisticsInquiryEntity)
-    private readonly totalLogisticsRepo: Repository<TotalLogisticsInquiryEntity>,
-    @InjectRepository(SpecialRequestInquiryEntity)
-    private readonly specialRequestRepo: Repository<SpecialRequestInquiryEntity>,
-    @InjectRepository(InquiryFieldChangeLog)
-    private readonly fieldChangeLogRepository: Repository<InquiryFieldChangeLog>,
+    private readonly repositories: InquiryRepositoryRegistry,
+    private readonly queries: InquiryQueryService,
     @InjectRepository(ServiceType)
     private readonly serviceTypeRepository: Repository<ServiceType>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly inquiryDocumentService: InquiryDocumentService,
     private readonly notificationService: NotificationService,
-  ) {
-    this.repos = {
-      'shipping-agency': shippingAgencyRepo,
-      chartering: charteringRepo,
-      'freight-forwarding': freightRepo,
-      'total-logistic': totalLogisticsRepo,
-      'special-request': specialRequestRepo,
-    };
-  }
+  ) {}
 
   async submitInquiry(
     dto: PublicInquiryRequestDto,
@@ -98,8 +70,7 @@ export class ServiceInquiryService {
       dto.serviceTypeId,
       dto.serviceTypeSlug,
     );
-    const slug = this.toServiceSlug(serviceType.name);
-    const code = await this.generateCodeForService(serviceType.name);
+    const slug = this.repositories.toSlug(serviceType.name);
 
     const common = {
       serviceType,
@@ -112,12 +83,14 @@ export class ServiceInquiryService {
       notes: this.trimToNull(dto.notes),
       createdSource: InquiryCreatedSource.CUSTOMER_PORTAL,
       details: dto.details ?? null,
-      code,
     };
 
-    const saved = await this.createForSlug(slug, common, dto);
-
-    await this.notificationService.notifyInternalNewInquiry(saved);
+    const saved = await this.createWithAllocatedCode(
+      slug,
+      serviceType.name,
+      common,
+      dto,
+    );
 
     if (files.length) {
       try {
@@ -126,9 +99,23 @@ export class ServiceInquiryService {
           files,
           currentUserId,
         );
-      } catch {
-        // Do not fail inquiry submission if attachment persistence fails.
+      } catch (error) {
+        await this.compensateFailedSubmission(slug, saved.id, error);
+        throw new ServiceUnavailableException(
+          'Could not save inquiry attachments. Please try again.',
+        );
       }
+    }
+
+    try {
+      await this.notificationService.notifyInternalNewInquiry(saved);
+    } catch (error) {
+      // Notification is a post-commit side effect. A delivery failure must not
+      // turn an already-persisted customer inquiry into a false HTTP failure.
+      this.logger.error(
+        `Failed to notify internal users about inquiry ${saved.id}`,
+        error instanceof Error ? error.stack : String(error),
+      );
     }
 
     return {
@@ -138,14 +125,70 @@ export class ServiceInquiryService {
     };
   }
 
+  /**
+   * Serializes code allocation per service/year and inserts the inquiry on the
+   * same database connection. The transaction-scoped advisory lock closes the
+   * read-last/insert race without holding a table lock.
+   */
+  private async createWithAllocatedCode(
+    slug: string,
+    serviceName: string,
+    common: Record<string, unknown>,
+    dto: PublicInquiryRequestDto,
+  ): Promise<BaseInquiry> {
+    const owningRepository = this.repositories.forSlug(slug);
+    const prefix = this.repositories.codePrefix(serviceName);
+
+    return owningRepository.manager.transaction(async (manager) => {
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `inquiry-code:${prefix}`,
+      ]);
+
+      const code = await this.generateCodeForPrefix(
+        prefix,
+        this.repositories.forSlug(slug, manager),
+      );
+      return this.createForSlug(slug, { ...common, code }, dto, manager);
+    });
+  }
+
+  private async compensateFailedSubmission(
+    slug: string,
+    inquiryId: number,
+    attachmentError: unknown,
+  ): Promise<void> {
+    try {
+      await this.repositories.forSlug(slug).delete(inquiryId);
+    } catch (cleanupError) {
+      this.logger.error(
+        `Attachment persistence failed and inquiry ${inquiryId} could not be removed`,
+        cleanupError instanceof Error
+          ? cleanupError.stack
+          : String(cleanupError),
+      );
+    }
+
+    this.logger.error(
+      `Attachment persistence failed for inquiry ${inquiryId}; submission was not accepted`,
+      attachmentError instanceof Error
+        ? attachmentError.stack
+        : String(attachmentError),
+    );
+  }
+
   private async createForSlug(
     slug: string,
     common: Record<string, unknown>,
     dto: PublicInquiryRequestDto,
+    manager?: EntityManager,
   ): Promise<BaseInquiry> {
     switch (slug) {
       case 'shipping-agency': {
-        const row = this.shippingAgencyRepo.create({
+        const repo = this.repositories.forSlug(
+          slug,
+          manager,
+        ) as Repository<ShippingAgencyInquiryEntity>;
+        const row = repo.create({
           ...common,
           quoteForm: 'HCM',
           berthHours: null,
@@ -175,10 +218,14 @@ export class ServiceInquiryService {
           transportQuarantine: this.trimToNull(dto.transportQuarantine),
         } as Partial<ShippingAgencyInquiryEntity>);
         row.customerSubmittedSnapshot = buildCustomerSubmittedSnapshot(row);
-        return this.shippingAgencyRepo.save(row);
+        return repo.save(row);
       }
       case 'chartering': {
-        const row = this.charteringRepo.create({
+        const repo = this.repositories.forSlug(
+          slug,
+          manager,
+        ) as Repository<CharteringBrokerageInquiryEntity>;
+        const row = repo.create({
           ...common,
           cargoQuantity:
             this.trimToNull(dto.cargoQuantity) ??
@@ -188,10 +235,14 @@ export class ServiceInquiryService {
           laycanFrom: this.toDateOnly(dto.laycanFrom),
           laycanTo: this.toDateOnly(dto.laycanTo),
         } as Partial<CharteringBrokerageInquiryEntity>);
-        return this.charteringRepo.save(row);
+        return repo.save(row);
       }
       case 'freight-forwarding': {
-        const row = this.freightRepo.create({
+        const repo = this.repositories.forSlug(
+          slug,
+          manager,
+        ) as Repository<FreightForwardingInquiryEntity>;
+        const row = repo.create({
           ...common,
           cargoName: this.trimToNull(dto.cargoName),
           deliveryTerm: this.trimToNull(dto.deliveryTerm),
@@ -202,10 +253,14 @@ export class ServiceInquiryService {
           shipmentFrom: this.toDateOnly(dto.shipmentFrom),
           shipmentTo: this.toDateOnly(dto.shipmentTo),
         } as Partial<FreightForwardingInquiryEntity>);
-        return this.freightRepo.save(row);
+        return repo.save(row);
       }
       case 'total-logistic': {
-        const row = this.totalLogisticsRepo.create({
+        const repo = this.repositories.forSlug(
+          slug,
+          manager,
+        ) as Repository<TotalLogisticsInquiryEntity>;
+        const row = repo.create({
           ...common,
           cargoName: this.trimToNull(dto.cargoName),
           deliveryTerm: this.trimToNull(dto.deliveryTerm),
@@ -216,17 +271,21 @@ export class ServiceInquiryService {
           shipmentFrom: this.toDateOnly(dto.shipmentFrom),
           shipmentTo: this.toDateOnly(dto.shipmentTo),
         } as Partial<TotalLogisticsInquiryEntity>);
-        return this.totalLogisticsRepo.save(row);
+        return repo.save(row);
       }
       case 'special-request': {
-        const row = this.specialRequestRepo.create({
+        const repo = this.repositories.forSlug(
+          slug,
+          manager,
+        ) as Repository<SpecialRequestInquiryEntity>;
+        const row = repo.create({
           ...common,
           subject: this.trimToNull(dto.subject),
           message: this.trimToNull(dto.message),
           preferredProvinceId: dto.preferredProvinceId ?? null,
           relatedDepartmentId: dto.relatedDepartmentId ?? null,
         } as Partial<SpecialRequestInquiryEntity>);
-        return this.specialRequestRepo.save(row);
+        return repo.save(row);
       }
       default:
         throw new BadRequestException(`Unsupported service type: ${slug}`);
@@ -247,7 +306,7 @@ export class ServiceInquiryService {
       query.serviceType?.trim() || query.serviceSlug?.trim();
     const serviceType =
       await this.resolveServiceTypeFromFilter(serviceTypeFilter);
-    return this.listInquiries(
+    return this.queries.list(
       {
         user: { id: userId },
         status: query.status,
@@ -275,7 +334,7 @@ export class ServiceInquiryService {
     const archivedFilter = opts.includeArchived
       ? this.normalizeArchivedFilter(query.archived)
       : 'active';
-    return this.listInquiries(
+    return this.queries.list(
       {
         status: query.status,
         serviceType: serviceType ?? undefined,
@@ -290,8 +349,8 @@ export class ServiceInquiryService {
     serviceTypeName: string,
     id: number,
   ): Promise<unknown> {
-    const row = await this.requireByServiceAndId(serviceTypeName, id);
-    return this.toResponse(row, 'admin');
+    const row = await this.queries.require(serviceTypeName, id);
+    return this.queries.toResponse(row, 'admin');
   }
 
   async updateStatus(
@@ -299,7 +358,10 @@ export class ServiceInquiryService {
     id: number,
     dto: UpdateInquiryStatusDto,
   ): Promise<unknown> {
-    const { row, repo } = await this.requireRowWithRepo(serviceTypeName, id);
+    const { row, repo } = await this.queries.requireWithRepository(
+      serviceTypeName,
+      id,
+    );
     const previousStatus = row.status;
     row.status = dto.status;
 
@@ -309,7 +371,7 @@ export class ServiceInquiryService {
       saved,
       previousStatus,
     );
-    return this.toResponse(saved, 'admin');
+    return this.queries.toResponse(saved, 'admin');
   }
 
   async updateForm(
@@ -317,15 +379,15 @@ export class ServiceInquiryService {
     id: number,
     dto: UpdateInquiryFormDto,
   ): Promise<unknown> {
-    if (!this.isShippingAgency(serviceTypeName)) {
+    if (!this.repositories.isShippingAgency(serviceTypeName)) {
       throw new BadRequestException(
         'Quote form update only supported for shipping agency',
       );
     }
-    const row = await this.requireShippingAgencyRow(id);
+    const row = await this.queries.requireShippingAgency(id);
     row.quoteForm = dto.form.trim().toUpperCase();
-    const saved = await this.shippingAgencyRepo.save(row);
-    return this.toResponse(saved, 'admin');
+    const saved = await this.repositories.shippingAgency.save(row);
+    return this.queries.toResponse(saved, 'admin');
   }
 
   async updateHours(
@@ -333,12 +395,12 @@ export class ServiceInquiryService {
     id: number,
     dto: UpdateInquiryHoursDto,
   ): Promise<unknown> {
-    if (!this.isShippingAgency(serviceTypeName)) {
+    if (!this.repositories.isShippingAgency(serviceTypeName)) {
       throw new BadRequestException(
         'Hours update only supported for shipping agency',
       );
     }
-    const row = await this.requireShippingAgencyRow(id);
+    const row = await this.queries.requireShippingAgency(id);
 
     if (dto.berthHours != null) {
       row.berthHours = this.toNumericString(dto.berthHours);
@@ -350,8 +412,8 @@ export class ServiceInquiryService {
       row.pilotage3rdMiles = this.toNumericString(dto.pilotage3rdMiles);
     }
 
-    const saved = await this.shippingAgencyRepo.save(row);
-    return this.toResponse(saved, 'admin');
+    const saved = await this.repositories.shippingAgency.save(row);
+    return this.queries.toResponse(saved, 'admin');
   }
 
   /**
@@ -362,11 +424,15 @@ export class ServiceInquiryService {
   private async deleteInquiryChildren(
     slug: string,
     inquiryId: number,
-  ): Promise<void> {
+    manager: EntityManager,
+  ): Promise<string[]> {
     if (slug === 'shipping-agency') {
-      await this.fieldChangeLogRepository.delete({ inquiryId });
+      await manager.getRepository(InquiryFieldChangeLog).delete({ inquiryId });
     }
-    await this.inquiryDocumentService.hardDeleteByInquiry(inquiryId);
+    return this.inquiryDocumentService.removeMetadataByInquiry(
+      inquiryId,
+      manager,
+    );
   }
 
   async softDeleteBatch(
@@ -374,22 +440,30 @@ export class ServiceInquiryService {
     deletedByUserId: number,
     serviceSlug?: string,
   ): Promise<{ deletedCount: number }> {
-    const found = await this.findRowsAcrossRepos(ids, {
-      includeDeleted: false,
-      serviceSlug,
-    });
-    if (found.length !== ids.length) {
-      throw new NotFoundException('One or more inquiries were not found');
-    }
+    return this.repositories.shippingAgency.manager.transaction(
+      async (manager) => {
+        const found = await this.queries.findRows(
+          ids,
+          {
+            includeDeleted: false,
+            serviceSlug,
+          },
+          manager,
+        );
+        if (found.length !== ids.length) {
+          throw new NotFoundException('One or more inquiries were not found');
+        }
 
-    const now = new Date();
-    for (const { row, repo } of found) {
-      row.deletedAt = now;
-      row.deletedById = deletedByUserId;
-      await repo.save(row);
-    }
+        const now = new Date();
+        for (const { row, repo } of found) {
+          row.deletedAt = now;
+          row.deletedById = deletedByUserId;
+          await repo.save(row);
+        }
 
-    return { deletedCount: found.length };
+        return { deletedCount: found.length };
+      },
+    );
   }
 
   async softDeleteBatchByUser(
@@ -397,26 +471,36 @@ export class ServiceInquiryService {
     ids: number[],
     serviceSlug: string,
   ): Promise<{ deletedCount: number }> {
-    const found = await this.findRowsAcrossRepos(ids, {
-      includeDeleted: false,
-      serviceSlug,
-    });
+    return this.repositories.shippingAgency.manager.transaction(
+      async (manager) => {
+        const found = await this.queries.findRows(
+          ids,
+          {
+            includeDeleted: false,
+            serviceSlug,
+          },
+          manager,
+        );
 
-    if (
-      found.length !== ids.length ||
-      found.some((f) => f.row.userId !== userId)
-    ) {
-      throw new ForbiddenException('You can only delete your own inquiries');
-    }
+        if (
+          found.length !== ids.length ||
+          found.some((f) => f.row.userId !== userId)
+        ) {
+          throw new ForbiddenException(
+            'You can only delete your own inquiries',
+          );
+        }
 
-    const now = new Date();
-    for (const { row, repo } of found) {
-      row.deletedAt = now;
-      row.deletedById = userId;
-      await repo.save(row);
-    }
+        const now = new Date();
+        for (const { row, repo } of found) {
+          row.deletedAt = now;
+          row.deletedById = userId;
+          await repo.save(row);
+        }
 
-    return { deletedCount: found.length };
+        return { deletedCount: found.length };
+      },
+    );
   }
 
   async softDeleteBatchByAdmin(
@@ -431,493 +515,114 @@ export class ServiceInquiryService {
     serviceTypeName: string,
     id: number,
   ): Promise<void> {
-    const { row, repo, slug } = await this.requireRowWithRepo(
-      serviceTypeName,
-      id,
-      {
-        includeDeleted: true,
-      },
-    );
-    await this.deleteInquiryChildren(slug, row.id);
-    await repo.remove(row);
+    const publicIds =
+      await this.repositories.shippingAgency.manager.transaction(
+        async (manager) => {
+          const { row, repo, slug } = await this.queries.requireWithRepository(
+            serviceTypeName,
+            id,
+            {
+              includeDeleted: true,
+            },
+            manager,
+          );
+          const storedObjectIds = await this.deleteInquiryChildren(
+            slug,
+            row.id,
+            manager,
+          );
+          await repo.remove(row);
+          return storedObjectIds;
+        },
+      );
+    await this.inquiryDocumentService.deleteStoredObjectsBestEffort(publicIds);
   }
 
   async hardDeleteBatchByAdmin(
     ids: number[],
     serviceSlug?: string,
   ): Promise<{ deletedCount: number }> {
-    const found = await this.findRowsAcrossRepos(ids, {
-      includeDeleted: true,
-      serviceSlug,
-    });
+    const result = await this.repositories.shippingAgency.manager.transaction(
+      async (manager) => {
+        const found = await this.queries.findRows(
+          ids,
+          {
+            includeDeleted: true,
+            serviceSlug,
+          },
+          manager,
+        );
 
-    if (found.length !== ids.length) {
-      throw new NotFoundException('One or more inquiries were not found');
-    }
+        if (found.length !== ids.length) {
+          throw new NotFoundException('One or more inquiries were not found');
+        }
 
-    for (const { row, repo, slug } of found) {
-      await this.deleteInquiryChildren(slug, row.id);
-      await repo.remove(row);
-    }
+        const publicIds: string[] = [];
+        for (const { row, repo, slug } of found) {
+          publicIds.push(
+            ...(await this.deleteInquiryChildren(slug, row.id, manager)),
+          );
+          await repo.remove(row);
+        }
 
-    return { deletedCount: found.length };
+        return { deletedCount: found.length, publicIds };
+      },
+    );
+    await this.inquiryDocumentService.deleteStoredObjectsBestEffort(
+      result.publicIds,
+    );
+    return { deletedCount: result.deletedCount };
   }
 
   async restoreBatchByAdmin(
     ids: number[],
     serviceSlug?: string,
   ): Promise<{ restoredCount: number }> {
-    const found = await this.findRowsAcrossRepos(ids, {
-      includeDeleted: true,
-      serviceSlug,
-    });
+    return this.repositories.shippingAgency.manager.transaction(
+      async (manager) => {
+        const found = await this.queries.findRows(
+          ids,
+          {
+            includeDeleted: true,
+            serviceSlug,
+          },
+          manager,
+        );
 
-    if (found.length !== ids.length) {
-      throw new NotFoundException('One or more inquiries were not found');
-    }
+        if (found.length !== ids.length) {
+          throw new NotFoundException('One or more inquiries were not found');
+        }
 
-    for (const { row, repo } of found) {
-      row.deletedAt = null;
-      row.deletedById = null;
-      await repo.save(row);
-    }
+        for (const { row, repo } of found) {
+          row.deletedAt = null;
+          row.deletedById = null;
+          await repo.save(row);
+        }
 
-    return { restoredCount: found.length };
+        return { restoredCount: found.length };
+      },
+    );
   }
 
   async restoreByServiceAndId(
     serviceTypeName: string,
     id: number,
   ): Promise<void> {
-    const { row, repo } = await this.requireRowWithRepo(serviceTypeName, id, {
-      includeDeleted: true,
-    });
-    row.deletedAt = null;
-    row.deletedById = null;
-    await repo.save(row);
-  }
-
-  /** @deprecated Use softDeleteBatchByUser — kept for controller compatibility. */
-  async deleteBatchByUser(
-    userId: number,
-    ids: number[],
-    serviceSlug: string,
-  ): Promise<{ deletedCount: number }> {
-    return this.softDeleteBatchByUser(userId, ids, serviceSlug);
-  }
-
-  /** @deprecated Use soft/hard delete methods explicitly. */
-  async deleteBatchByAdmin(ids: number[]): Promise<{ deletedCount: number }> {
-    return this.hardDeleteBatchByAdmin(ids);
-  }
-
-  async deleteByServiceAndId(
-    serviceTypeName: string,
-    id: number,
-  ): Promise<void> {
-    return this.hardDeleteByServiceAndId(serviceTypeName, id);
-  }
-
-  private async listInquiries(
-    filters: {
-      user?: { id: number };
-      status?: InquiryStatus;
-      serviceType?: ServiceType;
-      /** Admin list filter; user list is always "active". */
-      archivedFilter?: InquiryArchivedFilter;
-    },
-    query: ListInquiriesQueryDto,
-    audience: InquiryResponseAudience = 'admin',
-  ): Promise<{
-    content: unknown[];
-    totalElements: number;
-    totalPages: number;
-    size: number;
-    number: number;
-  }> {
-    const page = this.sanitizePage(query.page);
-    const size = this.sanitizePageSize(query.size);
-
-    const where: FindOptionsWhere<BaseInquiry> = {};
-    const archivedFilter = filters.archivedFilter ?? 'active';
-    if (archivedFilter === 'active') {
-      where.deletedAt = IsNull();
-    } else if (archivedFilter === 'archived') {
-      where.deletedAt = Not(IsNull());
-    }
-    if (filters.user) {
-      where.user = { id: filters.user.id } as User;
-    }
-    if (filters.status) {
-      where.status = filters.status;
-    }
-
-    // Filtered by a single service type → query just that table (true DB paging).
-    if (filters.serviceType) {
-      const repo = this.repoForSlug(
-        this.toServiceSlug(filters.serviceType.name),
-      );
-      const [rows, totalElements] = await repo.findAndCount({
-        where,
-        relations: { serviceType: true, user: true },
-        order: { submittedAt: 'DESC' },
-        skip: page * size,
-        take: size,
-      });
-      return {
-        content: rows.map((row) => this.toResponse(row, audience)),
-        totalElements,
-        totalPages: totalElements === 0 ? 0 : Math.ceil(totalElements / size),
-        size,
-        number: page,
-      };
-    }
-
-    // No service filter → paginate across all tables at the DB level (UNION ALL),
-    // then hydrate only the rows on the requested page.
-    return this.listAcrossAllRepos(
-      {
-        user: filters.user,
-        status: filters.status,
-        archivedFilter,
+    await this.repositories.shippingAgency.manager.transaction(
+      async (manager) => {
+        const { row, repo } = await this.queries.requireWithRepository(
+          serviceTypeName,
+          id,
+          {
+            includeDeleted: true,
+          },
+          manager,
+        );
+        row.deletedAt = null;
+        row.deletedById = null;
+        await repo.save(row);
       },
-      page,
-      size,
-      audience,
     );
-  }
-
-  /**
-   * Cross-table listing with real database pagination. A UNION ALL over the
-   * five inquiry tables determines the ordered page of (id, slug); only those
-   * rows are then hydrated with relations. Table names and slugs are fixed
-   * constants (never user input); the user/status filters are parameterized.
-   */
-  private async listAcrossAllRepos(
-    filters: {
-      user?: { id: number };
-      status?: InquiryStatus;
-      archivedFilter?: InquiryArchivedFilter;
-    },
-    page: number,
-    size: number,
-    audience: InquiryResponseAudience,
-  ): Promise<{
-    content: unknown[];
-    totalElements: number;
-    totalPages: number;
-    size: number;
-    number: number;
-  }> {
-    const sources: Array<[string, string]> = [
-      ['shipping_agency_inquiries', 'shipping-agency'],
-      ['chartering_broking_inquiries', 'chartering'],
-      ['freight_forwarding_inquiries', 'freight-forwarding'],
-      ['total_logistics_inquiries', 'total-logistic'],
-      ['special_request_inquiries', 'special-request'],
-    ];
-    const archivedFilter = filters.archivedFilter ?? 'active';
-    const deletedFilter =
-      archivedFilter === 'all'
-        ? ''
-        : archivedFilter === 'archived'
-          ? ' WHERE deleted_at IS NOT NULL'
-          : ' WHERE deleted_at IS NULL';
-    const union = sources
-      .map(
-        ([table, slug]) =>
-          `SELECT id, submitted_at, user_id, status, '${slug}'::text AS slug FROM ${table}${deletedFilter}`,
-      )
-      .join(' UNION ALL ');
-
-    const params: unknown[] = [];
-    const conds: string[] = [];
-    if (filters.user) {
-      params.push(filters.user.id);
-      conds.push(`user_id = $${params.length}`);
-    }
-    if (filters.status) {
-      params.push(filters.status);
-      conds.push(`status = $${params.length}`);
-    }
-    const whereSql = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
-
-    const manager = this.shippingAgencyRepo.manager;
-
-    const countRows: Array<{ total: number }> = await manager.query(
-      `SELECT COUNT(*)::int AS total FROM (${union}) AS t ${whereSql}`,
-      params,
-    );
-    const totalElements = countRows[0]?.total ?? 0;
-
-    if (totalElements === 0) {
-      return {
-        content: [],
-        totalElements: 0,
-        totalPages: 0,
-        size,
-        number: page,
-      };
-    }
-
-    params.push(size);
-    const limitIdx = params.length;
-    params.push(page * size);
-    const offsetIdx = params.length;
-
-    const pageRows: Array<{ id: string | number; slug: string }> =
-      await manager.query(
-        `SELECT id, slug FROM (${union}) AS t ${whereSql} ` +
-          `ORDER BY submitted_at DESC, id DESC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
-        params,
-      );
-
-    // Hydrate only the page's rows, grouped by table.
-    const idsBySlug = new Map<string, number[]>();
-    for (const { id, slug } of pageRows) {
-      const list = idsBySlug.get(slug) ?? [];
-      list.push(Number(id));
-      idsBySlug.set(slug, list);
-    }
-
-    const rowByKey = new Map<string, BaseInquiry>();
-    for (const [slug, ids] of idsBySlug) {
-      const repo = this.repos[slug];
-      const rows = await repo.find({
-        where: ids.map((id) => ({ id })),
-        relations: { serviceType: true, user: true },
-      });
-      for (const row of rows) {
-        rowByKey.set(`${slug}:${row.id}`, row);
-      }
-    }
-
-    const content = pageRows
-      .map(({ id, slug }) => rowByKey.get(`${slug}:${Number(id)}`))
-      .filter((row): row is BaseInquiry => row != null)
-      .map((row) => this.toResponse(row, audience));
-
-    return {
-      content,
-      totalElements,
-      totalPages: Math.ceil(totalElements / size),
-      size,
-      number: page,
-    };
-  }
-
-  private toResponse(
-    row: BaseInquiry,
-    audience: InquiryResponseAudience = 'admin',
-  ): Record<string, unknown> {
-    const serviceSlug = this.toServiceSlug(row.serviceType.name);
-    const base = {
-      id: row.id,
-      code: row.code,
-      userId: row.userId,
-      fullName: row.fullName,
-      email: row.email,
-      phone: row.phone,
-      company: row.company,
-      notes: row.notes,
-      status: row.status,
-      serviceType: {
-        id: row.serviceType.id,
-        name: row.serviceType.name,
-        displayName: row.serviceType.displayName,
-      },
-      submittedAt: row.submittedAt,
-      updatedAt: row.updatedAt,
-      deletedAt: row.deletedAt,
-      isArchived: row.deletedAt != null,
-    };
-
-    if (serviceSlug === 'shipping-agency') {
-      return {
-        ...base,
-        ...mapShippingAgencyInquiryFields(
-          row as ShippingAgencyInquiryEntity,
-          audience,
-        ),
-      };
-    }
-
-    if (serviceSlug === 'chartering') {
-      const r = row as CharteringBrokerageInquiryEntity;
-      return {
-        ...base,
-        cargoQuantity: r.cargoQuantity,
-        loadingPort: r.loadingPort,
-        dischargingPort: r.dischargingPort,
-        laycanFrom: r.laycanFrom,
-        laycanTo: r.laycanTo,
-        otherInfo: r.otherInfo,
-      };
-    }
-
-    if (
-      serviceSlug === 'freight-forwarding' ||
-      serviceSlug === 'total-logistic'
-    ) {
-      const r = row as FreightForwardingInquiryEntity;
-      return {
-        ...base,
-        cargoName: r.cargoName,
-        deliveryTerm: r.deliveryTerm,
-        container20: r.container20ft,
-        container40: r.container40ft,
-        loadingPort: r.loadingPort,
-        dischargingPort: r.dischargingPort,
-        shipmentFrom: r.shipmentFrom,
-        shipmentTo: r.shipmentTo,
-      };
-    }
-
-    if (serviceSlug === 'special-request') {
-      const r = row as SpecialRequestInquiryEntity;
-      return {
-        ...base,
-        subject: r.subject,
-        preferredProvinceId: r.preferredProvinceId,
-        relatedDepartmentId: r.relatedDepartmentId,
-        message: r.message,
-        otherInfo: r.otherInfo,
-      };
-    }
-
-    return base;
-  }
-
-  private async requireByServiceAndId(
-    serviceTypeName: string,
-    id: number,
-  ): Promise<BaseInquiry> {
-    return (await this.requireRowWithRepo(serviceTypeName, id)).row;
-  }
-
-  private async requireRowWithRepo(
-    serviceTypeName: string,
-    id: number,
-    opts: { includeDeleted?: boolean } = {},
-  ): Promise<{
-    row: BaseInquiry;
-    repo: Repository<BaseInquiry>;
-    slug: string;
-  }> {
-    const slug = this.toServiceSlug(serviceTypeName);
-    const repo = this.repoForSlug(slug);
-    const where: FindOptionsWhere<BaseInquiry> = { id };
-    if (!opts.includeDeleted) {
-      where.deletedAt = IsNull();
-    }
-    const row = await repo.findOne({
-      where,
-      relations: { serviceType: true, user: true },
-    });
-
-    if (!row) {
-      throw new NotFoundException('Inquiry not found');
-    }
-
-    return { row, repo, slug };
-  }
-
-  private async requireShippingAgencyRow(
-    id: number,
-  ): Promise<ShippingAgencyInquiryEntity> {
-    const row = await this.shippingAgencyRepo.findOne({
-      where: { id, deletedAt: IsNull() },
-      relations: { serviceType: true, user: true },
-    });
-    if (!row) {
-      throw new NotFoundException('Inquiry not found');
-    }
-    return row;
-  }
-
-  private async findRowsAcrossRepos(
-    ids: number[],
-    opts: { includeDeleted?: boolean; serviceSlug?: string } = {},
-  ): Promise<
-    Array<{ row: BaseInquiry; repo: Repository<BaseInquiry>; slug: string }>
-  > {
-    if (!ids.length) return [];
-
-    const idsBySlug = new Map<string, number[]>();
-
-    if (opts.serviceSlug?.trim()) {
-      const slug = this.toServiceSlug(opts.serviceSlug.trim());
-      idsBySlug.set(slug, [...ids]);
-    } else {
-      const refs = await this.resolveInquiryRefsByIds(ids, opts);
-      if (refs.length !== ids.length) {
-        return [];
-      }
-      for (const ref of refs) {
-        const list = idsBySlug.get(ref.slug) ?? [];
-        list.push(ref.id);
-        idsBySlug.set(ref.slug, list);
-      }
-    }
-
-    const found: Array<{
-      row: BaseInquiry;
-      repo: Repository<BaseInquiry>;
-      slug: string;
-    }> = [];
-    for (const [slug, slugIds] of idsBySlug) {
-      const repo = this.repoForSlug(slug);
-      const rows = await repo.find({
-        where: slugIds.map((id) => {
-          const clause: FindOptionsWhere<BaseInquiry> = { id };
-          if (!opts.includeDeleted) {
-            clause.deletedAt = IsNull();
-          }
-          return clause;
-        }),
-        relations: { serviceType: true, user: true },
-      });
-      for (const row of rows) {
-        found.push({ row, repo, slug });
-      }
-    }
-
-    return found;
-  }
-
-  /**
-   * Fallback when `serviceSlug` is omitted: resolve id → table via UNION.
-   * Prefer passing `serviceSlug` from the UI so only one table is touched.
-   */
-  private async resolveInquiryRefsByIds(
-    ids: number[],
-    opts: { includeDeleted?: boolean } = {},
-  ): Promise<Array<{ id: number; slug: string }>> {
-    if (!ids.length) return [];
-
-    const sources: Array<[string, string]> = [
-      ['shipping_agency_inquiries', 'shipping-agency'],
-      ['chartering_broking_inquiries', 'chartering'],
-      ['freight_forwarding_inquiries', 'freight-forwarding'],
-      ['total_logistics_inquiries', 'total-logistic'],
-      ['special_request_inquiries', 'special-request'],
-    ];
-
-    const deletedFilter = opts.includeDeleted ? '' : ' AND deleted_at IS NULL';
-    const union = sources
-      .map(
-        ([table, slug]) =>
-          `SELECT id, '${slug}'::text AS slug FROM ${table} WHERE id = ANY($1)${deletedFilter}`,
-      )
-      .join(' UNION ALL ');
-
-    const rows: Array<{ id: string | number; slug: string }> =
-      await this.shippingAgencyRepo.manager.query(
-        `SELECT id, slug FROM (${union}) AS t`,
-        [ids],
-      );
-
-    return rows.map((row) => ({ id: Number(row.id), slug: row.slug }));
   }
 
   private normalizeArchivedFilter(
@@ -925,14 +630,6 @@ export class ServiceInquiryService {
   ): InquiryArchivedFilter {
     if (value === 'all' || value === 'archived') return value;
     return 'active';
-  }
-
-  private repoForSlug(slug: string): Repository<BaseInquiry> {
-    const repo = this.repos[this.toServiceSlug(slug)];
-    if (!repo) {
-      throw new BadRequestException(`Unsupported service type: ${slug}`);
-    }
-    return repo;
   }
 
   private async resolveServiceType(
@@ -970,7 +667,7 @@ export class ServiceInquiryService {
   private async resolveServiceTypeByAnyName(
     value: string,
   ): Promise<ServiceType> {
-    const normalizedName = this.toServiceName(value);
+    const normalizedName = this.repositories.toServiceName(value);
 
     const serviceType = await this.serviceTypeRepository
       .createQueryBuilder('serviceType')
@@ -984,79 +681,6 @@ export class ServiceInquiryService {
     }
 
     return serviceType;
-  }
-
-  private toServiceName(value: string): string {
-    const normalized = value.trim().toLowerCase();
-
-    if (normalized === 'shipping-agency' || normalized === 'shipping agency') {
-      return ServiceInquiryService.SERVICE_SHIPPING_AGENCY;
-    }
-    if (
-      normalized === 'chartering' ||
-      normalized === 'chartering-ship-broking' ||
-      normalized === 'chartering-broking'
-    ) {
-      return ServiceInquiryService.SERVICE_CHARTERING;
-    }
-    if (
-      normalized === 'freight-forwarding' ||
-      normalized === 'freight forwarding'
-    ) {
-      return ServiceInquiryService.SERVICE_FREIGHT_FORWARDING;
-    }
-    if (
-      normalized === 'logistics' ||
-      normalized === 'total-logistic' ||
-      normalized === 'total-logistics'
-    ) {
-      return ServiceInquiryService.SERVICE_LOGISTICS;
-    }
-    if (normalized === 'special-request' || normalized === 'special request') {
-      return ServiceInquiryService.SERVICE_SPECIAL_REQUEST;
-    }
-
-    return value.trim();
-  }
-
-  private toServiceSlug(serviceName: string): string {
-    const normalizedName = this.toServiceName(serviceName);
-
-    switch (normalizedName) {
-      case ServiceInquiryService.SERVICE_SHIPPING_AGENCY:
-        return 'shipping-agency';
-      case ServiceInquiryService.SERVICE_CHARTERING:
-        return 'chartering';
-      case ServiceInquiryService.SERVICE_FREIGHT_FORWARDING:
-        return 'freight-forwarding';
-      case ServiceInquiryService.SERVICE_LOGISTICS:
-        return 'total-logistic';
-      case ServiceInquiryService.SERVICE_SPECIAL_REQUEST:
-        return 'special-request';
-      default:
-        return normalizedName.toLowerCase().replace(/\s+/g, '-');
-    }
-  }
-
-  private isShippingAgency(serviceName: string): boolean {
-    return (
-      this.toServiceName(serviceName) ===
-      ServiceInquiryService.SERVICE_SHIPPING_AGENCY
-    );
-  }
-
-  private sanitizePage(page?: number): number {
-    if (!Number.isFinite(page) || page == null || page < 0) {
-      return 0;
-    }
-    return page;
-  }
-
-  private sanitizePageSize(size?: number): number {
-    if (!Number.isFinite(size) || size == null || size <= 0) {
-      return ServiceInquiryService.DEFAULT_PAGE_SIZE;
-    }
-    return Math.min(size, ServiceInquiryService.MAX_PAGE_SIZE);
   }
 
   private trimToNull(value?: string | null): string | null {
@@ -1084,32 +708,28 @@ export class ServiceInquiryService {
     return String(value);
   }
 
-  private async generateCodeForService(serviceName: string): Promise<string> {
-    const prefixes: Record<string, string> = {
-      [ServiceInquiryService.SERVICE_SHIPPING_AGENCY]: 'SA',
-      [ServiceInquiryService.SERVICE_CHARTERING]: 'CH',
-      [ServiceInquiryService.SERVICE_FREIGHT_FORWARDING]: 'FF',
-      [ServiceInquiryService.SERVICE_LOGISTICS]: 'TL',
-      [ServiceInquiryService.SERVICE_SPECIAL_REQUEST]: 'SR',
-    };
-
-    const serviceKey = this.toServiceName(serviceName);
-    const prefixCode = prefixes[serviceKey] ?? 'IN';
-    const year = new Date().getFullYear();
-    const prefix = `${prefixCode}-${year}-`;
-
-    const repo = this.repoForSlug(this.toServiceSlug(serviceName));
+  private async generateCodeForPrefix(
+    prefix: string,
+    repo: Repository<BaseInquiry>,
+  ): Promise<string> {
     const last = await repo
       .createQueryBuilder('inquiry')
-      .select('inquiry.code', 'code')
-      .where('inquiry.code LIKE :prefix', { prefix: `${prefix}%` })
-      .orderBy('inquiry.code', 'DESC')
-      .limit(1)
-      .getRawOne<{ code: string }>();
+      .select(
+        'MAX(CAST(SUBSTRING(inquiry.code FROM CHAR_LENGTH(:codePrefix) + 1) AS BIGINT))',
+        'lastNumber',
+      )
+      .where(
+        "inquiry.code LIKE :prefixPattern AND SUBSTRING(inquiry.code FROM CHAR_LENGTH(:codePrefix) + 1) ~ '^[0-9]+$'",
+        {
+          codePrefix: prefix,
+          prefixPattern: `${prefix}%`,
+        },
+      )
+      .getRawOne<{ lastNumber: string | null }>();
 
-    const nextNumber = last?.code
-      ? parseInt(last.code.slice(prefix.length), 10) + 1
-      : 1;
+    // BigInt avoids rollover/precision bugs when the sequence grows beyond
+    // four digits; padStart preserves the existing display format.
+    const nextNumber = BigInt(last?.lastNumber ?? '0') + 1n;
 
     return `${prefix}${String(nextNumber).padStart(4, '0')}`;
   }

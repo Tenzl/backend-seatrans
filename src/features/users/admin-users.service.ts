@@ -148,7 +148,27 @@ export class AdminUsersService {
       createdByUserId: staffUserId,
     });
 
-    const saved = await this.userRepository.save(row);
+    let saved: User;
+    try {
+      saved = await this.userRepository.save(row);
+    } catch (error) {
+      const pgError = error as {
+        code?: string;
+        constraint?: string;
+        detail?: string;
+      };
+      if (pgError.code === '23505') {
+        const identity =
+          `${pgError.constraint ?? ''} ${pgError.detail ?? ''}`.toLowerCase();
+        if (identity.includes('username')) {
+          throw new ConflictException('Username already exists');
+        }
+        if (identity.includes('email')) {
+          throw new ConflictException('Email already exists');
+        }
+      }
+      throw error;
+    }
     return AdminUserRowDto.from({
       id: saved.id,
       email: saved.email,

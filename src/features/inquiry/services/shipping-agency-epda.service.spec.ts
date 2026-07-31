@@ -3,6 +3,7 @@ import { ShippingAgencyEpdaService } from './shipping-agency-epda.service';
 import { InquiryStatus } from '../enums/inquiry-status.enum';
 import { ShippingAgencyInquiryEntity } from '../entities/shipping-agency-inquiry.entity';
 import { User } from '../../auth/entities/user.entity';
+import { ShippingAgencyEpdaSnapshotService } from './shipping-agency-epda-snapshot.service';
 
 function queryBuilder(result: unknown) {
   return {
@@ -135,7 +136,7 @@ describe('ShippingAgencyEpdaService increment 1', () => {
       portRepository as never,
       notificationService as never,
       fieldChangeService as never,
-      epdaParametersService as never,
+      new ShippingAgencyEpdaSnapshotService(epdaParametersService as never),
     );
     return {
       service,

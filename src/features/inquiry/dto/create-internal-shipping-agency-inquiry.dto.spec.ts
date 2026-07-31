@@ -56,19 +56,29 @@ describe('shipping-agency EPDA DTO contract', () => {
     });
   });
 
-  it('strips epdaSnapshot from create drafts', async () => {
-    const dto = await validateDto(CreateInternalShippingAgencyInquiryDto, {
-      customerUserId: 10,
-      shipownerTo: 'Owner',
-      vesselName: 'MV Test',
-      portId: 21,
-      portOfCall: 'HAI PHONG',
-      dischargeLoadingLocation: 'BERTH',
-      quoteForm: 'HN',
-      epdaSnapshot: { shouldNot: 'persist' },
+  it('rejects client-owned epdaSnapshot from create drafts', async () => {
+    await expect(
+      validateDto(CreateInternalShippingAgencyInquiryDto, {
+        customerUserId: 10,
+        shipownerTo: 'Owner',
+        vesselName: 'MV Test',
+        portId: 21,
+        portOfCall: 'HAI PHONG',
+        dischargeLoadingLocation: 'BERTH',
+        quoteForm: 'HN',
+        epdaSnapshot: { shouldNot: 'persist' },
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        message: 'Request validation failed',
+        details: [
+          {
+            field: 'epdaSnapshot',
+            message: 'property epdaSnapshot should not exist',
+          },
+        ],
+      },
     });
-
-    expect(dto).not.toHaveProperty('epdaSnapshot');
   });
 
   it('requires canonical portId for every internal EPDA draft', async () => {

@@ -22,6 +22,7 @@ import { RolesGuard } from '../../features/auth/guards/roles.guard';
 import { RoleGroup } from '../../features/auth/enums/role-group.enum';
 import { Section } from '../../features/roles/decorators/section.decorator';
 import { SectionAccessGuard } from '../../features/roles/guards/section-access.guard';
+import { PermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
 import { EpdaParametersService } from './epda-parameters.service';
 import {
   CreateEpdaParameterGroupDto,
@@ -126,6 +127,10 @@ export class EpdaParametersAdminController {
   }
 
   @Delete('port/:portId')
+  @PermanentDelete({
+    resourceType: 'epda_port_override',
+    idSource: { kind: 'param', key: 'portId' },
+  })
   @HttpCode(HttpStatus.NO_CONTENT)
   @UseGuards(SectionAccessGuard)
   @Section('epda-parameter')
@@ -193,6 +198,10 @@ export class EpdaParametersAdminController {
   }
 
   @Delete('groups/:id')
+  @PermanentDelete({
+    resourceType: 'epda_parameter_group',
+    idSource: { kind: 'param', key: 'id' },
+  })
   @HttpCode(HttpStatus.NO_CONTENT)
   @UseGuards(SectionAccessGuard)
   @Section('epda-parameter')

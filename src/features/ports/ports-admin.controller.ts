@@ -10,6 +10,7 @@ import {
   Put,
 } from '@nestjs/common';
 import { AdminSection } from '../../shared/decorators/admin-section.decorator';
+import { PermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
 import { PortsService } from './ports.service';
 import { CreatePortDto } from './dto/create-port.dto';
 import { PortDto } from './dto/port.dto';
@@ -43,6 +44,10 @@ export class PortsAdminController {
   }
 
   @Delete(':id')
+  @PermanentDelete({
+    resourceType: 'port',
+    idSource: { kind: 'param', key: 'id' },
+  })
   @HttpCode(HttpStatus.NO_CONTENT)
   deletePort(@Param('id') id: string): Promise<void> {
     return this.portsService.deletePort(Number(id));

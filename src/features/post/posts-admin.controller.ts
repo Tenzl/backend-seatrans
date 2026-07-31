@@ -12,6 +12,7 @@ import {
   Req,
 } from '@nestjs/common';
 import { AdminSection } from '../../shared/decorators/admin-section.decorator';
+import { PermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
 import { LimitQueryDto } from '../../shared/dto/list-query.dto';
 import { PostsService } from './posts.service';
 import { PostRequestDto } from './dto/post-request.dto';
@@ -46,6 +47,10 @@ export class PostsAdminController {
   }
 
   @Delete(':id')
+  @PermanentDelete({
+    resourceType: 'post',
+    idSource: { kind: 'param', key: 'id' },
+  })
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id') id: string) {
     return this.postsService.delete(Number(id));

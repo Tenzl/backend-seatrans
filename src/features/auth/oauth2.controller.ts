@@ -18,6 +18,7 @@ import {
   generateOAuthState,
   setOAuthStateCookie,
 } from './oauth-state';
+import { safeErrorForLog } from '../../shared/logging/safe-error-log';
 
 @Controller('v1/auth/oauth2')
 export class OAuth2Controller {
@@ -126,13 +127,16 @@ export class OAuth2Controller {
       if (!userInfoRes.ok || !userInfo.email || !userInfo.sub) {
         throw new Error('Failed to fetch Google user profile');
       }
+      if (userInfo.email_verified !== true) {
+        throw new Error('Google account email is not verified');
+      }
 
       const user = await this.authService.findOrCreateOAuthUser({
         email: userInfo.email,
         fullName: resolveGoogleFullName(userInfo) || userInfo.email,
         provider: 'google',
         providerId: userInfo.sub,
-        emailVerified: userInfo.email_verified ?? true,
+        emailVerified: true,
       });
 
       if (!user.isActive) {
@@ -144,7 +148,11 @@ export class OAuth2Controller {
       // Cookie is already set; land on home — AuthProvider hydrates via GET /auth/me.
       return this.redirectToFrontend(res, '/');
     } catch (error) {
-      this.logger.error('OAuth2 callback error', error);
+      const safeError = safeErrorForLog(error);
+      this.logger.error(
+        `OAuth2 callback error: ${safeError.message}`,
+        safeError.stack,
+      );
       return this.redirectToFrontend(res, '/login', 'oauth_failed');
     }
   }

@@ -1,10 +1,6 @@
 import {
   BadRequestException,
-  ConflictException,
-  HttpException,
-  HttpStatus,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -27,152 +23,22 @@ import {
   isEmptyEpdaOverride,
   validateEpdaParameterValues,
 } from './epda-parameter-values.validation';
+import {
+  cloneEpdaOverrideDocument,
+  hydrateEpdaParameterRows,
+  normalizeEpdaAreaKey,
+  resolveEpdaParameterValues,
+  type EpdaAreaKey,
+} from './epda-parameter-resolution';
+import { EpdaParameterVersionControl } from './epda-parameter-version-control';
 
-const AGENCY_FEE_TIERS = [
-  { maxGrt: 1000, amount: 0, label: '0 - 1,000' },
-  { maxGrt: 3000, amount: 500, label: '1,001 - 3,000' },
-  { maxGrt: 6000, amount: 600, label: '3,001 - 6,000' },
-  { maxGrt: 10000, amount: 700, label: '6,001 - 10,000' },
-  { maxGrt: 15000, amount: 850, label: '10,001 - 15,000' },
-  { maxGrt: 25000, amount: 1000, label: '15,001 - 25,000' },
-  { maxGrt: 50000, amount: 1150, label: '25,001 - 50,000' },
-  { maxGrt: null, amount: 1300, label: '50,001+' },
-];
-
-/**
- * Built-in fallback defaults (mirror the FE quoteParameters defaults + the seed)
- * so the form always resolves even when no DB row exists. Area 2 uses the QN
- * template; areas 1 and 3 use the HCM template.
- */
-export function defaultValuesForArea(
-  area?: string | null,
-): EpdaParameterValues {
-  const isQn = normalizeEpdaAreaKey(area) === '2';
-  const base: EpdaParameterValues = {
-    hours: {
-      berthHours: 96,
-      anchorageHours: 24,
-      pilotageThirdMiles: 17,
-      qnPilotageMiles: 5,
-    },
-    garbage: { atBerthUsd: 54, atBuoyUsd: 54 },
-    quarantine: {
-      shipUnitLowGrt: 95,
-      shipUnitHighGrt: 110,
-      shipThresholdGrt: 10000,
-      cargoPerTrip: 100,
-    },
-    coeff: {
-      tonnagePerGrt: 0.034,
-      navigationPerGrt: 0.1,
-      tankerFactor: 0.85,
-      bulkFactor: 1,
-      berthDuePerGrtHour: 0.0031,
-      buoyDuePerGrtHour: 0.0013,
-      anchoragePerGrtHour: 0.0005,
-      clearanceFee: 50,
-      oceanFrtDefaultRate: 16,
-      oceanFrtTaxRate: 0.02,
-      pilotageLeg1Rate: 0.0034,
-      pilotageLeg1Miles: 10,
-      pilotageLeg2Rate: 0.0022,
-      pilotageLeg2Miles: 20,
-      pilotageLeg3Rate: 0.0015,
-      pilotageSingleRate: 0.0034,
-      pilotageMinAmount: 600,
-      cargoAgencyBagRate: 0.06,
-      cargoAgencyEquipRate: 0.1,
-      cargoAgencyBulkRate: 0.05,
-    },
-    agencyFeeTiers: AGENCY_FEE_TIERS.map((t) => ({ ...t })),
-    moorUnmoorBerthTiers: [
-      { maxGrt: 4000, amount: 74, label: '<= 4,000' },
-      { maxGrt: 9999, amount: 110, label: '4,001 - <10,000' },
-      { maxGrt: 14999, amount: 144, label: '10,001 - <15,000' },
-      { maxGrt: 19999, amount: 180, label: '15,001 - <20,000' },
-      { maxGrt: null, amount: 220, label: '>= 20,001' },
-    ],
-    moorUnmoorBuoyTiers: [
-      { maxGrt: 4000, amount: 180, label: '<= 4,000' },
-      { maxGrt: 9999, amount: 240, label: '4,001 - <10,000' },
-      { maxGrt: 14999, amount: 330, label: '10,001 - <15,000' },
-      { maxGrt: 19999, amount: 380, label: '15,001 - <20,000' },
-      { maxGrt: null, amount: 440, label: '>= 20,001' },
-    ],
-    tugTiers: [
-      { minLoa: 80, amount: 510, label: '80 - <95m' },
-      { minLoa: 95, amount: 1020, label: '95 - <120m' },
-      { minLoa: 120, amount: 1490, label: '120 - <145m' },
-      { minLoa: 145, amount: 1960, label: '145 - <160m' },
-      { minLoa: 160, amount: 2180, label: '160 - <175m' },
-      { minLoa: 175, amount: 2400, label: '175 - <190m' },
-      { minLoa: 190, amount: 2600, label: '190 - <205m' },
-      { minLoa: 205, amount: 2800, label: '≥ 205m' },
-    ],
-    // Empty by default: the EPDA calc falls back to the coeff bag/equip/bulk rates
-    // until an admin adds explicit per-cargo-type rates on the Parameter screen.
-    cargoAgencyRates: [],
-  };
-  if (!isQn) return base;
-  return {
-    ...base,
-    garbage: { atBerthUsd: 17, atBuoyUsd: 17 },
-    coeff: { ...base.coeff, navigationPerGrt: 0.058, clearanceFee: 100 },
-    moorUnmoorBerthTiers: [
-      { maxGrt: 499, amount: 32, label: '< 500' },
-      { maxGrt: 1000, amount: 50, label: '500 - <1,000' },
-      { maxGrt: 4000, amount: 66, label: '1,001 - <4,000' },
-      { maxGrt: 10000, amount: 120, label: '4,001 - <10,000' },
-      { maxGrt: 15000, amount: 140, label: '10,001 - <15,000' },
-      { maxGrt: null, amount: 180, label: '> 15,000' },
-    ],
-    moorUnmoorBuoyTiers: [],
-    tugTiers: [
-      { minLoa: 0, amount: 1154, label: '0 - <90m' },
-      { minLoa: 90, amount: 2308, label: '90 - <135m' },
-      { minLoa: 135, amount: 3956, label: '135 - <175m' },
-      { minLoa: 175, amount: 6792, label: '175 - <200m' },
-      { minLoa: 200, amount: 9916, label: '≥ 200m' },
-    ],
-  };
-}
-
-/** Deep-merge parameter value layers; later layers win. Arrays (tiers) replace. */
-function mergeValues(
-  area: string | null,
-  ...layers: Array<PartialEpdaParameterValues | undefined | null>
-): EpdaParameterValues {
-  const out = defaultValuesForArea(area);
-  for (const layer of layers) {
-    if (!layer) continue;
-    if (layer.hours) out.hours = { ...out.hours, ...layer.hours };
-    if (layer.garbage) out.garbage = { ...out.garbage, ...layer.garbage };
-    if (layer.quarantine)
-      out.quarantine = { ...out.quarantine, ...layer.quarantine };
-    if (layer.coeff) out.coeff = { ...out.coeff, ...layer.coeff };
-    if (Array.isArray(layer.agencyFeeTiers))
-      out.agencyFeeTiers = layer.agencyFeeTiers.map((t) => ({ ...t }));
-    if (Array.isArray(layer.moorUnmoorBerthTiers))
-      out.moorUnmoorBerthTiers = layer.moorUnmoorBerthTiers.map((t) => ({
-        ...t,
-      }));
-    if (Array.isArray(layer.moorUnmoorBuoyTiers))
-      out.moorUnmoorBuoyTiers = layer.moorUnmoorBuoyTiers.map((t) => ({
-        ...t,
-      }));
-    if (Array.isArray(layer.tugTiers))
-      out.tugTiers = layer.tugTiers.map((t) => ({ ...t }));
-    if (Array.isArray(layer.cargoAgencyRates))
-      out.cargoAgencyRates = layer.cargoAgencyRates.map((r) => ({ ...r }));
-  }
-  return out;
-}
+export { defaultValuesForArea } from './epda-parameter-resolution';
 
 @Injectable()
 export class EpdaParametersService {
-  private readonly logger = new Logger(EpdaParametersService.name);
-  private readonly requireExpectedVersion =
-    process.env.EPDA_REQUIRE_EXPECTED_VERSION?.trim().toLowerCase() === 'true';
+  private readonly versionControl = new EpdaParameterVersionControl(
+    EpdaParametersService.name,
+  );
 
   constructor(
     @InjectRepository(EpdaParameterSet)
@@ -273,18 +139,22 @@ export class EpdaParametersService {
       const existing = await this.getAreaSet(normalizedArea, repository);
       const before = existing ? existing.values : null;
       const saved = existing
-        ? await this.updateWithVersion(
+        ? await this.versionControl.updateWithVersion(
             repository,
             existing,
             {
               area: normalizedArea,
-              values: mergeValues(normalizedArea, existing.values, values),
+              values: resolveEpdaParameterValues(
+                normalizedArea,
+                existing.values,
+                values,
+              ),
             },
             expectedVersion,
             `Area ${normalizedArea}`,
           )
         : await repository.save(
-            this.createAfterVersionCheck(
+            this.versionControl.createAfterVersionCheck(
               repository,
               {
                 scope: 'AREA',
@@ -292,7 +162,7 @@ export class EpdaParametersService {
                 portId: null,
                 name: null,
                 memberPortIds: null,
-                values: mergeValues(normalizedArea, values),
+                values: resolveEpdaParameterValues(normalizedArea, values),
               },
               expectedVersion,
               `Area ${normalizedArea}`,
@@ -311,16 +181,14 @@ export class EpdaParametersService {
     });
   }
 
-  private async resolvePortArea(
-    portId: number,
-  ): Promise<'1' | '2' | '3' | null> {
+  private async resolvePortArea(portId: number): Promise<EpdaAreaKey | null> {
     const port = await this.portRepo.findOne({
       where: { id: portId },
       relations: { province: true },
     });
     if (!port) throw new NotFoundException(`Port ${portId} not found`);
     const areaCode = normalizeProvinceAreaCode(port.province?.area ?? null);
-    return areaCode ? (String(areaCode) as '1' | '2' | '3') : null;
+    return areaCode ? normalizeEpdaAreaKey(String(areaCode)) : null;
   }
 
   async upsertPort(
@@ -346,20 +214,20 @@ export class EpdaParametersService {
       const existing = await this.findPortOverride(portId, repository);
       const before = existing ? existing.values : null;
       const saved = existing
-        ? await this.updateWithVersion(
+        ? await this.versionControl.updateWithVersion(
             repository,
             existing,
             {
               area: null,
               // PUT semantics: the Parameter screen sends the complete partial
               // override document. Omitted nested fields are intentionally unset.
-              values: this.replaceOverrideDocument(values),
+              values: cloneEpdaOverrideDocument(values),
             },
             expectedVersion,
             `Port override ${portId}`,
           )
         : await repository.save(
-            this.createAfterVersionCheck(
+            this.versionControl.createAfterVersionCheck(
               repository,
               {
                 scope: 'PORT',
@@ -367,7 +235,7 @@ export class EpdaParametersService {
                 portId,
                 name: null,
                 memberPortIds: null,
-                values: this.replaceOverrideDocument(values),
+                values: cloneEpdaOverrideDocument(values),
               },
               expectedVersion,
               `Port override ${portId}`,
@@ -396,7 +264,7 @@ export class EpdaParametersService {
       const repository = manager.getRepository(EpdaParameterSet);
       const existing = await this.findPortOverride(portId, repository);
       if (!existing) return;
-      this.assertExpectedVersion(
+      this.versionControl.assertExpectedVersion(
         existing,
         expectedVersion,
         `Port override ${portId}`,
@@ -407,7 +275,11 @@ export class EpdaParametersService {
         version: existing.version ?? 1,
       });
       if (result.affected !== 1) {
-        await this.throwVersionConflict(repository, existing.id, portId);
+        await this.versionControl.throwVersionConflict(
+          repository,
+          existing.id,
+          portId,
+        );
       }
       await this.saveAudit(manager, {
         scope: 'PORT',
@@ -534,7 +406,7 @@ export class EpdaParametersService {
       if (normalizedName !== undefined) metadataPatch.name = normalizedName;
       if (patch.values !== undefined) metadataPatch.values = patch.values;
       const saved = Object.keys(metadataPatch).length
-        ? await this.updateWithVersion(
+        ? await this.versionControl.updateWithVersion(
             repository,
             current,
             metadataPatch,
@@ -578,14 +450,18 @@ export class EpdaParametersService {
         where: { id, scope: 'GROUP' },
       });
       if (!current) return null;
-      this.assertExpectedVersion(current, expectedVersion, `Group ${id}`);
+      this.versionControl.assertExpectedVersion(
+        current,
+        expectedVersion,
+        `Group ${id}`,
+      );
       const result = await repository.delete({
         id,
         scope: 'GROUP',
         version: current.version ?? 1,
       });
       if (result.affected !== 1) {
-        await this.throwVersionConflict(repository, id);
+        await this.versionControl.throwVersionConflict(repository, id);
       }
       await this.saveAudit(manager, {
         scope: 'GROUP',
@@ -634,7 +510,11 @@ export class EpdaParametersService {
       });
       if (!lockedGroup) throw new NotFoundException(`Group ${id} not found`);
       group = lockedGroup;
-      this.assertExpectedVersion(group, expectedVersion, `Group ${id}`);
+      this.versionControl.assertExpectedVersion(
+        group,
+        expectedVersion,
+        `Group ${id}`,
+      );
 
       const ports = unique.length
         ? await transactionalPortRepo.find({
@@ -691,7 +571,7 @@ export class EpdaParametersService {
         );
       }
       if (changedSiblings.length) await parameterRepo.save(changedSiblings);
-      const saved = await this.updateWithVersion(
+      const saved = await this.versionControl.updateWithVersion(
         parameterRepo,
         group,
         { memberPortIds: unique },
@@ -807,7 +687,7 @@ export class EpdaParametersService {
         : Promise.resolve(null),
       portId ? this.getPortOverride(portId) : Promise.resolve(null),
     ]);
-    return mergeValues(
+    return resolveEpdaParameterValues(
       normalizedArea,
       areaSet?.values,
       groupSet?.values,
@@ -842,149 +722,6 @@ export class EpdaParametersService {
           })
         : Promise.resolve([]),
     ]);
-    const membersByGroup = new Map<number, number[]>();
-    for (const membership of memberships) {
-      const members = membersByGroup.get(membership.groupId) ?? [];
-      members.push(membership.portId);
-      membersByGroup.set(membership.groupId, members);
-    }
-    const areaByPort = new Map(
-      ports.map((port) => {
-        const area = normalizeProvinceAreaCode(port.province?.area ?? null);
-        return [port.id, area ? String(area) : null] as const;
-      }),
-    );
-
-    return rows.map((row) => {
-      if (row.scope === 'PORT' && row.portId != null) {
-        row.area = areaByPort.get(row.portId) ?? null;
-      } else {
-        row.area = normalizeEpdaAreaKey(row.area);
-      }
-      if (row.scope === 'GROUP') {
-        const normalizedMembers = membersByGroup.get(row.id);
-        if (normalizedMembers) {
-          row.memberPortIds = normalizedMembers.sort((a, b) => a - b);
-        } else {
-          row.memberPortIds = row.memberPortIds ?? [];
-        }
-      }
-      return row;
-    });
+    return hydrateEpdaParameterRows(rows, memberships, ports);
   }
-
-  private assertExpectedVersion(
-    current: EpdaParameterSet,
-    expectedVersion: number | null | undefined,
-    resource: string,
-  ): void {
-    const currentVersion = current.version ?? 1;
-    if (expectedVersion === undefined) {
-      if (this.requireExpectedVersion) {
-        throw new HttpException(
-          {
-            code: 'EPDA_PARAMETER_VERSION_REQUIRED',
-            message: `${resource} requires expectedVersion`,
-          },
-          HttpStatus.PRECONDITION_REQUIRED,
-        );
-      }
-      this.logger.warn(
-        `${resource} was mutated without expectedVersion; legacy compatibility is temporary`,
-      );
-      return;
-    }
-    if (expectedVersion === null || expectedVersion !== currentVersion) {
-      throw new ConflictException({
-        code: 'EPDA_PARAMETER_VERSION_CONFLICT',
-        message: `${resource} has changed; reload before saving`,
-        currentVersion,
-      });
-    }
-  }
-
-  private createAfterVersionCheck(
-    repository: Repository<EpdaParameterSet>,
-    values: Partial<EpdaParameterSet>,
-    expectedVersion: number | null | undefined,
-    resource: string,
-  ): EpdaParameterSet {
-    if (expectedVersion != null) {
-      throw new ConflictException({
-        code: 'EPDA_PARAMETER_VERSION_CONFLICT',
-        message: `${resource} no longer matches the requested version`,
-        currentVersion: null,
-      });
-    }
-    if (expectedVersion === undefined) {
-      if (this.requireExpectedVersion) {
-        throw new HttpException(
-          {
-            code: 'EPDA_PARAMETER_VERSION_REQUIRED',
-            message: `${resource} requires expectedVersion`,
-          },
-          HttpStatus.PRECONDITION_REQUIRED,
-        );
-      }
-      this.logger.warn(
-        `${resource} was created without expectedVersion; legacy compatibility is temporary`,
-      );
-    }
-    return repository.create({ ...values, version: 1 });
-  }
-
-  private async updateWithVersion(
-    repository: Repository<EpdaParameterSet>,
-    current: EpdaParameterSet,
-    patch: Partial<EpdaParameterSet>,
-    expectedVersion: number | null | undefined,
-    resource: string,
-  ): Promise<EpdaParameterSet> {
-    this.assertExpectedVersion(current, expectedVersion, resource);
-    const currentVersion = current.version ?? 1;
-    const result = await repository.update(
-      { id: current.id, scope: current.scope, version: currentVersion },
-      patch,
-    );
-    if (result.affected !== 1) {
-      await this.throwVersionConflict(
-        repository,
-        current.id,
-        current.portId ?? undefined,
-      );
-    }
-    const saved = await repository.findOne({
-      where: { id: current.id, scope: current.scope },
-    });
-    if (!saved) throw new NotFoundException(`${resource} not found`);
-    return saved;
-  }
-
-  private async throwVersionConflict(
-    repository: Repository<EpdaParameterSet>,
-    id: number,
-    portId?: number,
-  ): Promise<never> {
-    const current = await repository.findOne({
-      where: portId ? { scope: 'PORT', portId } : { id },
-    });
-    throw new ConflictException({
-      code: 'EPDA_PARAMETER_VERSION_CONFLICT',
-      message: 'EPDA parameters changed; reload before saving',
-      currentVersion: current?.version ?? null,
-    });
-  }
-
-  private replaceOverrideDocument(
-    values: PartialEpdaParameterValues,
-  ): PartialEpdaParameterValues {
-    return structuredClone(values);
-  }
-}
-
-function normalizeEpdaAreaKey(value?: string | null): '1' | '2' | '3' | null {
-  const normalized = value?.trim();
-  return normalized === '1' || normalized === '2' || normalized === '3'
-    ? normalized
-    : null;
 }

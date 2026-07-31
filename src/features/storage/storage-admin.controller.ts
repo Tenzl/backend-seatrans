@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AdminSection } from '../../shared/decorators/admin-section.decorator';
+import { PermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
 import { MB } from '../../shared/uploads/upload-validators';
 import { StorageService } from './storage.service';
 import { StorageListQueryDto } from './dto/storage-list-query.dto';
@@ -69,6 +70,10 @@ export class StorageAdminController {
   }
 
   @Delete()
+  @PermanentDelete({
+    resourceType: 'storage_object',
+    idSource: { kind: 'query', key: 'key' },
+  })
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Query() query: StorageKeyQueryDto) {
     await this.storageService.delete(query.key);

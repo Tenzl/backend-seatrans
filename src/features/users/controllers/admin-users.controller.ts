@@ -14,8 +14,7 @@ import {
   Req,
 } from '@nestjs/common';
 import type { Request } from 'express';
-import { ApiAdmin } from '../../../shared/decorators/api-admin.decorator';
-import { Roles } from '../../auth/decorators/roles.decorator';
+import { ApiAdminOnly } from '../../../shared/decorators/api-admin.decorator';
 import { validateDto } from '../../../shared/utils/validate-dto.util';
 import { AdminUsersService } from '../admin-users.service';
 import { AdminListUsersQueryDto } from '../dto/admin-list-users-query.dto';
@@ -26,8 +25,7 @@ import { RoleGroup } from '../../auth/enums/role-group.enum';
 
 type StaffRequest = Request & { user?: { id?: number } };
 
-@ApiAdmin()
-@Roles('ROLE_ADMIN')
+@ApiAdminOnly()
 @Controller('v1/admin/users')
 export class AdminUsersController {
   constructor(private readonly adminUsersService: AdminUsersService) {}

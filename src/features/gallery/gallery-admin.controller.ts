@@ -18,6 +18,7 @@ import {
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import type { Request } from 'express';
 import { AdminSection } from '../../shared/decorators/admin-section.decorator';
+import { PermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
 import { GalleryService } from './gallery.service';
 import { CreateGalleryImageDto } from './dto/create-gallery-image.dto';
 import { UpdateGalleryImageDto } from './dto/update-gallery-image.dto';
@@ -131,6 +132,10 @@ export class GalleryAdminController {
   }
 
   @Delete(':id')
+  @PermanentDelete({
+    resourceType: 'gallery_image',
+    idSource: { kind: 'param', key: 'id' },
+  })
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id') id: string) {
     return this.galleryService.delete(Number(id));

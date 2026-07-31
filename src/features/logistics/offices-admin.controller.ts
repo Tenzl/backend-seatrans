@@ -11,6 +11,7 @@ import {
 import { OfficesService } from './offices.service';
 import { CreateOfficeDto } from './dto/create-office.dto';
 import { AdminSection } from '../../shared/decorators/admin-section.decorator';
+import { PermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
 
 @AdminSection('data-offices')
 @Controller('v1/admin/offices')
@@ -33,6 +34,10 @@ export class OfficesAdminController {
   }
 
   @Delete(':id')
+  @PermanentDelete({
+    resourceType: 'office',
+    idSource: { kind: 'param', key: 'id' },
+  })
   remove(@Param('id') id: string) {
     return this.officesService.delete(Number(id));
   }

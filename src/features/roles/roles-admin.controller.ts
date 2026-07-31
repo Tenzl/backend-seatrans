@@ -10,8 +10,8 @@ import {
   Post,
   Put,
 } from '@nestjs/common';
-import { ApiAdmin } from '../../shared/decorators/api-admin.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { ApiAdminOnly } from '../../shared/decorators/api-admin.decorator';
+import { PermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
 import { validateDto } from '../../shared/utils/validate-dto.util';
 import { RolesAdminService } from './roles-admin.service';
 import { CreateRoleDto } from './dto/create-role.dto';
@@ -22,8 +22,7 @@ import { UpdateRoleDto } from './dto/update-role.dto';
  * a privileged operation, so it must not be reachable by a non-admin who merely
  * holds the "roles" section (prevents privilege escalation).
  */
-@ApiAdmin()
-@Roles('ROLE_ADMIN')
+@ApiAdminOnly()
 @Controller('v1/admin/roles')
 export class RolesAdminController {
   constructor(private readonly service: RolesAdminService) {}
@@ -56,6 +55,10 @@ export class RolesAdminController {
   }
 
   @Delete(':id')
+  @PermanentDelete({
+    resourceType: 'role',
+    idSource: { kind: 'param', key: 'id' },
+  })
   @HttpCode(HttpStatus.OK)
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.service.deleteRole(id);

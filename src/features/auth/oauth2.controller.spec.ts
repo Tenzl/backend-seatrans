@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { OAuth2Controller } from './oauth2.controller';
@@ -7,6 +8,10 @@ import type { User } from './entities/user.entity';
 describe('OAuth2Controller', () => {
   const originalNodeEnv = process.env.NODE_ENV;
   const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    jest.spyOn(Logger.prototype, 'error').mockImplementation();
+  });
 
   afterEach(() => {
     process.env.NODE_ENV = originalNodeEnv;
@@ -192,10 +197,7 @@ describe('OAuth2Controller', () => {
         path: '/',
         maxAge: 1000 * 60 * 60,
       });
-      expect(redirect).toHaveBeenCalledWith(
-        303,
-        'https://www.example.test/',
-      );
+      expect(redirect).toHaveBeenCalledWith(303, 'https://www.example.test/');
     },
   );
 
@@ -293,6 +295,67 @@ describe('OAuth2Controller', () => {
       'https://www.example.test/login?error=oauth_failed',
     );
   });
+
+  it.each([[false], [undefined]])(
+    'rejects a Google profile unless email_verified is explicitly true',
+    async (emailVerified) => {
+      const authService = {
+        findOrCreateOAuthUser: jest.fn(),
+        buildAuthResponse: jest.fn(),
+      };
+      const values: Record<string, string> = {
+        GOOGLE_CLIENT_ID: 'google-client',
+        GOOGLE_CLIENT_SECRET: 'google-secret',
+        GOOGLE_REDIRECT_URI:
+          'https://api.example.test/v1/auth/oauth2/callback/google',
+        CORS_ORIGINS: 'https://www.example.test',
+      };
+      const configService = {
+        get: jest.fn(
+          (key: string, fallback?: string) => values[key] ?? fallback,
+        ),
+      };
+      const controller = new OAuth2Controller(
+        authService as unknown as AuthService,
+        configService as unknown as ConfigService,
+      );
+      const clearCookie = jest.fn();
+      const redirect = jest.fn();
+      const response = { clearCookie, redirect } as unknown as Response;
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce(
+          new global.Response(
+            JSON.stringify({ access_token: 'google-access' }),
+            { status: 200 },
+          ),
+        )
+        .mockResolvedValueOnce(
+          new global.Response(
+            JSON.stringify({
+              email: 'user@example.test',
+              sub: 'google-user-id',
+              email_verified: emailVerified,
+            }),
+            { status: 200 },
+          ),
+        ) as typeof fetch;
+
+      await controller.handleGoogleCallback(
+        'google-code',
+        'expected-state',
+        requestWithState('expected-state'),
+        response,
+      );
+
+      expect(authService.findOrCreateOAuthUser).not.toHaveBeenCalled();
+      expect(authService.buildAuthResponse).not.toHaveBeenCalled();
+      expect(redirect).toHaveBeenCalledWith(
+        303,
+        'https://www.example.test/login?error=oauth_failed',
+      );
+    },
+  );
 
   it('ignores non-http redirect origins instead of creating an open redirect', async () => {
     const configService = {

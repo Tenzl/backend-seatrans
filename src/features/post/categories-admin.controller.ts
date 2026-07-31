@@ -11,6 +11,7 @@ import {
 import { CategoriesService } from './categories.service';
 import { CategoryRequestDto } from './dto/category-request.dto';
 import { AdminSection } from '../../shared/decorators/admin-section.decorator';
+import { PermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
 
 @AdminSection('content-categories')
 @Controller('v1/admin/categories')
@@ -38,6 +39,10 @@ export class CategoriesAdminController {
   }
 
   @Delete(':id')
+  @PermanentDelete({
+    resourceType: 'post_category',
+    idSource: { kind: 'param', key: 'id' },
+  })
   remove(@Param('id') id: string) {
     return this.categoriesService.delete(Number(id));
   }

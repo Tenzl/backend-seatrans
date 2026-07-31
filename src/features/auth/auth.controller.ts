@@ -37,7 +37,7 @@ export class AuthController {
   ) {
     const auth = await this.authService.register(registerDto);
     setAuthCookie(res, auth.token, auth.cookieMaxAgeMs);
-    return auth;
+    return { user: auth.user };
   }
 
   @Post('login')
@@ -48,7 +48,7 @@ export class AuthController {
   ) {
     const auth = await this.authService.login(loginDto);
     setAuthCookie(res, auth.token, auth.cookieMaxAgeMs);
-    return auth;
+    return { user: auth.user };
   }
 
   @Post('logout')

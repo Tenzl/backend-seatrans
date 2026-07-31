@@ -7,6 +7,7 @@ describe('AdminInquiryController batch operations', () => {
   function setup() {
     const inquiryService = {
       hardDeleteBatchByAdmin: jest.fn().mockResolvedValue(undefined),
+      hardDeleteByServiceAndId: jest.fn().mockResolvedValue(undefined),
       softDeleteBatch: jest.fn().mockResolvedValue(undefined),
       restoreBatchByAdmin: jest.fn().mockResolvedValue(undefined),
     };
@@ -17,7 +18,7 @@ describe('AdminInquiryController batch operations', () => {
     return { controller, inquiryService };
   }
 
-  it('allows an administrator to delete across services when slug is omitted', async () => {
+  it('archives through the standard batch route even for administrators', async () => {
     const { controller, inquiryService } = setup();
 
     await controller.deleteBatch({ ids: [11, 12] }, {}, {
@@ -25,6 +26,19 @@ describe('AdminInquiryController batch operations', () => {
     } as Request & {
       user: { id: number; role: { name: string } };
     });
+
+    expect(inquiryService.hardDeleteBatchByAdmin).not.toHaveBeenCalled();
+    expect(inquiryService.softDeleteBatch).toHaveBeenCalledWith(
+      [11, 12],
+      7,
+      undefined,
+    );
+  });
+
+  it('uses a separate admin-only method for permanent batch deletion', async () => {
+    const { controller, inquiryService } = setup();
+
+    await controller.hardDeleteBatch({ ids: [11, 12] }, {});
 
     expect(inquiryService.hardDeleteBatchByAdmin).toHaveBeenCalledWith(
       [11, 12],
@@ -44,6 +58,33 @@ describe('AdminInquiryController batch operations', () => {
     expect(inquiryService.restoreBatchByAdmin).toHaveBeenCalledWith(
       [11, 12],
       undefined,
+    );
+  });
+
+  it('never hard-deletes for an admin-like custom role', async () => {
+    const { controller, inquiryService } = setup();
+    const request = {
+      user: { id: 8, role: { name: 'ROLE_ADMIN_ASSISTANT' } },
+    } as Request & {
+      user: { id: number; role: { name: string } };
+    };
+
+    await controller.deleteBatch({ ids: [11, 12] }, {}, request);
+    await controller.remove('shipping-agency', 13, request);
+
+    expect(inquiryService.hardDeleteBatchByAdmin).not.toHaveBeenCalled();
+    expect(inquiryService.hardDeleteByServiceAndId).not.toHaveBeenCalled();
+    expect(inquiryService.softDeleteBatch).toHaveBeenNthCalledWith(
+      1,
+      [11, 12],
+      8,
+      undefined,
+    );
+    expect(inquiryService.softDeleteBatch).toHaveBeenNthCalledWith(
+      2,
+      [13],
+      8,
+      'shipping-agency',
     );
   });
 });

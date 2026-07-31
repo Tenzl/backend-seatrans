@@ -20,12 +20,17 @@ import { NotificationModule } from './features/notification/notification.module'
 import { RolesModule } from './features/roles/roles.module';
 import { StorageModule } from './features/storage/storage.module';
 import { BookingDocumentsModule } from './features/booking-documents/booking-documents.module';
+import { AuditModule } from './shared/audit/audit.module';
+import { HealthModule } from './shared/health/health.module';
+import { validateEnvironment } from './config/environment';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
+      cache: true,
+      validate: validateEnvironment,
     }),
     ThrottlerModule.forRoot({
       throttlers: [
@@ -37,6 +42,7 @@ import { BookingDocumentsModule } from './features/booking-documents/booking-doc
     }),
     AuthModule,
     DatabaseModule,
+    AuditModule,
     ProvincesModule,
     PortsModule,
     CommoditiesModule,
@@ -51,6 +57,7 @@ import { BookingDocumentsModule } from './features/booking-documents/booking-doc
     RolesModule,
     StorageModule,
     BookingDocumentsModule,
+    HealthModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
