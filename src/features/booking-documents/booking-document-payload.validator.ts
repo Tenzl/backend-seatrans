@@ -3,6 +3,7 @@ import { plainToInstance } from 'class-transformer';
 import { validate, ValidationError } from 'class-validator';
 import { BookingDocumentPayload } from './booking-document.types';
 import { ArrivalNoticePreviewDto } from './dto/arrival-notice-preview.dto';
+import { BillOfLadingPreviewDto } from './dto/bill-of-lading-preview.dto';
 import { BookingConfirmationPreviewDto } from './dto/booking-confirmation-preview.dto';
 import { DeliveryOrderPreviewDto } from './dto/delivery-order-preview.dto';
 import { BookingDocumentType } from './enums/booking-document-type.enum';
@@ -13,6 +14,7 @@ const DTO_BY_TYPE: Record<BookingDocumentType, PayloadClass> = {
   [BookingDocumentType.ARRIVAL_NOTICE]: ArrivalNoticePreviewDto,
   [BookingDocumentType.BOOKING_CONFIRMATION]: BookingConfirmationPreviewDto,
   [BookingDocumentType.DELIVERY_ORDER]: DeliveryOrderPreviewDto,
+  [BookingDocumentType.BILL_OF_LADING]: BillOfLadingPreviewDto,
 };
 
 @Injectable()

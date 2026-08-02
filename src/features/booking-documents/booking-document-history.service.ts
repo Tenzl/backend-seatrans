@@ -7,6 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { BookingDocumentPayload } from './booking-document.types';
 import { ArrivalNoticePreviewDto } from './dto/arrival-notice-preview.dto';
+import { BillOfLadingPreviewDto } from './dto/bill-of-lading-preview.dto';
 import { BookingConfirmationPreviewDto } from './dto/booking-confirmation-preview.dto';
 import { DeliveryOrderPreviewDto } from './dto/delivery-order-preview.dto';
 import { BookingDocumentRecord } from './entities/booking-document-record.entity';
@@ -174,6 +175,9 @@ export class BookingDocumentHistoryService {
         break;
       case BookingDocumentType.DELIVERY_ORDER:
         value = (payload as DeliveryOrderPreviewDto).doNumber;
+        break;
+      case BookingDocumentType.BILL_OF_LADING:
+        value = (payload as BillOfLadingPreviewDto).fblNumber;
         break;
     }
     return value?.trim() || null;

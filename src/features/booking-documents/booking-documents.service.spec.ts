@@ -125,6 +125,7 @@ describe('BookingDocumentsService', () => {
     [BookingDocumentType.ARRIVAL_NOTICE, 'AN-preview.pdf'],
     [BookingDocumentType.BOOKING_CONFIRMATION, 'BOOKING-preview.pdf'],
     [BookingDocumentType.DELIVERY_ORDER, 'DO-preview.pdf'],
+    [BookingDocumentType.BILL_OF_LADING, 'BL-preview.pdf'],
   ])('renders a valid %s PDF with a fixed filename', async (type, filename) => {
     const result = await service.createPreview(type, {});
 

@@ -26,8 +26,8 @@ export const SECTION_CATALOG: readonly SectionDef[] = [
   { key: 'booking-shipment', label: 'Shipment', group: 'Data Management' },
   {
     key: 'booking-documents',
-    label: 'Transport documents',
-    group: 'Booking Management',
+    label: 'Booking Management',
+    group: 'Data Management',
   },
   { key: 'users', label: 'Users', group: 'Data Management', adminOnly: true },
   { key: 'data-ports', label: 'Ports', group: 'Data Management' },
