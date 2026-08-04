@@ -29,6 +29,7 @@
     "db:migrate:users-identity": "node scripts/run-users-identity-uniqueness-migration.mjs",
     "db:migrate:customer-id-sequences": "node scripts/run-customer-id-sequences-migration.mjs",
     "db:migrate:booking-workflows": "node scripts/apply-booking-workflows.mjs",
+    "db:migrate:booking-document-split": "node scripts/run-booking-document-table-split.mjs",
     "db:seed:import-export-forms": "node scripts/seed-import-export-booking-forms.mjs"
   },
   "dependencies": {

@@ -1,6 +1,6 @@
 /**
  * Seed one Import + one Export Booking Confirmation (transport document forms)
- * into booking_document_records for UI / workflow testing.
+ * into the four split booking-document tables for UI / workflow testing.
  *
  * Usage:
  *   node scripts/seed-import-export-booking-forms.mjs
@@ -336,9 +336,22 @@ async function findActiveByRef(client, referenceNumber) {
   const result = await client.query(
     `
     SELECT id, document_type, booking_flow, booking_id, reference_number, status
-    FROM booking_document_records
-    WHERE reference_number = $1
-      AND deleted_at IS NULL
+    FROM (
+      SELECT id, 'booking'::text AS document_type, booking_flow,
+             NULL::bigint AS booking_id, booking_number AS reference_number,
+             status, deleted_at
+      FROM booking_records
+      UNION ALL
+      SELECT id, 'an'::text, NULL::varchar, booking_id, an_number, status, deleted_at
+      FROM arrival_notice_records
+      UNION ALL
+      SELECT id, 'do'::text, NULL::varchar, booking_id, do_number, status, deleted_at
+      FROM delivery_order_records
+      UNION ALL
+      SELECT id, 'bl'::text, NULL::varchar, booking_id, fbl_number, status, deleted_at
+      FROM bill_of_lading_records
+    ) records
+    WHERE reference_number = $1 AND deleted_at IS NULL
     ORDER BY id DESC
     LIMIT 1
     `,
@@ -348,26 +361,27 @@ async function findActiveByRef(client, referenceNumber) {
 }
 
 async function softDeleteByRefs(client, refs, actorUserId) {
-  await client.query(
-    `
-    UPDATE booking_document_records
-    SET deleted_at = NOW(),
-        deleted_by_user_id = $2
-    WHERE reference_number = ANY($1::text[])
-      AND deleted_at IS NULL
-    `,
-    [refs, actorUserId],
-  );
+  for (const [table, referenceColumn] of [
+    ['arrival_notice_records', 'an_number'],
+    ['delivery_order_records', 'do_number'],
+    ['bill_of_lading_records', 'fbl_number'],
+    ['booking_records', 'booking_number'],
+  ]) {
+    await client.query(
+      `UPDATE ${table}
+          SET deleted_at = NOW(), deleted_by_user_id = $2
+        WHERE ${referenceColumn} = ANY($1::text[])
+          AND deleted_at IS NULL`,
+      [refs, actorUserId],
+    );
+  }
 }
 
 async function insertBooking(client, { flow, payload, userId }) {
   const result = await client.query(
     `
-    INSERT INTO booking_document_records (
-      document_type,
+    INSERT INTO booking_records (
       booking_flow,
-      booking_id,
-      reference_number,
       payload,
       status,
       created_by_user_id,
@@ -375,35 +389,40 @@ async function insertBooking(client, { flow, payload, userId }) {
       created_at,
       updated_at
     ) VALUES (
-      'booking',
       $1,
-      NULL,
-      $2,
-      $3::jsonb,
+      $2::jsonb,
       'COMPLETED',
-      $4,
-      $4,
+      $3,
+      $3,
       NOW(),
       NOW()
     )
-    RETURNING id, document_type, booking_flow, reference_number, status
+    RETURNING id, 'booking'::text AS document_type, booking_flow,
+              booking_number AS reference_number, status
     `,
-    [flow, payload.bookingNumber, JSON.stringify(payload), userId],
+    [flow, JSON.stringify(payload), userId],
   );
   return result.rows[0];
 }
 
 async function insertChild(
   client,
-  { documentType, bookingId, referenceNumber, payload, userId },
+  { documentType, bookingId, payload, userId },
 ) {
+  const tableByType = {
+    an: ['arrival_notice_records', 'an_number'],
+    do: ['delivery_order_records', 'do_number'],
+    bl: ['bill_of_lading_records', 'fbl_number'],
+  };
+  const target = tableByType[documentType];
+  if (!target) {
+    throw new Error(`Unsupported child document type: ${documentType}`);
+  }
+  const [table, referenceColumn] = target;
   const result = await client.query(
     `
-    INSERT INTO booking_document_records (
-      document_type,
-      booking_flow,
+    INSERT INTO ${table} (
       booking_id,
-      reference_number,
       payload,
       status,
       created_by_user_id,
@@ -412,25 +431,17 @@ async function insertChild(
       updated_at
     ) VALUES (
       $1,
-      NULL,
-      $2,
-      $3,
-      $4::jsonb,
+      $2::jsonb,
       'COMPLETED',
-      $5,
-      $5,
+      $3,
+      $3,
       NOW(),
       NOW()
     )
-    RETURNING id, document_type, booking_id, reference_number, status
+    RETURNING id, '${documentType}'::text AS document_type, booking_id,
+              ${referenceColumn} AS reference_number, status
     `,
-    [
-      documentType,
-      bookingId,
-      referenceNumber,
-      JSON.stringify(payload),
-      userId,
-    ],
+    [bookingId, JSON.stringify(payload), userId],
   );
   return result.rows[0];
 }
@@ -448,22 +459,25 @@ async function main() {
     const schema = await client.query(`
     SELECT
       current_database() AS database,
-      to_regclass('public.booking_document_records') IS NOT NULL AS has_table,
-      EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public'
-          AND table_name = 'booking_document_records'
-          AND column_name = 'booking_flow'
-      ) AS has_booking_flow
+      to_regclass('public.booking_document_records') IS NOT NULL AS has_legacy_table,
+      to_regclass('public.booking_records') IS NOT NULL AS has_booking_table,
+      to_regclass('public.arrival_notice_records') IS NOT NULL AS has_an_table,
+      to_regclass('public.delivery_order_records') IS NOT NULL AS has_do_table,
+      to_regclass('public.bill_of_lading_records') IS NOT NULL AS has_bl_table
   `);
     const state = schema.rows[0];
-    if (!state?.has_table) {
-      throw new Error('booking_document_records table does not exist');
-    }
-    if (!state?.has_booking_flow) {
+    if (state?.has_legacy_table) {
       throw new Error(
-        'booking_flow column missing — run scripts/apply-booking-workflows.mjs first',
+        'Legacy booking_document_records schema detected; run the guarded four-table split migration first',
       );
+    }
+    if (
+      !state?.has_booking_table ||
+      !state?.has_an_table ||
+      !state?.has_do_table ||
+      !state?.has_bl_table
+    ) {
+      throw new Error('Four-table booking-document schema is incomplete');
     }
 
     const userId = await resolveUserId(client);

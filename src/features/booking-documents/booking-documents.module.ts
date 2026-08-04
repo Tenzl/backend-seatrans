@@ -1,17 +1,27 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { BookingDocumentRecordService } from './booking-document-record.service';
 import { BookingDocumentsAdminController } from './booking-documents-admin.controller';
-import { BookingDocumentHistoryService } from './booking-document-history.service';
 import { BookingDocumentPayloadValidator } from './booking-document-payload.validator';
 import { BookingDocumentsService } from './booking-documents.service';
-import { BookingDocumentRecord } from './entities/booking-document-record.entity';
+import { ArrivalNoticeRecord } from './entities/arrival-notice-record.entity';
+import { BillOfLadingRecord } from './entities/bill-of-lading-record.entity';
+import { BookingRecord } from './entities/booking-record.entity';
+import { DeliveryOrderRecord } from './entities/delivery-order-record.entity';
 import { BookingDocumentPdfRenderer } from './rendering/booking-document-pdf.renderer';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([BookingDocumentRecord])],
+  imports: [
+    TypeOrmModule.forFeature([
+      BookingRecord,
+      ArrivalNoticeRecord,
+      DeliveryOrderRecord,
+      BillOfLadingRecord,
+    ]),
+  ],
   controllers: [BookingDocumentsAdminController],
   providers: [
-    BookingDocumentHistoryService,
+    BookingDocumentRecordService,
     BookingDocumentPayloadValidator,
     BookingDocumentPdfRenderer,
     BookingDocumentsService,

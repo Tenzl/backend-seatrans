@@ -144,11 +144,17 @@ async function main() {
     const databaseCheck = await client.query(`
       SELECT
         current_database() AS database,
-        to_regclass('public.booking_document_records') IS NOT NULL AS has_table
+        to_regclass('public.booking_document_records') IS NOT NULL AS has_table,
+        to_regclass('public.booking_records') IS NOT NULL AS has_split_schema
     `);
     const databaseState = databaseCheck.rows[0];
     if (databaseState?.database !== args.targetDb) {
       throw new Error('Connected database does not match --target-db');
+    }
+    if (databaseState?.has_split_schema === true) {
+      throw new Error(
+        'apply-booking-workflows.mjs is obsolete after the four-table split',
+      );
     }
     if (databaseState?.has_table !== true) {
       throw new Error('booking_document_records table does not exist');

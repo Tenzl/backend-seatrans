@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { BookingDocumentHistoryService } from './booking-document-history.service';
+import { BookingDocumentRecordService } from './booking-document-record.service';
 import { BookingDocumentPayloadValidator } from './booking-document-payload.validator';
 import { BookingDocumentPreview } from './booking-document.types';
 import { UpsertBookingDocumentRecordDto } from './dto/upsert-booking-document-record.dto';
@@ -14,7 +14,7 @@ import { BookingDocumentPdfRenderer } from './rendering/booking-document-pdf.ren
 export class BookingDocumentsService {
   constructor(
     private readonly payloadValidator: BookingDocumentPayloadValidator,
-    private readonly historyService: BookingDocumentHistoryService,
+    private readonly recordService: BookingDocumentRecordService,
     private readonly pdfRenderer: BookingDocumentPdfRenderer,
   ) {}
 
@@ -29,7 +29,7 @@ export class BookingDocumentsService {
       type,
       payload,
     );
-    return this.historyService.create(
+    return this.recordService.create(
       type,
       validatedPayload,
       createdByUserId,
@@ -38,48 +38,60 @@ export class BookingDocumentsService {
     );
   }
 
-  async getRecord(id: number) {
-    return this.historyService.getById(id);
+  async getRecord(type: BookingDocumentType, id: number) {
+    return this.recordService.getById(type, id);
   }
 
   async getWorkflow(bookingId: number) {
-    return this.historyService.getWorkflow(bookingId);
+    return this.recordService.getWorkflow(bookingId);
   }
 
-  async updateRecord(id: number, body: unknown, actorUserId: number) {
-    const existing = await this.historyService.getById(id);
+  async updateRecord(
+    type: BookingDocumentType,
+    id: number,
+    body: unknown,
+    actorUserId: number,
+  ) {
     const { status, payload } = await this.parseUpsertBody(body);
     const validatedPayload = await this.payloadValidator.validate(
-      existing.documentType,
+      type,
       payload,
     );
-    return this.historyService.update(
+    return this.recordService.update(
+      type,
       id,
-      existing.documentType,
       validatedPayload,
       actorUserId,
       status,
     );
   }
 
-  async lockRecord(id: number, actorUserId: number) {
-    return this.historyService.lock(id, actorUserId);
+  async lockRecord(type: BookingDocumentType, id: number, actorUserId: number) {
+    return this.recordService.lock(type, id, actorUserId);
   }
 
-  async unlockRecord(id: number, actorUserId: number) {
-    return this.historyService.unlock(id, actorUserId);
+  async unlockRecord(
+    type: BookingDocumentType,
+    id: number,
+    actorUserId: number,
+  ) {
+    return this.recordService.unlock(type, id, actorUserId);
   }
 
-  async archiveRecord(id: number, actorUserId: number) {
-    return this.historyService.archive(id, actorUserId);
+  async archiveRecord(
+    type: BookingDocumentType,
+    id: number,
+    actorUserId: number,
+  ) {
+    return this.recordService.archive(type, id, actorUserId);
   }
 
-  async permanentDeleteRecord(id: number) {
-    return this.historyService.hardDelete(id);
+  async permanentDeleteRecord(type: BookingDocumentType, id: number) {
+    return this.recordService.hardDelete(type, id);
   }
 
-  listRecords(type?: BookingDocumentType, page = 0, size = 10) {
-    return this.historyService.list(type, page, size);
+  listRecords(type: BookingDocumentType, page = 0, size = 10) {
+    return this.recordService.list(type, page, size);
   }
 
   async createPreview(

@@ -1,3 +1,5 @@
+import { BadRequestException, ParseEnumPipe } from '@nestjs/common';
+import { PATH_METADATA } from '@nestjs/common/constants';
 import { BOOKING_DOCUMENT_SECTION } from './constants/booking-document.constants';
 import { BookingDocumentsAdminController } from './booking-documents-admin.controller';
 import { BookingDocumentsService } from './booking-documents.service';
@@ -62,13 +64,17 @@ describe('BookingDocumentsAdminController', () => {
     );
   });
 
-  it('lists paginated document history', async () => {
+  it('lists paginated records for the document type in the route', async () => {
     const listRecords = jest.fn().mockResolvedValue({ content: [] });
     const controller = new BookingDocumentsAdminController({
       listRecords,
     } as unknown as BookingDocumentsService);
 
-    await controller.history('booking', '2', '15');
+    await controller.listRecords(
+      BookingDocumentType.BOOKING_CONFIRMATION,
+      '2',
+      '15',
+    );
 
     expect(listRecords).toHaveBeenCalledWith(
       BookingDocumentType.BOOKING_CONFIRMATION,
@@ -77,14 +83,17 @@ describe('BookingDocumentsAdminController', () => {
     );
   });
 
-  it('loads a single document record by id', async () => {
+  it('loads a single document record by type and id', async () => {
     const getRecord = jest.fn().mockResolvedValue({ id: 9 });
     const controller = new BookingDocumentsAdminController({
       getRecord,
     } as unknown as BookingDocumentsService);
 
-    await controller.getRecord(9);
-    expect(getRecord).toHaveBeenCalledWith(9);
+    await controller.getRecord(BookingDocumentType.BILL_OF_LADING, 9);
+    expect(getRecord).toHaveBeenCalledWith(
+      BookingDocumentType.BILL_OF_LADING,
+      9,
+    );
   });
 
   it('updates, locks, unlocks, archives, and permanently deletes records', async () => {
@@ -102,23 +111,84 @@ describe('BookingDocumentsAdminController', () => {
     } as unknown as BookingDocumentsService);
 
     await controller.updateRecord(
+      BookingDocumentType.ARRIVAL_NOTICE,
       3,
       { anNumber: 'AN-3', status: 'COMPLETED' },
       { user: { id: 2 } } as never,
     );
-    await controller.lockRecord(3, { user: { id: 2 } } as never);
-    await controller.unlockRecord(3, { user: { id: 2 } } as never);
-    await controller.archiveRecord(3, { user: { id: 2 } } as never);
-    await controller.permanentDeleteRecord(3);
+    await controller.lockRecord(BookingDocumentType.ARRIVAL_NOTICE, 3, {
+      user: { id: 2 },
+    } as never);
+    await controller.unlockRecord(BookingDocumentType.ARRIVAL_NOTICE, 3, {
+      user: { id: 2 },
+    } as never);
+    await controller.archiveRecord(BookingDocumentType.ARRIVAL_NOTICE, 3, {
+      user: { id: 2 },
+    } as never);
+    await controller.permanentDeleteRecord(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      3,
+    );
 
     expect(updateRecord).toHaveBeenCalledWith(
+      BookingDocumentType.ARRIVAL_NOTICE,
       3,
       { anNumber: 'AN-3', status: 'COMPLETED' },
       2,
     );
-    expect(lockRecord).toHaveBeenCalledWith(3, 2);
-    expect(unlockRecord).toHaveBeenCalledWith(3, 2);
-    expect(archiveRecord).toHaveBeenCalledWith(3, 2);
-    expect(permanentDeleteRecord).toHaveBeenCalledWith(3);
+    expect(lockRecord).toHaveBeenCalledWith(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      3,
+      2,
+    );
+    expect(unlockRecord).toHaveBeenCalledWith(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      3,
+      2,
+    );
+    expect(archiveRecord).toHaveBeenCalledWith(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      3,
+      2,
+    );
+    expect(permanentDeleteRecord).toHaveBeenCalledWith(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      3,
+    );
+  });
+
+  it('requires the document type in every record route', () => {
+    const prototype = BookingDocumentsAdminController.prototype;
+    const pathFor = (
+      methodName: keyof BookingDocumentsAdminController,
+    ): unknown => {
+      const method = Object.getOwnPropertyDescriptor(prototype, methodName)
+        ?.value as object;
+      const path: unknown = Reflect.getMetadata(PATH_METADATA, method);
+      return path;
+    };
+
+    expect(pathFor('listRecords')).toBe(':type/records');
+    expect(pathFor('getRecord')).toBe(':type/records/:id');
+    expect(pathFor('createRecord')).toBe(':type/records');
+    expect(pathFor('updateRecord')).toBe(':type/records/:id');
+    expect(pathFor('lockRecord')).toBe(':type/records/:id/lock');
+    expect(pathFor('unlockRecord')).toBe(':type/records/:id/unlock');
+    expect(pathFor('archiveRecord')).toBe(':type/records/:id');
+    expect(pathFor('permanentDeleteRecord')).toBe(
+      ':type/records/:id/permanent',
+    );
+  });
+
+  it('rejects unsupported document types with the route enum parser', async () => {
+    const pipe = new ParseEnumPipe(BookingDocumentType);
+
+    await expect(
+      pipe.transform('unsupported', {
+        type: 'param',
+        metatype: String,
+        data: 'type',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

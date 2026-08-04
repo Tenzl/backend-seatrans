@@ -1,4 +1,4 @@
-import { degrees, PDFFont, PDFPage, rgb } from 'pdf-lib';
+import { PDFFont, PDFPage, rgb } from 'pdf-lib';
 import type { BillOfLadingPreviewDto } from '../dto/bill-of-lading-preview.dto';
 import type { BookingDocumentRenderContext } from './booking-document-render-context';
 
@@ -16,9 +16,11 @@ const FONT_SIZE_SMALL = 7.5;
 const FONT_SIZE_FBL = 10.5;
 const LINE_GAP = 1.15;
 const BLACK = rgb(0, 0, 0);
-const SURRENDERED_RED = rgb(0.72, 0.04, 0.06);
+const SURRENDERED_RED = rgb(1, 0, 0);
 const SURRENDERED_LABEL = 'SURRENDERED';
-const SURRENDERED_FONT_SIZE = 43;
+const SURRENDERED_FONT_SIZE = 22;
+const SURRENDERED_X = 350;
+const SURRENDERED_TOP = 270;
 
 type TopLeft = { x: number; top: number; maxWidth: number; maxLines?: number };
 
@@ -142,18 +144,12 @@ export function drawBillOfLadingSurrenderedMark(
   page: PDFPage,
   font: PDFFont,
 ): void {
-  const width = font.widthOfTextAtSize(
-    SURRENDERED_LABEL,
-    SURRENDERED_FONT_SIZE,
-  );
   page.drawText(SURRENDERED_LABEL, {
-    x: (BL_PAGE_WIDTH - width) / 2 - 18,
-    y: 445,
+    x: SURRENDERED_X,
+    y: pdfYFromTop(SURRENDERED_TOP, SURRENDERED_FONT_SIZE, font),
     size: SURRENDERED_FONT_SIZE,
     font,
     color: SURRENDERED_RED,
-    opacity: 0.42,
-    rotate: degrees(18),
   });
 }
 

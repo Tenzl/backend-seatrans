@@ -1,7 +1,6 @@
 import {
   Column,
   CreateDateColumn,
-  Entity,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -9,49 +8,18 @@ import {
 } from 'typeorm';
 import { User } from '../../auth/entities/user.entity';
 import { BookingDocumentStatus } from '../enums/booking-document-status.enum';
-import { BookingDocumentType } from '../enums/booking-document-type.enum';
-import { BookingFlow } from '../enums/booking-flow.enum';
 
-@Entity('booking_document_records')
-export class BookingDocumentRecord {
+/**
+ * Lifecycle fields shared by every persisted booking document.
+ *
+ * Concrete records intentionally use separate tables and independent bigint
+ * sequences. The editable payload remains the source of truth; searchable
+ * document fields on concrete entities are generated from it by PostgreSQL.
+ */
+export abstract class BookingDocumentRecordBase {
   @PrimaryGeneratedColumn('increment', { type: 'bigint' })
   id!: number;
 
-  @Column({ name: 'document_type', type: 'varchar', length: 20 })
-  documentType!: BookingDocumentType;
-
-  /** Direction for the root Booking record. Child documents derive it. */
-  @Column({
-    name: 'booking_flow',
-    type: 'varchar',
-    length: 10,
-    nullable: true,
-  })
-  bookingFlow!: BookingFlow | null;
-
-  /** Root Booking record that owns this AN / BL / D/O. */
-  @Column({ name: 'booking_id', type: 'bigint', nullable: true })
-  bookingId!: number | null;
-
-  @ManyToOne(() => BookingDocumentRecord, {
-    onDelete: 'CASCADE',
-    nullable: true,
-  })
-  @JoinColumn({ name: 'booking_id' })
-  booking?: BookingDocumentRecord | null;
-
-  @Column({
-    name: 'reference_number',
-    type: 'varchar',
-    length: 200,
-    nullable: true,
-  })
-  referenceNumber!: string | null;
-
-  /**
-   * Editable form snapshot used to reproduce the document PDF.
-   * Remains the source of truth for Create & Preview regeneration.
-   */
   @Column({ type: 'jsonb' })
   payload!: Record<string, unknown>;
 
@@ -82,11 +50,9 @@ export class BookingDocumentRecord {
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt!: Date;
 
-  /** When set, edits are frozen permanently (no unlock). */
   @Column({ name: 'locked_at', type: 'timestamptz', nullable: true })
   lockedAt!: Date | null;
 
-  /** Soft-archive timestamp. Hard delete removes the row. */
   @Column({ name: 'deleted_at', type: 'timestamptz', nullable: true })
   deletedAt!: Date | null;
 

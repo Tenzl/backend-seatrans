@@ -168,6 +168,7 @@ async function main() {
       SELECT
         current_database() AS database,
         to_regclass('public.booking_document_records') IS NOT NULL AS has_table,
+        to_regclass('public.booking_records') IS NOT NULL AS has_split_schema,
         EXISTS (
           SELECT 1 FROM information_schema.columns
           WHERE table_schema = 'public'
@@ -178,6 +179,11 @@ async function main() {
     const databaseState = databaseCheck.rows[0];
     if (databaseState?.database !== args.targetDb) {
       throw new Error('Connected database does not match --target-db');
+    }
+    if (databaseState?.has_split_schema === true) {
+      throw new Error(
+        'This legacy seed is disabled for the four-table schema; use seed-import-export-booking-forms.mjs',
+      );
     }
     if (databaseState?.has_table !== true) {
       throw new Error('booking_document_records table does not exist');

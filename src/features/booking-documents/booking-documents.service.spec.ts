@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { PDFDocument } from 'pdf-lib';
 import { BILL_OF_LADING_TEMPLATE_BY_VARIANT } from './constants/booking-document.constants';
-import { BookingDocumentHistoryService } from './booking-document-history.service';
+import { BookingDocumentRecordService } from './booking-document-record.service';
 import { BookingDocumentPayloadValidator } from './booking-document-payload.validator';
 import { BookingDocumentsService } from './booking-documents.service';
 import { BookingDocumentType } from './enums/booking-document-type.enum';
@@ -19,7 +19,12 @@ describe('BookingDocumentsService', () => {
     jest.clearAllMocks();
     service = new BookingDocumentsService(
       new BookingDocumentPayloadValidator(),
-      new BookingDocumentHistoryService(recordRepository as never),
+      new BookingDocumentRecordService(
+        recordRepository as never,
+        recordRepository as never,
+        recordRepository as never,
+        recordRepository as never,
+      ),
       new BookingDocumentPdfRenderer(),
     );
   });
@@ -44,10 +49,7 @@ describe('BookingDocumentsService', () => {
     );
 
     expect(recordRepository.create).toHaveBeenCalledWith({
-      documentType: BookingDocumentType.ARRIVAL_NOTICE,
-      bookingFlow: null,
       bookingId: null,
-      referenceNumber: 'AN-001',
       payload: { anNumber: 'AN-001' },
       status: 'PROCESSING',
       createdByUserId: 9,
@@ -100,14 +102,14 @@ describe('BookingDocumentsService', () => {
 
     expect(recordRepository.findAndCount).toHaveBeenCalledTimes(1);
     expect(findOptions).toMatchObject({
-      where: {
-        documentType: BookingDocumentType.DELIVERY_ORDER,
-      },
       relations: { createdBy: true },
       order: { createdAt: 'DESC', id: 'DESC' },
       skip: 0,
       take: 10,
     });
+    expect(
+      (findOptions as { where?: { deletedAt?: unknown } }).where?.deletedAt,
+    ).toBeDefined();
     expect(result).toMatchObject({
       totalElements: 1,
       totalPages: 1,

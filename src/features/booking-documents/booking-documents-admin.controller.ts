@@ -34,27 +34,27 @@ type AuthenticatedRequest = Request & {
 export class BookingDocumentsAdminController {
   constructor(private readonly bookingDocuments: BookingDocumentsService) {}
 
-  @Get('records')
-  history(
-    @Query('type') type?: string,
+  @Get(':type/records')
+  listRecords(
+    @Param('type', new ParseEnumPipe(BookingDocumentType))
+    type: BookingDocumentType,
     @Query('page') page = '0',
     @Query('size') size = '10',
   ) {
-    const supportedTypes: string[] = Object.values(BookingDocumentType);
-    if (type && !supportedTypes.includes(type)) {
-      throw new BadRequestException(`Unsupported document type: ${type}`);
-    }
-    const documentType = type as BookingDocumentType | undefined;
     return this.bookingDocuments.listRecords(
-      documentType,
+      type,
       this.toInteger(page, 0),
       this.toInteger(size, 10),
     );
   }
 
-  @Get('records/:id')
-  getRecord(@Param('id', ParseIntPipe) id: number) {
-    return this.bookingDocuments.getRecord(id);
+  @Get(':type/records/:id')
+  getRecord(
+    @Param('type', new ParseEnumPipe(BookingDocumentType))
+    type: BookingDocumentType,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.bookingDocuments.getRecord(type, id);
   }
 
   @Get('bookings/:id/workflow')
@@ -77,66 +77,80 @@ export class BookingDocumentsAdminController {
     );
   }
 
-  @Put('records/:id')
+  @Put(':type/records/:id')
   updateRecord(
+    @Param('type', new ParseEnumPipe(BookingDocumentType))
+    type: BookingDocumentType,
     @Param('id', ParseIntPipe) id: number,
     @Body() body: unknown,
     @Req() request: AuthenticatedRequest,
   ) {
     return this.bookingDocuments.updateRecord(
+      type,
       id,
       body,
       this.requireActorUserId(request),
     );
   }
 
-  @Post('records/:id/lock')
+  @Post(':type/records/:id/lock')
   lockRecord(
+    @Param('type', new ParseEnumPipe(BookingDocumentType))
+    type: BookingDocumentType,
     @Param('id', ParseIntPipe) id: number,
     @Req() request: AuthenticatedRequest,
   ) {
     return this.bookingDocuments.lockRecord(
+      type,
       id,
       this.requireActorUserId(request),
     );
   }
 
   /** Admin-only: clear lock so staff can edit the form again. */
-  @Post('records/:id/unlock')
+  @Post(':type/records/:id/unlock')
   @ApiAdminOnly()
   unlockRecord(
+    @Param('type', new ParseEnumPipe(BookingDocumentType))
+    type: BookingDocumentType,
     @Param('id', ParseIntPipe) id: number,
     @Req() request: AuthenticatedRequest,
   ) {
     return this.bookingDocuments.unlockRecord(
+      type,
       id,
       this.requireActorUserId(request),
     );
   }
 
   /** Soft-archive for staff (and admin). */
-  @Delete('records/:id')
+  @Delete(':type/records/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async archiveRecord(
+    @Param('type', new ParseEnumPipe(BookingDocumentType))
+    type: BookingDocumentType,
     @Param('id', ParseIntPipe) id: number,
     @Req() request: AuthenticatedRequest,
   ): Promise<void> {
     await this.bookingDocuments.archiveRecord(
+      type,
       id,
       this.requireActorUserId(request),
     );
   }
 
-  @Delete('records/:id/permanent')
+  @Delete(':type/records/:id/permanent')
   @HttpCode(HttpStatus.NO_CONTENT)
   @PermanentDelete({
     resourceType: 'booking_document_record',
     idSource: { kind: 'param', key: 'id' },
   })
   async permanentDeleteRecord(
+    @Param('type', new ParseEnumPipe(BookingDocumentType))
+    type: BookingDocumentType,
     @Param('id', ParseIntPipe) id: number,
   ): Promise<void> {
-    await this.bookingDocuments.permanentDeleteRecord(id);
+    await this.bookingDocuments.permanentDeleteRecord(type, id);
   }
 
   @Post(':type/preview')
