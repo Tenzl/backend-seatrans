@@ -44,21 +44,8 @@ export class BillOfLadingPreviewDto {
 
   @PreviewText(2_000) deliveryApplyTo?: string;
 
-  /**
-   * Which blank BL form PNG to overlay.
-   * Defaults to non_negotiable; legacy `showSurrendered=yes` maps to surrendered.
-   */
+  /** Which blank BL form PNG to overlay. Defaults to non_negotiable. */
   @IsOptional()
   @IsIn([...BILL_OF_LADING_FORM_VARIANTS])
   blFormVariant?: (typeof BILL_OF_LADING_FORM_VARIANTS)[number];
-
-  /** @deprecated Prefer blFormVariant=`surrendered` (blank template). Kept for legacy payloads. */
-  @IsOptional()
-  @IsIn(['', 'yes'])
-  showSurrendered?: '' | 'yes';
-
-  /** @deprecated Signature is always drawn. Kept for legacy payloads. */
-  @IsOptional()
-  @IsIn(['', 'yes'])
-  includeCompanyStamp?: '' | 'yes';
 }

@@ -9,7 +9,7 @@ export const BOOKING_DOCUMENT_FILENAMES: Record<BookingDocumentType, string> = {
   [BookingDocumentType.BILL_OF_LADING]: 'BL-preview.pdf',
 };
 
-/** PDF blank templates for drawn documents. BL uses a PNG overlay instead. */
+/** PDF blank templates for drawn documents. BL uses a JPEG overlay instead. */
 export const BOOKING_DOCUMENT_TEMPLATES: Partial<
   Record<BookingDocumentType, string>
 > = {
@@ -27,18 +27,14 @@ export const BILL_OF_LADING_FORM_VARIANTS = [
 export type BillOfLadingFormVariant =
   (typeof BILL_OF_LADING_FORM_VARIANTS)[number];
 
-/** Blank PNG templates under `assets/templates/`. */
+/** Optimized JPEG blank templates under `assets/templates/`. */
 export const BILL_OF_LADING_TEMPLATE_BY_VARIANT: Record<
   BillOfLadingFormVariant,
   string
 > = {
-  non_negotiable: 'bl-non-negotiable.png',
-  original: 'bl-original.png',
-  surrendered: 'bl-surrendered.png',
+  non_negotiable: 'bl-non-negotiable.jpg',
+  original: 'bl-original.jpg',
+  surrendered: 'bl-original.jpg',
 };
-
-/** @deprecated Prefer BILL_OF_LADING_TEMPLATE_BY_VARIANT */
-export const BILL_OF_LADING_TEMPLATE_PNG =
-  BILL_OF_LADING_TEMPLATE_BY_VARIANT.non_negotiable;
 
 export const BILL_OF_LADING_AUTHOR_SIGNATURE_PNG = 'authorSignature-nobg.png';

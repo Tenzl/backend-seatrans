@@ -7,6 +7,7 @@ import { BookingDocumentPreview } from './booking-document.types';
 import { UpsertBookingDocumentRecordDto } from './dto/upsert-booking-document-record.dto';
 import { BookingDocumentStatus } from './enums/booking-document-status.enum';
 import { BookingDocumentType } from './enums/booking-document-type.enum';
+import { BookingFlow } from './enums/booking-flow.enum';
 import { BookingDocumentPdfRenderer } from './rendering/booking-document-pdf.renderer';
 
 @Injectable()
@@ -22,7 +23,8 @@ export class BookingDocumentsService {
     body: unknown,
     createdByUserId: number,
   ) {
-    const { status, payload } = await this.parseUpsertBody(body);
+    const { status, bookingFlow, bookingId, payload } =
+      await this.parseUpsertBody(body);
     const validatedPayload = await this.payloadValidator.validate(
       type,
       payload,
@@ -32,11 +34,16 @@ export class BookingDocumentsService {
       validatedPayload,
       createdByUserId,
       status ?? BookingDocumentStatus.PROCESSING,
+      { bookingFlow, bookingId },
     );
   }
 
   async getRecord(id: number) {
     return this.historyService.getById(id);
+  }
+
+  async getWorkflow(bookingId: number) {
+    return this.historyService.getWorkflow(bookingId);
   }
 
   async updateRecord(id: number, body: unknown, actorUserId: number) {
@@ -88,19 +95,25 @@ export class BookingDocumentsService {
 
   private async parseUpsertBody(body: unknown): Promise<{
     status?: BookingDocumentStatus;
+    bookingFlow?: BookingFlow;
+    bookingId?: number;
     payload: unknown;
   }> {
     if (typeof body !== 'object' || body === null || Array.isArray(body)) {
       throw new BadRequestException('Request body must be an object');
     }
 
-    const { status: rawStatus, ...payload } = body as Record<string, unknown>;
-    if (rawStatus === undefined) {
-      return { payload };
-    }
+    const {
+      status: rawStatus,
+      bookingFlow: rawBookingFlow,
+      bookingId: rawBookingId,
+      ...payload
+    } = body as Record<string, unknown>;
 
     const envelope = plainToInstance(UpsertBookingDocumentRecordDto, {
       status: rawStatus,
+      bookingFlow: rawBookingFlow,
+      bookingId: rawBookingId,
     });
     const errors = await validate(envelope, {
       whitelist: true,
@@ -111,13 +124,20 @@ export class BookingDocumentsService {
         message: 'Request validation failed',
         details: [
           {
-            field: 'status',
-            message: 'status must be PROCESSING or COMPLETED',
+            field: errors[0]?.property ?? 'metadata',
+            message:
+              Object.values(errors[0]?.constraints ?? {})[0] ??
+              'Invalid booking workflow metadata',
           },
         ],
       });
     }
 
-    return { status: envelope.status, payload };
+    return {
+      status: envelope.status,
+      bookingFlow: envelope.bookingFlow,
+      bookingId: envelope.bookingId,
+      payload,
+    };
   }
 }

@@ -102,6 +102,8 @@ export class PortsQuery {
       id: port.id,
       name: port.name,
       provinceName: port.province?.name ?? null,
+      code: port.code ?? null,
+      countryCode: port.countryCode ?? null,
     }));
   }
 

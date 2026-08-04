@@ -112,8 +112,13 @@ describe('privileged authorization contract', () => {
   );
 
   it('reserves booking-document unlock for ROLE_ADMIN', () => {
+    const prototype =
+      BookingDocumentsAdminController.prototype as unknown as Record<
+        string,
+        object
+      >;
     const roles = reflector.getAllAndOverride<string[]>(ROLES_KEY, [
-      BookingDocumentsAdminController.prototype.unlockRecord,
+      prototype.unlockRecord,
       BookingDocumentsAdminController,
     ]);
     expect(roles).toEqual(['ROLE_ADMIN']);

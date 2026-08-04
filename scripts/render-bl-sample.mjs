@@ -34,8 +34,7 @@ const payload = {
   cargoInsurance: 'not_covered',
   deliveryApplyTo:
     'APEX INTERNATIONAL INC.\n7F, TOYOKUNI BLDG, 2-4-6, SHIBA-DAIMON, MINATO-KU, TOKYO 105-0012 JAPAN\nTEL: 81-3-5408-3733 FAX: 81-3-5408-3589',
-  showSurrendered: 'yes',
-  includeCompanyStamp: 'yes',
+  blFormVariant: 'surrendered',
 }
 
 const preview = await renderer.render('bl', payload)

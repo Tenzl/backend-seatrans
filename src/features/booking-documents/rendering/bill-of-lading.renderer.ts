@@ -1,4 +1,4 @@
-import { PDFFont, PDFPage, rgb } from 'pdf-lib';
+import { degrees, PDFFont, PDFPage, rgb } from 'pdf-lib';
 import type { BillOfLadingPreviewDto } from '../dto/bill-of-lading-preview.dto';
 import type { BookingDocumentRenderContext } from './booking-document-render-context';
 
@@ -16,6 +16,9 @@ const FONT_SIZE_SMALL = 7.5;
 const FONT_SIZE_FBL = 10.5;
 const LINE_GAP = 1.15;
 const BLACK = rgb(0, 0, 0);
+const SURRENDERED_RED = rgb(0.72, 0.04, 0.06);
+const SURRENDERED_LABEL = 'SURRENDERED';
+const SURRENDERED_FONT_SIZE = 43;
 
 type TopLeft = { x: number; top: number; maxWidth: number; maxLines?: number };
 
@@ -125,18 +128,32 @@ function drawBoxText(
   });
 }
 
-function drawCheckMark(
-  page: PDFPage,
-  font: PDFFont,
-  x: number,
-  top: number,
-) {
+function drawCheckMark(page: PDFPage, font: PDFFont, x: number, top: number) {
   page.drawText('X', {
     x,
     y: pdfYFromTop(top, FONT_SIZE, font),
     size: FONT_SIZE,
     font,
     color: BLACK,
+  });
+}
+
+export function drawBillOfLadingSurrenderedMark(
+  page: PDFPage,
+  font: PDFFont,
+): void {
+  const width = font.widthOfTextAtSize(
+    SURRENDERED_LABEL,
+    SURRENDERED_FONT_SIZE,
+  );
+  page.drawText(SURRENDERED_LABEL, {
+    x: (BL_PAGE_WIDTH - width) / 2 - 18,
+    y: 445,
+    size: SURRENDERED_FONT_SIZE,
+    font,
+    color: SURRENDERED_RED,
+    opacity: 0.42,
+    rotate: degrees(18),
   });
 }
 
@@ -152,6 +169,10 @@ export function renderBillOfLading(
   const page = context.pdf.getPage(0);
   const font = context.regular;
   const bold = context.bold;
+
+  if (payload.blFormVariant === 'surrendered') {
+    drawBillOfLadingSurrenderedMark(page, bold);
+  }
 
   drawBoxText(page, bold, payload.fblNumber, BOX.fblNumber, FONT_SIZE_FBL);
   drawBoxText(page, font, payload.consignor, BOX.consignor);
@@ -207,12 +228,7 @@ export function renderBillOfLading(
       BOX.insuranceNotCovered.top,
     );
   } else if (payload.cargoInsurance === 'covered') {
-    drawCheckMark(
-      page,
-      bold,
-      BOX.insuranceCovered.x,
-      BOX.insuranceCovered.top,
-    );
+    drawCheckMark(page, bold, BOX.insuranceCovered.x, BOX.insuranceCovered.top);
   }
 
   if (context.managerStamp) {

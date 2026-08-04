@@ -29,7 +29,6 @@ import {
   drawTextBlock,
   finishCargoAndAttentionPage,
   FRAME_TEXT_INSET,
-  LabelValuePair,
   measureTextHeight,
 } from './pdf-layout';
 

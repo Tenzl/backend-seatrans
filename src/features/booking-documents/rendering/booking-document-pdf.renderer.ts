@@ -29,12 +29,14 @@ import { renderDeliveryOrder } from './delivery-order.renderer';
 
 @Injectable()
 export class BookingDocumentPdfRenderer {
+  private readonly assetCache = new Map<string, Promise<Buffer>>();
+
   async render(
     type: BookingDocumentType,
     payload: BookingDocumentPayload,
   ): Promise<BookingDocumentPreview> {
     if (type === BookingDocumentType.BILL_OF_LADING) {
-      return this.renderBillOfLading(payload as BillOfLadingPreviewDto);
+      return this.renderBillOfLading(payload);
     }
 
     const pdf = await this.openTemplate(type);
@@ -94,10 +96,6 @@ export class BookingDocumentPdfRenderer {
     ) {
       return payload.blFormVariant;
     }
-    // Legacy payloads used a red text stamp instead of the surrendered blank.
-    if (payload.showSurrendered === 'yes') {
-      return 'surrendered';
-    }
     return 'non_negotiable';
   }
 
@@ -108,10 +106,8 @@ export class BookingDocumentPdfRenderer {
     pdf.registerFontkit(fontkit);
     const page = pdf.addPage([BL_PAGE_WIDTH, BL_PAGE_HEIGHT]);
 
-    const templateFile =
-      BILL_OF_LADING_TEMPLATE_BY_VARIANT[
-        this.resolveBillOfLadingVariant(payload)
-      ];
+    const variant = this.resolveBillOfLadingVariant(payload);
+    const templateFile = BILL_OF_LADING_TEMPLATE_BY_VARIANT[variant];
 
     const [regularBytes, boldBytes, templateBytes, signatureBytes] =
       await Promise.all([
@@ -123,7 +119,7 @@ export class BookingDocumentPdfRenderer {
 
     const regular = await pdf.embedFont(regularBytes, { subset: true });
     const bold = await pdf.embedFont(boldBytes, { subset: true });
-    const template = await pdf.embedPng(templateBytes);
+    const template = await pdf.embedJpg(templateBytes);
     const managerStamp = await pdf.embedPng(signatureBytes);
 
     page.drawImage(template, {
@@ -160,6 +156,17 @@ export class BookingDocumentPdfRenderer {
   }
 
   private readAsset(...segments: string[]): Promise<Buffer> {
-    return readFile(join(__dirname, '..', 'assets', ...segments));
+    const assetPath = join(__dirname, '..', 'assets', ...segments);
+    const cached = this.assetCache.get(assetPath);
+    if (cached) {
+      return cached;
+    }
+
+    const loading = readFile(assetPath).catch((error: unknown) => {
+      this.assetCache.delete(assetPath);
+      throw error;
+    });
+    this.assetCache.set(assetPath, loading);
+    return loading;
   }
 }

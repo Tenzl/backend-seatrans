@@ -10,6 +10,7 @@ import {
 import { User } from '../../auth/entities/user.entity';
 import { BookingDocumentStatus } from '../enums/booking-document-status.enum';
 import { BookingDocumentType } from '../enums/booking-document-type.enum';
+import { BookingFlow } from '../enums/booking-flow.enum';
 
 @Entity('booking_document_records')
 export class BookingDocumentRecord {
@@ -18,6 +19,26 @@ export class BookingDocumentRecord {
 
   @Column({ name: 'document_type', type: 'varchar', length: 20 })
   documentType!: BookingDocumentType;
+
+  /** Direction for the root Booking record. Child documents derive it. */
+  @Column({
+    name: 'booking_flow',
+    type: 'varchar',
+    length: 10,
+    nullable: true,
+  })
+  bookingFlow!: BookingFlow | null;
+
+  /** Root Booking record that owns this AN / BL / D/O. */
+  @Column({ name: 'booking_id', type: 'bigint', nullable: true })
+  bookingId!: number | null;
+
+  @ManyToOne(() => BookingDocumentRecord, {
+    onDelete: 'CASCADE',
+    nullable: true,
+  })
+  @JoinColumn({ name: 'booking_id' })
+  booking?: BookingDocumentRecord | null;
 
   @Column({
     name: 'reference_number',

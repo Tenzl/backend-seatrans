@@ -162,8 +162,7 @@ export function drawMetaHeaderRow(
       width: valueWidth,
       size: DOC_BODY_TEXT_SIZE,
     });
-    const cellBottom =
-      (cell.value?.trim() ? valueBottom : labelY) - pad;
+    const cellBottom = (cell.value?.trim() ? valueBottom : labelY) - pad;
     deepest = Math.min(deepest, cellBottom);
   }
 
@@ -221,7 +220,12 @@ export function drawLabeledBlock(
     opts.top < tightTop - DOC_LABEL_GAP * 2
       ? tightTop
       : Math.min(opts.top, tightTop);
-  const contentH = measureTextHeight(opts.value, regular, valueSize, opts.width);
+  const contentH = measureTextHeight(
+    opts.value,
+    regular,
+    valueSize,
+    opts.width,
+  );
   const contentBottom = drawTextBlock(page, regular, bold, opts.value, {
     x: opts.x,
     top: valueTop,
@@ -299,13 +303,7 @@ export function drawPairedLabeledBlocks(
 
   const sectionBottom = valueTop - height - pad;
   // Mid divider for this pair only (Notify/Note, Marks/Volume, …).
-  drawRule(
-    page,
-    DOC_FRAME_MID,
-    opts.sectionTop,
-    DOC_FRAME_MID,
-    sectionBottom,
-  );
+  drawRule(page, DOC_FRAME_MID, opts.sectionTop, DOC_FRAME_MID, sectionBottom);
   return sectionBottom;
 }
 
@@ -324,8 +322,7 @@ export function columnValueLayout(
   font: PDFFont,
   size: number = DETAIL_LABEL_SIZE,
 ): { valueX: number; valueWidth: number } {
-  const valueX =
-    labelX + maxLabelWidth(labels, font, size) + LABEL_VALUE_GAP;
+  const valueX = labelX + maxLabelWidth(labels, font, size) + LABEL_VALUE_GAP;
   return { valueX, valueWidth: Math.max(40, valueRight - valueX) };
 }
 
@@ -665,8 +662,7 @@ export function measureAttentionBandHeight(
   options: AttentionBandOptions = {},
 ): number {
   const x = DOC_FRAME_LEFT + FRAME_TEXT_INSET;
-  const width =
-    options.width ?? DOC_FRAME_RIGHT - FRAME_TEXT_INSET - x;
+  const width = options.width ?? DOC_FRAME_RIGHT - FRAME_TEXT_INSET - x;
   const bodyH = contentAwareHeight(
     measureTextHeight(options.text, regular, DOC_BODY_TEXT_SIZE, width),
     options.emptyMinHeight ?? 0,
@@ -779,8 +775,7 @@ export function drawAttentionBand(
 ): number {
   const pageFloor = options.pageFloor ?? 48;
   const x = DOC_FRAME_LEFT + FRAME_TEXT_INSET;
-  const width =
-    options.width ?? DOC_FRAME_RIGHT - FRAME_TEXT_INSET - x;
+  const width = options.width ?? DOC_FRAME_RIGHT - FRAME_TEXT_INSET - x;
   const pad = DOC_CELL_PAD;
 
   const labelY = options.top - pad - DOC_SECTION_LABEL_SIZE;
@@ -895,7 +890,13 @@ export function addCargoContinuationPages(
         color: BLACK,
       }),
     );
-    drawRule(page, columns[0], headerTop, columns[columns.length - 1], headerTop);
+    drawRule(
+      page,
+      columns[0],
+      headerTop,
+      columns[columns.length - 1],
+      headerTop,
+    );
     drawRule(page, columns[0], bodyTop, columns[columns.length - 1], bodyTop);
 
     const batch: CargoRowDto[] = [];
@@ -1037,7 +1038,7 @@ export function finishCargoAndAttentionPage(
 
   const needed = measureAttentionBandHeight(regular, attentionOpts);
   let remaining = opts.cargoRows ?? [];
-  let anchorTop = opts.marksBottom;
+  const anchorTop = opts.marksBottom;
 
   const cargoNeed = headerHeight + minRowHeight;
   const canFitCargo =
@@ -1121,9 +1122,10 @@ export function measureTextHeight(
   font: PDFFont,
   size: number,
   width: number,
+  lineHeightFactor = 1.2,
 ): number {
   if (!text?.trim()) return 0;
-  const lineHeight = size * 1.2;
+  const lineHeight = size * lineHeightFactor;
   const lines = wrapText(text.trim(), font, size, width).length;
   // Descent ≈ 0.2·size; keep 0.25·size so hairlines clear glyphs.
   return lines * lineHeight + size * 0.25;
@@ -1146,13 +1148,22 @@ export function drawTextBlock(
     minHeight?: number;
     size?: number;
     bold?: boolean;
+    /** Multiplier on font size for inter-line spacing (default 1.2). */
+    lineHeightFactor?: number;
     color?: ReturnType<typeof rgb>;
   },
 ): number {
   const size = box.size ?? DOC_BODY_TEXT_SIZE;
   const font = box.bold ? bold : regular;
-  const lineHeight = size * 1.2;
-  const contentHeight = measureTextHeight(value, font, size, box.width);
+  const lineHeightFactor = box.lineHeightFactor ?? 1.2;
+  const lineHeight = size * lineHeightFactor;
+  const contentHeight = measureTextHeight(
+    value,
+    font,
+    size,
+    box.width,
+    lineHeightFactor,
+  );
   const height = contentAwareHeight(contentHeight, box.minHeight ?? 0);
   const bottomY = box.top - height;
 

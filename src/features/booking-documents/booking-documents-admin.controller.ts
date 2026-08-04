@@ -57,6 +57,11 @@ export class BookingDocumentsAdminController {
     return this.bookingDocuments.getRecord(id);
   }
 
+  @Get('bookings/:id/workflow')
+  getWorkflow(@Param('id', ParseIntPipe) id: number) {
+    return this.bookingDocuments.getWorkflow(id);
+  }
+
   @Post(':type/records')
   @HttpCode(HttpStatus.CREATED)
   createRecord(

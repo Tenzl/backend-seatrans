@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { PDFDocument } from 'pdf-lib';
+import { BILL_OF_LADING_TEMPLATE_BY_VARIANT } from './constants/booking-document.constants';
 import { BookingDocumentHistoryService } from './booking-document-history.service';
 import { BookingDocumentPayloadValidator } from './booking-document-payload.validator';
 import { BookingDocumentsService } from './booking-documents.service';
@@ -44,6 +45,8 @@ describe('BookingDocumentsService', () => {
 
     expect(recordRepository.create).toHaveBeenCalledWith({
       documentType: BookingDocumentType.ARRIVAL_NOTICE,
+      bookingFlow: null,
+      bookingId: null,
       referenceNumber: 'AN-001',
       payload: { anNumber: 'AN-001' },
       status: 'PROCESSING',
@@ -62,28 +65,32 @@ describe('BookingDocumentsService', () => {
   });
 
   it('returns paginated records newest first', async () => {
-    recordRepository.findAndCount.mockResolvedValue([
-      [
-        {
-          id: 8,
-          documentType: BookingDocumentType.DELIVERY_ORDER,
-          referenceNumber: 'DO-008',
-          payload: { doNumber: 'DO-008' },
-          status: 'COMPLETED',
-          createdByUserId: 3,
-          createdAt: new Date('2026-07-29T09:00:00.000Z'),
-          updatedAt: new Date('2026-07-29T09:00:00.000Z'),
-          lockedAt: null,
-          deletedAt: null,
-          createdBy: {
-            id: 3,
-            fullName: 'Operator',
-            email: 'operator@seatrans.test',
+    let findOptions: unknown;
+    recordRepository.findAndCount.mockImplementation((options: unknown) => {
+      findOptions = options;
+      return Promise.resolve([
+        [
+          {
+            id: 8,
+            documentType: BookingDocumentType.DELIVERY_ORDER,
+            referenceNumber: 'DO-008',
+            payload: { doNumber: 'DO-008' },
+            status: 'COMPLETED',
+            createdByUserId: 3,
+            createdAt: new Date('2026-07-29T09:00:00.000Z'),
+            updatedAt: new Date('2026-07-29T09:00:00.000Z'),
+            lockedAt: null,
+            deletedAt: null,
+            createdBy: {
+              id: 3,
+              fullName: 'Operator',
+              email: 'operator@seatrans.test',
+            },
           },
-        },
-      ],
-      1,
-    ]);
+        ],
+        1,
+      ]);
+    });
 
     const result = await service.listRecords(
       BookingDocumentType.DELIVERY_ORDER,
@@ -91,17 +98,16 @@ describe('BookingDocumentsService', () => {
       10,
     );
 
-    expect(recordRepository.findAndCount).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          documentType: BookingDocumentType.DELIVERY_ORDER,
-        }),
-        relations: { createdBy: true },
-        order: { createdAt: 'DESC', id: 'DESC' },
-        skip: 0,
-        take: 10,
-      }),
-    );
+    expect(recordRepository.findAndCount).toHaveBeenCalledTimes(1);
+    expect(findOptions).toMatchObject({
+      where: {
+        documentType: BookingDocumentType.DELIVERY_ORDER,
+      },
+      relations: { createdBy: true },
+      order: { createdAt: 'DESC', id: 'DESC' },
+      skip: 0,
+      take: 10,
+    });
     expect(result).toMatchObject({
       totalElements: 1,
       totalPages: 1,
@@ -133,6 +139,18 @@ describe('BookingDocumentsService', () => {
     expect(result.data.subarray(0, 5).toString('ascii')).toBe('%PDF-');
     const pdf = await PDFDocument.load(result.data);
     expect(pdf.getPageCount()).toBe(1);
+  });
+
+  it('builds Surrendered from the Original blank', async () => {
+    expect(BILL_OF_LADING_TEMPLATE_BY_VARIANT.surrendered).toBe(
+      BILL_OF_LADING_TEMPLATE_BY_VARIANT.original,
+    );
+
+    const result = await service.createPreview(
+      BookingDocumentType.BILL_OF_LADING,
+      { blFormVariant: 'surrendered' },
+    );
+    await expect(PDFDocument.load(result.data)).resolves.toBeDefined();
   });
 
   it('embeds Vietnamese Unicode text', async () => {

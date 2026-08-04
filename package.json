@@ -27,7 +27,9 @@
     "db:migrate:relational-integrity": "node scripts/run-relational-integrity-expand.mjs",
     "db:migrate:roles-name-uniqueness": "node scripts/run-roles-name-uniqueness-migration.mjs",
     "db:migrate:users-identity": "node scripts/run-users-identity-uniqueness-migration.mjs",
-    "db:migrate:customer-id-sequences": "node scripts/run-customer-id-sequences-migration.mjs"
+    "db:migrate:customer-id-sequences": "node scripts/run-customer-id-sequences-migration.mjs",
+    "db:migrate:booking-workflows": "node scripts/apply-booking-workflows.mjs",
+    "db:seed:import-export-forms": "node scripts/seed-import-export-booking-forms.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1081.0",
