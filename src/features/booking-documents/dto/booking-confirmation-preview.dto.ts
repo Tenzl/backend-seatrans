@@ -1,27 +1,11 @@
-import { IsBoolean, IsIn, IsInt, IsOptional, Min } from 'class-validator';
+import { IsInt, IsOptional, Min } from 'class-validator';
 import { PreviewText } from './preview-text.decorator';
 
 export class BookingConfirmationPreviewDto {
   @PreviewText(100) date?: string;
   @PreviewText(200) bookingNumber?: string;
   @PreviewText(2_000) to?: string;
-  @PreviewText(2_000) shipper?: string;
-  @IsOptional() @IsInt() @Min(1) shipperPartyId?: number;
-  @PreviewText(2_000) agent?: string;
-  @IsOptional() @IsInt() @Min(1) agentPartyId?: number;
-  @PreviewText(2_000) consignee?: string;
-  @IsOptional() @IsInt() @Min(1) consigneePartyId?: number;
-  @PreviewText(2_000) notifyParty?: string;
-  @IsOptional() @IsInt() @Min(1) notifyPartyId?: number;
-  @IsOptional() @IsBoolean() notifyPartySameAsConsignee?: boolean;
-  @IsOptional()
-  @IsIn([
-    'NONE',
-    'SAME_AS_SHIPPER',
-    'SAME_AS_NOTIFY_PARTY',
-    'SAME_AS_CONSIGNEE',
-  ])
-  billToMode?: string;
+  @IsOptional() @IsInt() @Min(1) clientPartyId?: number;
   @PreviewText(300) vesselVoyage?: string;
   @PreviewText(100) etd?: string;
   @PreviewText(100) eta?: string;

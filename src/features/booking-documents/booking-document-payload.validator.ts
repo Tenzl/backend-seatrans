@@ -16,6 +16,7 @@ import { BookingDocumentType } from './enums/booking-document-type.enum';
 type PayloadClass = new () => BookingDocumentPayload;
 
 type PartyPayload = BookingDocumentPayload & {
+  clientPartyId?: number | null;
   agent?: string;
   agentPartyId?: number | null;
   shipper?: string;
@@ -27,8 +28,8 @@ type PartyPayload = BookingDocumentPayload & {
   consignor?: string;
   consignedToOrderOf?: string;
   notifyAddress?: string;
+  deliverTo?: string;
   notifyPartySameAsConsignee?: boolean;
-  billToMode?: string;
   to?: string;
 };
 
@@ -85,13 +86,16 @@ export class BookingDocumentPayloadValidator {
     if (!this.partnerRepository) return;
 
     const ids = [
+      payload.clientPartyId,
       payload.agentPartyId,
       payload.shipperPartyId,
       payload.consigneePartyId,
       payload.notifyPartyId,
     ].filter((id): id is number => typeof id === 'number');
     if (ids.length === 0) {
-      this.normalizeSameAs(payload);
+      if (type === BookingDocumentType.ARRIVAL_NOTICE) {
+        this.normalizeSameAs(payload);
+      }
       return;
     }
 
@@ -132,10 +136,14 @@ export class BookingDocumentPayloadValidator {
       (payload[textKey] as string | undefined) = this.formatParty(partner);
     };
 
-    if (
-      type === BookingDocumentType.BOOKING_CONFIRMATION ||
-      type === BookingDocumentType.ARRIVAL_NOTICE
-    ) {
+    if (type === BookingDocumentType.BOOKING_CONFIRMATION) {
+      normalize(
+        payload.clientPartyId,
+        'Client',
+        'to',
+        PartnerAdditionType.CUSTOMER,
+      );
+    } else if (type === BookingDocumentType.ARRIVAL_NOTICE) {
       normalize(
         payload.agentPartyId,
         'Agent',
@@ -184,6 +192,12 @@ export class BookingDocumentPayloadValidator {
       );
     } else if (type === BookingDocumentType.DELIVERY_ORDER) {
       normalize(
+        payload.consigneePartyId,
+        'Consignee',
+        'deliverTo',
+        PartnerAdditionType.CONSIGNEE,
+      );
+      normalize(
         payload.notifyPartyId,
         'Notify Party',
         'notifyParty',
@@ -191,7 +205,9 @@ export class BookingDocumentPayloadValidator {
       );
     }
 
-    this.normalizeSameAs(payload);
+    if (type === BookingDocumentType.ARRIVAL_NOTICE) {
+      this.normalizeSameAs(payload);
+    }
   }
 
   private normalizeSameAs(payload: PartyPayload): void {
@@ -204,35 +220,6 @@ export class BookingDocumentPayloadValidator {
         payload.notifyPartyId = undefined;
         payload.notifyParty = '';
       }
-    }
-
-    const billToSource: Record<
-      string,
-      { id: number | null | undefined; text: string | undefined }
-    > = {
-      SAME_AS_SHIPPER: {
-        id: payload.shipperPartyId,
-        text: payload.shipper,
-      },
-      SAME_AS_NOTIFY_PARTY: {
-        id: payload.notifyPartyId,
-        text: payload.notifyParty,
-      },
-      SAME_AS_CONSIGNEE: {
-        id: payload.consigneePartyId,
-        text: payload.consignee,
-      },
-    };
-    if (payload.billToMode && payload.billToMode !== 'NONE') {
-      const source = billToSource[payload.billToMode];
-      if (typeof source?.id === 'number' && source.text) {
-        payload.to = source.text;
-      } else {
-        payload.billToMode = 'NONE';
-        payload.to = '';
-      }
-    } else if (payload.billToMode === 'NONE') {
-      payload.to = '';
     }
   }
 

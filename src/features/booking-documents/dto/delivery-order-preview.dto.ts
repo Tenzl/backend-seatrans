@@ -15,6 +15,7 @@ export class DeliveryOrderPreviewDto {
   @PreviewText(100) date?: string;
   @PreviewText(1_000) to?: string;
   @PreviewText(2_000) deliverTo?: string;
+  @IsOptional() @IsInt() @Min(1) consigneePartyId?: number;
   @PreviewText(2_000) notifyParty?: string;
   @IsOptional() @IsInt() @Min(1) notifyPartyId?: number;
   @PreviewText(200) mblNumber?: string;

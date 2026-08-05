@@ -28,15 +28,40 @@ describe('Booking document Party validation', () => {
     partner(2, { customerType: CustomerType.AGENT }),
     partner(3, { additionTypes: [PartnerAdditionType.CONSIGNEE] }),
     partner(4, { additionTypes: [PartnerAdditionType.NOTIFY_PARTY] }),
+    partner(5, { additionTypes: [PartnerAdditionType.CUSTOMER] }),
   ];
   const repository = {
     find: jest.fn().mockResolvedValue(rows),
   } as unknown as Repository<BookingPartner>;
   const validator = new BookingDocumentPayloadValidator(repository);
 
-  it('accepts role-specific IDs and normalizes same-as values', async () => {
+  it('normalizes the Booking Client from a CUSTOMER Party', async () => {
     const result = await validator.validate(
       BookingDocumentType.BOOKING_CONFIRMATION,
+      {
+        to: 'Stale client text',
+        clientPartyId: 5,
+      },
+    );
+
+    expect(result).toMatchObject({
+      to: 'Party 5',
+      clientPartyId: 5,
+    });
+  });
+
+  it('rejects a Booking Client without the CUSTOMER addition type', async () => {
+    await expect(
+      validator.validate(BookingDocumentType.BOOKING_CONFIRMATION, {
+        to: 'Wrong role',
+        clientPartyId: 1,
+      }),
+    ).rejects.toThrow('Client Party must have addition type CUSTOMER');
+  });
+
+  it('accepts AN role-specific IDs and normalizes same-as values', async () => {
+    const result = await validator.validate(
+      BookingDocumentType.ARRIVAL_NOTICE,
       {
         shipper: 'Party 1',
         shipperPartyId: 1,
@@ -47,21 +72,18 @@ describe('Booking document Party validation', () => {
         notifyParty: '',
         notifyPartyId: null,
         notifyPartySameAsConsignee: true,
-        billToMode: 'SAME_AS_CONSIGNEE',
-        to: '',
       },
     );
 
     expect(result).toMatchObject({
       notifyParty: 'Party 3',
       notifyPartyId: 3,
-      to: 'Party 3',
     });
   });
 
   it('rejects an Agent ID that is not customerType AGENT', async () => {
     await expect(
-      validator.validate(BookingDocumentType.BOOKING_CONFIRMATION, {
+      validator.validate(BookingDocumentType.ARRIVAL_NOTICE, {
         agent: 'Party 1',
         agentPartyId: 1,
       }),
@@ -70,21 +92,36 @@ describe('Booking document Party validation', () => {
 
   it('resets same-as modes when their source Party ID is missing', async () => {
     const result = await validator.validate(
-      BookingDocumentType.BOOKING_CONFIRMATION,
+      BookingDocumentType.ARRIVAL_NOTICE,
       {
         consignee: 'Legacy free text',
         notifyParty: 'Legacy free text',
         notifyPartySameAsConsignee: true,
-        billToMode: 'SAME_AS_CONSIGNEE',
-        to: 'Legacy free text',
       },
     );
 
     expect(result).toMatchObject({
       notifyPartySameAsConsignee: false,
       notifyParty: '',
-      billToMode: 'NONE',
-      to: '',
+    });
+  });
+
+  it('normalizes Delivery Order delivery and notify parties independently', async () => {
+    const result = await validator.validate(
+      BookingDocumentType.DELIVERY_ORDER,
+      {
+        deliverTo: 'Stale consignee',
+        consigneePartyId: 3,
+        notifyParty: 'Stale notify',
+        notifyPartyId: 4,
+      },
+    );
+
+    expect(result).toMatchObject({
+      deliverTo: 'Party 3',
+      consigneePartyId: 3,
+      notifyParty: 'Party 4',
+      notifyPartyId: 4,
     });
   });
 });

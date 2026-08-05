@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsInt,
   IsOptional,
   Min,
@@ -21,6 +22,7 @@ export class ArrivalNoticePreviewDto {
   @IsOptional() @IsInt() @Min(1) consigneePartyId?: number;
   @PreviewText(2_000) notifyParty?: string;
   @IsOptional() @IsInt() @Min(1) notifyPartyId?: number;
+  @IsOptional() @IsBoolean() notifyPartySameAsConsignee?: boolean;
   @PreviewText(200) mblNumber?: string;
   @PreviewText(200) hblNumber?: string;
   @PreviewText(300) vesselVoyage?: string;
