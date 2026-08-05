@@ -9,6 +9,7 @@ import { BillOfLadingRecord } from './entities/bill-of-lading-record.entity';
 import { BookingRecord } from './entities/booking-record.entity';
 import { DeliveryOrderRecord } from './entities/delivery-order-record.entity';
 import { BookingDocumentPdfRenderer } from './rendering/booking-document-pdf.renderer';
+import { BookingPartner } from '../booking/entities/booking-partner.entity';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { BookingDocumentPdfRenderer } from './rendering/booking-document-pdf.ren
       ArrivalNoticeRecord,
       DeliveryOrderRecord,
       BillOfLadingRecord,
+      BookingPartner,
     ]),
   ],
   controllers: [BookingDocumentsAdminController],

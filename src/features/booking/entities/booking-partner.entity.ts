@@ -3,7 +3,6 @@ import {
   CreateDateColumn,
   Entity,
   OneToMany,
-  OneToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -12,7 +11,6 @@ import { CustomerStatus } from '../enums/customer-status.enum';
 import { CustomerType } from '../enums/customer-type.enum';
 import { PartnerContact } from '../types/partner-contact';
 import { BookingPartnerAdditionTypeEntity } from './booking-partner-addition-type.entity';
-import { BookingShipping } from './booking-shipping.entity';
 
 @Entity('booking_partners')
 export class BookingPartner {
@@ -171,7 +169,4 @@ export class BookingPartner {
   /** When set, partner edits are frozen (EPDA-style lock; no unlock). */
   @Column({ name: 'locked_at', type: 'timestamptz', nullable: true })
   lockedAt!: Date | null;
-
-  @OneToOne(() => BookingShipping, (shipping) => shipping.bookingPartner)
-  shipping!: BookingShipping | null;
 }

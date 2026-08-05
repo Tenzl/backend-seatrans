@@ -2,7 +2,9 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsInt,
   IsOptional,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { CargoRowDto } from './cargo-row.dto';
@@ -14,6 +16,7 @@ export class DeliveryOrderPreviewDto {
   @PreviewText(1_000) to?: string;
   @PreviewText(2_000) deliverTo?: string;
   @PreviewText(2_000) notifyParty?: string;
+  @IsOptional() @IsInt() @Min(1) notifyPartyId?: number;
   @PreviewText(200) mblNumber?: string;
   @PreviewText(200) hblNumber?: string;
   @PreviewText(100) etd?: string;

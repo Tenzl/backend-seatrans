@@ -1,7 +1,15 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { CustomerType } from '../enums/customer-type.enum';
+import { PartnerAdditionType } from '../enums/partner-addition-type.enum';
 
 export class ListPartnerOptionsQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  page?: number = 0;
+
   @IsOptional()
   @IsString()
   q?: string;
@@ -10,5 +18,14 @@ export class ListPartnerOptionsQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  limit?: number;
+  @Max(10)
+  limit?: number = 10;
+
+  @IsOptional()
+  @IsEnum(PartnerAdditionType)
+  additionType?: PartnerAdditionType;
+
+  @IsOptional()
+  @IsEnum(CustomerType)
+  customerType?: CustomerType;
 }

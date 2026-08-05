@@ -2,7 +2,9 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsInt,
   IsOptional,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { CargoRowDto } from './cargo-row.dto';
@@ -10,11 +12,15 @@ import { PreviewText } from './preview-text.decorator';
 
 export class ArrivalNoticePreviewDto {
   @PreviewText(300) agent?: string;
+  @IsOptional() @IsInt() @Min(1) agentPartyId?: number;
   @PreviewText(100) date?: string;
   @PreviewText(100) anNumber?: string;
   @PreviewText(2_000) shipper?: string;
+  @IsOptional() @IsInt() @Min(1) shipperPartyId?: number;
   @PreviewText(2_000) consignee?: string;
+  @IsOptional() @IsInt() @Min(1) consigneePartyId?: number;
   @PreviewText(2_000) notifyParty?: string;
+  @IsOptional() @IsInt() @Min(1) notifyPartyId?: number;
   @PreviewText(200) mblNumber?: string;
   @PreviewText(200) hblNumber?: string;
   @PreviewText(300) vesselVoyage?: string;

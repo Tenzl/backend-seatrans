@@ -16,13 +16,13 @@ import pg from 'pg';
 
 const root = resolve(import.meta.dirname, '..');
 
-const SEED_TAG = 'SEED_IMPORT_EXPORT_FORMS_20260804';
-const IMPORT_REF = 'SEED-IMP-BK-20260804';
-const EXPORT_REF = 'SEED-EXP-BK-20260804';
-const IMPORT_AN_REF = 'SEED-IMP-AN-20260804';
-const IMPORT_DO_REF = 'SEED-IMP-DO-20260804';
-const EXPORT_AN_REF = 'SEED-EXP-AN-20260804';
-const EXPORT_BL_REF = 'SEED-EXP-BL-20260804';
+const SEED_TAG = 'SEED_IMPORT_EXPORT_FORMS_20260805';
+const IMPORT_REF = 'SEED-IMP-BK-20260805';
+const EXPORT_REF = 'SEED-EXP-BK-20260805';
+const IMPORT_AN_REF = 'SEED-IMP-AN-20260805';
+const IMPORT_DO_REF = 'SEED-IMP-DO-20260805';
+const EXPORT_AN_REF = 'SEED-EXP-AN-20260805';
+const EXPORT_BL_REF = 'SEED-EXP-BL-20260805';
 
 function loadEnv(path) {
   if (!existsSync(path)) return;
@@ -87,7 +87,7 @@ function parseArgs(argv) {
 
 function importBookingPayload() {
   return {
-    date: '04 Aug 2026',
+    date: '05 Aug 2026',
     bookingNumber: IMPORT_REF,
     to: 'APEX LOGISTICS VIETNAM CO., LTD\n12 NGUYEN HUE, DISTRICT 1, HO CHI MINH CITY, VIETNAM\nTEL: +84-28-3822-1100',
     vesselVoyage: 'SITC OSAKA / 2628S',
@@ -119,7 +119,7 @@ function importBookingPayload() {
 
 function exportBookingPayload() {
   return {
-    date: '04 Aug 2026',
+    date: '05 Aug 2026',
     bookingNumber: EXPORT_REF,
     to: 'AN THINH STONE CO., LTD\n92 HAI BA TRUNG STREET, QUI NHON WARD, GIA LAI PROVINCE, VIETNAM\nTEL: +84-256-3701-745',
     vesselVoyage: 'SITC MINHE / 2615N',
@@ -153,7 +153,7 @@ function exportBookingPayload() {
 function importArrivalNoticePayload() {
   return {
     agent: 'SEATRANS SHIPPING AGENCY',
-    date: '04 Aug 2026',
+    date: '05 Aug 2026',
     anNumber: IMPORT_AN_REF,
     shipper:
       'TOKYO ELECTRONICS TRADING CO., LTD\n3-1-1 MINATO, YOKOHAMA, JAPAN',
@@ -165,7 +165,7 @@ function importArrivalNoticePayload() {
     vesselVoyage: 'SITC OSAKA / 2628S',
     etdEta: 'ETD 10 Aug 2026 / ETA 18 Aug 2026',
     cfsTerminal: 'CAT LAI CFS',
-    shipmentNumber: 'IMP-SHP-260804',
+    shipmentNumber: 'IMP-SHP-260805',
     referenceNumber: IMPORT_REF,
     billOfLadingType: 'Surrendered',
     placeOfReceipt: 'YOKOHAMA, JP (JPYOK)',
@@ -193,7 +193,7 @@ function importArrivalNoticePayload() {
 function importDeliveryOrderPayload() {
   return {
     doNumber: IMPORT_DO_REF,
-    date: '04 Aug 2026',
+    date: '05 Aug 2026',
     to: 'CAT LAI TERMINAL / CFS',
     deliverTo:
       'APEX LOGISTICS VIETNAM CO., LTD\n12 NGUYEN HUE, DISTRICT 1, HO CHI MINH CITY, VIETNAM',
@@ -202,7 +202,7 @@ function importDeliveryOrderPayload() {
     hblNumber: IMPORT_AN_REF,
     etd: '10 Aug 2026',
     eta: '18 Aug 2026',
-    shipmentNumber: 'IMP-SHP-260804',
+    shipmentNumber: 'IMP-SHP-260805',
     vesselVoyage: 'SITC OSAKA / 2628S',
     placeOfReceipt: 'YOKOHAMA, JP (JPYOK)',
     portOfLoading: 'YOKOHAMA, JP (JPYOK)',
@@ -230,7 +230,7 @@ function importDeliveryOrderPayload() {
 function exportArrivalNoticePayload() {
   return {
     agent: 'SEATRANS SHIPPING AGENCY',
-    date: '04 Aug 2026',
+    date: '05 Aug 2026',
     anNumber: EXPORT_AN_REF,
     shipper:
       'AN THINH STONE CO., LTD\n92 HAI BA TRUNG STREET, QUI NHON WARD, GIA LAI PROVINCE, VIETNAM',
@@ -242,7 +242,7 @@ function exportArrivalNoticePayload() {
     vesselVoyage: 'SITC MINHE / 2615N',
     etdEta: 'ETD 14 Aug 2026 / ETA 22 Aug 2026',
     cfsTerminal: 'DA NANG CFS',
-    shipmentNumber: 'EXP-SHP-260804',
+    shipmentNumber: 'EXP-SHP-260805',
     referenceNumber: EXPORT_REF,
     billOfLadingType: 'Original',
     placeOfReceipt: 'QUI NHON, VN (VNUIH)',

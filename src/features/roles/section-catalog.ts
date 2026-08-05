@@ -23,7 +23,6 @@ export const SECTION_CATALOG: readonly SectionDef[] = [
   { key: 'epda-inquiry', label: 'Inquiry', group: 'EPDA' },
   { key: 'epda-parameter', label: 'Parameter', group: 'EPDA' },
   { key: 'booking-partner', label: 'Partner', group: 'Data Management' },
-  { key: 'booking-shipment', label: 'Shipment', group: 'Data Management' },
   {
     key: 'booking-documents',
     label: 'Booking Management',

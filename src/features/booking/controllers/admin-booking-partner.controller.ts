@@ -79,7 +79,7 @@ export class AdminBookingPartnerController {
 
   @Get('options')
   listPartnerOptions(@Query() query: ListPartnerOptionsQueryDto) {
-    return this.bookingPartnerService.listPartnerOptions(query.q, query.limit);
+    return this.bookingPartnerService.listPartnerOptions(query);
   }
 
   @Get()

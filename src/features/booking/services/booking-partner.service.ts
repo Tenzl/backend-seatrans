@@ -27,7 +27,11 @@ import {
   BookingPartnerListItemResponseDto,
 } from '../dto/booking-partner-response.dto';
 import { buildPaginatedResponse } from '../../../shared/dto/pagination.dto';
-import { PartnerOptionDto } from '../dto/partner-option.dto';
+import {
+  PartnerOptionDto,
+  PartnerOptionPageDto,
+} from '../dto/partner-option.dto';
+import { ListPartnerOptionsQueryDto } from '../dto/list-partner-options-query.dto';
 import { PartnerAdditionType } from '../enums/partner-addition-type.enum';
 import { UpdateCustomerStatusDto } from '../dto/update-customer-status.dto';
 import { BookingPartnerFieldChangeAction } from '../entities/booking-partner-field-change-log.entity';
@@ -36,13 +40,14 @@ import {
   partnerFieldSnapshot,
 } from './booking-partner-audit';
 import { BookingPartnerFieldChangeService } from './booking-partner-field-change.service';
+import { buildPartnerContainsPattern } from './partner-search';
 
 @Injectable()
 export class BookingPartnerService {
   private static readonly DEFAULT_PAGE_SIZE = 20;
   private static readonly MAX_PAGE_SIZE = 100;
-  private static readonly DEFAULT_OPTIONS_LIMIT = 30;
-  private static readonly MAX_OPTIONS_LIMIT = 50;
+  private static readonly DEFAULT_OPTIONS_LIMIT = 10;
+  private static readonly MAX_OPTIONS_LIMIT = 10;
   constructor(
     @InjectRepository(BookingPartner)
     private readonly partnerRepository: Repository<BookingPartner>,
@@ -51,39 +56,80 @@ export class BookingPartnerService {
   ) {}
 
   async listPartnerOptions(
-    q?: string,
-    limit?: number,
-  ): Promise<PartnerOptionDto[]> {
-    const normalizedQ = q?.trim().toLowerCase() ?? '';
+    query: ListPartnerOptionsQueryDto,
+  ): Promise<PartnerOptionPageDto> {
+    const normalizedQ = query.q?.trim().toLowerCase() ?? '';
+    const page = this.sanitizePage(query.page);
     const take = this.sanitizeOptionsLimit(
-      limit ?? BookingPartnerService.DEFAULT_OPTIONS_LIMIT,
+      query.limit ?? BookingPartnerService.DEFAULT_OPTIONS_LIMIT,
     );
 
     const qb = this.partnerRepository
       .createQueryBuilder('partner')
-      .select(['partner.id', 'partner.name', 'partner.customerId'])
+      .select([
+        'partner.id',
+        'partner.name',
+        'partner.customerId',
+        'partner.address',
+        'partner.city',
+        'partner.country',
+        'partner.phone',
+        'partner.fax',
+      ])
       .where('partner.deletedAt IS NULL')
       .orderBy('partner.name', 'ASC')
-      .take(take);
+      .addOrderBy('partner.id', 'ASC')
+      .skip(page * take)
+      .take(take + 1);
+
+    if (query.customerType) {
+      qb.andWhere('partner.customerType = :customerType', {
+        customerType: query.customerType,
+      });
+    }
+
+    if (query.additionType) {
+      qb.andWhere(
+        `EXISTS (
+          SELECT 1 FROM booking_partner_addition_types option_tag
+          WHERE option_tag.partner_id = partner.id
+            AND option_tag.addition_type = :additionType
+        )`,
+        { additionType: query.additionType },
+      );
+    }
 
     if (normalizedQ.length > 0) {
+      const containsPattern = buildPartnerContainsPattern(normalizedQ);
       qb.andWhere(
         new Brackets((sub) => {
           sub
-            .where('LOWER(partner.name) LIKE :q', { q: `%${normalizedQ}%` })
-            .orWhere('LOWER(partner.customerId) LIKE :q', {
-              q: `%${normalizedQ}%`,
+            .where("LOWER(partner.name) LIKE :q ESCAPE E'\\\\'", {
+              q: containsPattern,
+            })
+            .orWhere("LOWER(partner.customerId) LIKE :q ESCAPE E'\\\\'", {
+              q: containsPattern,
+            })
+            .orWhere("LOWER(partner.taxNumber) LIKE :q ESCAPE E'\\\\'", {
+              q: containsPattern,
             });
         }),
       );
     }
 
     const rows = await qb.getMany();
-    return rows.map((row) => ({
+    const hasNext = rows.length > take;
+    const content: PartnerOptionDto[] = rows.slice(0, take).map((row) => ({
       id: row.id,
       name: row.name,
       customerId: row.customerId,
+      address: row.address,
+      city: row.city,
+      country: row.country,
+      phone: row.phone,
+      fax: row.fax,
     }));
+    return { content, page, size: take, hasNext };
   }
 
   async listPartners(query: ListBookingPartnersDto) {
@@ -447,15 +493,18 @@ export class BookingPartnerService {
     }
 
     if (normalizedQ) {
+      const containsPattern = buildPartnerContainsPattern(normalizedQ);
       qb.andWhere(
         new Brackets((subQb) => {
           subQb
-            .where('LOWER(partner.name) LIKE :q', { q: `%${normalizedQ}%` })
-            .orWhere('LOWER(partner.customerId) LIKE :q', {
-              q: `%${normalizedQ}%`,
+            .where("LOWER(partner.name) LIKE :q ESCAPE E'\\\\'", {
+              q: containsPattern,
             })
-            .orWhere('LOWER(partner.taxNumber) LIKE :q', {
-              q: `%${normalizedQ}%`,
+            .orWhere("LOWER(partner.customerId) LIKE :q ESCAPE E'\\\\'", {
+              q: containsPattern,
+            })
+            .orWhere("LOWER(partner.taxNumber) LIKE :q ESCAPE E'\\\\'", {
+              q: containsPattern,
             });
         }),
       );

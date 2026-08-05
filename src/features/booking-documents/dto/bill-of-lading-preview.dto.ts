@@ -1,4 +1,4 @@
-import { IsIn, IsOptional } from 'class-validator';
+import { IsIn, IsInt, IsOptional, Min } from 'class-validator';
 import { BILL_OF_LADING_FORM_VARIANTS } from '../constants/booking-document.constants';
 import { PreviewText } from './preview-text.decorator';
 
@@ -7,8 +7,11 @@ export class BillOfLadingPreviewDto {
   @PreviewText(100) fblNumber?: string;
 
   @PreviewText(2_000) consignor?: string;
+  @IsOptional() @IsInt() @Min(1) shipperPartyId?: number;
   @PreviewText(2_000) consignedToOrderOf?: string;
+  @IsOptional() @IsInt() @Min(1) consigneePartyId?: number;
   @PreviewText(2_000) notifyAddress?: string;
+  @IsOptional() @IsInt() @Min(1) notifyPartyId?: number;
 
   @PreviewText(300) placeOfReceipt?: string;
   @PreviewText(300) oceanVessel?: string;
