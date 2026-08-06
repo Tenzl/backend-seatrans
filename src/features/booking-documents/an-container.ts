@@ -109,15 +109,15 @@ export function normalizeAnContainersPayload(payload: {
 
 /**
  * One PDF/DO cargo table row per container.
- * Shipment `descriptionOfGoods` goes on the first row’s description cell.
- * Per-container `note` is not mapped into the description column.
+ * Each row’s description cell uses the container `note` when set, otherwise
+ * the shipment-level `descriptionOfGoods` (same text on every row).
  */
 export function anContainersToCargoRows(
   containers: AnContainer[],
   descriptionOfGoods = '',
 ): CargoRowDto[] {
   const shipmentDescription = descriptionOfGoods.trim();
-  return containers.map((container, index) => ({
+  return containers.map((container) => ({
     containerSealNumber: [container.containerNo, container.sealNo, container.type]
       .filter(Boolean)
       .join(' / '),
@@ -126,13 +126,14 @@ export function anContainersToCargoRows(
       .join(' '),
     descriptionOfGoods: [
       container.tare ? `Tare: ${container.tare}` : '',
-      index === 0 ? shipmentDescription : '',
+      container.note.trim() || shipmentDescription,
       container.method ? `Method: ${container.method}` : '',
     ]
       .filter(Boolean)
       .join('\n'),
-    grossWeight: container.grossWeight,
-    measurement: container.measurement,
+    // Same unit formatting as BL PDF rows — every non-empty cell gets KGS/CBM.
+    grossWeight: formatBlGrossWeight(container.grossWeight),
+    measurement: formatBlMeasurement(container.measurement),
   }));
 }
 

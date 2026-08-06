@@ -1,7 +1,8 @@
-import { PDFFont, PDFPage, rgb } from 'pdf-lib';
+import { PDFDocument, PDFFont, PDFPage, rgb } from 'pdf-lib';
 import { resolveBookingVolumeDisplay } from '../cargo-volume';
 import { BookingConfirmationPreviewDto } from '../dto/booking-confirmation-preview.dto';
 import { BookingDocumentRenderContext } from './booking-document-render-context';
+import { formatBookingPdfDateTime } from './pdf-schedule-date';
 import {
   BLACK,
   contentAwareHeight,
@@ -18,6 +19,8 @@ import {
   labeledBlockStackHeight,
   labelValueStartX,
   measureTextHeight,
+  PAGE_HEIGHT,
+  PAGE_WIDTH,
   partyDisplayName,
 } from './pdf-layout';
 
@@ -41,6 +44,20 @@ const INTRO =
 /** Title sits a bit lower under the letterhead than shared AN/DO chrome. */
 const BC_TITLE_Y = 694;
 const BC_BODY_TOP = 682;
+/** Gap between the data grid bottom rule and Terms heading. */
+const TERMS_GAP = 12;
+const TERMS_ITEM_GAP = 3;
+const TERMS_CONTINUATION_TOP = 790;
+
+/** Static legal copy shown below the booking confirmation grid (no border). */
+export const BOOKING_CONFIRMATION_TERMS: readonly string[] = [
+  'The booking information is checked and accepted by the client/shipper before picking-up the empty container out of the C/Y.',
+  "Booking confirmation is subject to the carrier's space and equipment availability.",
+  "Vessel's sailing schedule may be changed without prior notice.",
+  'Customers are not allowed to exchanged containers between bookings.If doing so, swapping fee will be applied.',
+  "The container condition to be checked carefully & accepted before gating out. if any container's damage found then, the arising charge/expense to be for the client's account.",
+  "Any damage/expenses happen due to client/shipper's wrong weight declaration which to be for the client/shipper's account.",
+];
 
 /**
  * Column edges (A4 body). Extra split at 370 for Gross Weight / Measurement.
@@ -80,15 +97,15 @@ export function renderBookingConfirmation(
   drawRule(page, FRAME_LEFT, gridTop, FRAME_RIGHT, gridTop);
 
   const rows: GridCell[][] = [
-    [
+    compactGridRow([
       {
         label: 'Vessel / Voyage:',
         value: dto.vesselVoyage,
         colStart: 0,
         colEnd: 1,
       },
-      { label: 'ETD:', value: dto.etd, colStart: 1, colEnd: 2 },
-      { label: 'ETA:', value: dto.eta, colStart: 2, colEnd: 3 },
+      scheduleGridCell('ETD:', dto.etd, 1, 2),
+      scheduleGridCell('ETA:', dto.eta, 2, 3),
       {
         label: 'Place of Receipt:',
         value: dto.placeOfReceipt,
@@ -101,7 +118,7 @@ export function renderBookingConfirmation(
         colStart: 5,
         colEnd: 6,
       },
-    ],
+    ]),
     [
       {
         label: 'Date of Pickup:',
@@ -215,9 +232,92 @@ export function renderBookingConfirmation(
   }
 
   const frameBottom = Math.max(cursor, PAGE_MIN_BOTTOM);
-  // Outer verticals only around the data grid (not the borderless intro).
+  // Outer verticals only around the data grid (not the borderless intro / terms).
   drawRule(page, FRAME_LEFT, gridTop, FRAME_LEFT, frameBottom);
   drawRule(page, FRAME_RIGHT, gridTop, FRAME_RIGHT, frameBottom);
+
+  // Terms sit below the bordered grid (no decorative box). PIC stays in-grid via dto.pic.
+  drawTermsAndConditions(pdf, page, regular, bold, frameBottom);
+}
+
+/** Numbered terms body as a single multiline string for measurement / draw. */
+export function formatBookingConfirmationTermsBody(): string {
+  return BOOKING_CONFIRMATION_TERMS.map(
+    (line, index) => `${index + 1}. ${line}`,
+  ).join('\n');
+}
+
+/** Vertical space needed for the Terms heading + numbered list. */
+export function measureBookingConfirmationTermsHeight(
+  regular: PDFFont,
+  width: number,
+): number {
+  const headingH = LABEL_SIZE * LINE_HEIGHT;
+  const bodyH = measureTextHeight(
+    formatBookingConfirmationTermsBody(),
+    regular,
+    TEXT_SIZE,
+    width,
+    LINE_HEIGHT,
+  );
+  return headingH + TERMS_ITEM_GAP + bodyH;
+}
+
+/**
+ * Draw Terms and Conditions below the grid when there is room; otherwise on a
+ * continuation page (same overflow pattern as AN/DO attention bands).
+ */
+function drawTermsAndConditions(
+  pdf: PDFDocument,
+  page: PDFPage,
+  regular: PDFFont,
+  bold: PDFFont,
+  gridBottom: number,
+): void {
+  const x = DOC_LEFT_X;
+  const width = FRAME_RIGHT - FRAME_TEXT_INSET - x;
+  const needed = measureBookingConfirmationTermsHeight(regular, width);
+  const topOnPage1 = gridBottom - TERMS_GAP;
+
+  if (topOnPage1 - needed >= PAGE_MIN_BOTTOM) {
+    drawTermsBlock(page, regular, bold, topOnPage1, x, width);
+    return;
+  }
+
+  const cont = pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  cont.drawText('BOOKING CONFIRMATION - TERMS AND CONDITIONS', {
+    x: DOC_LEFT_X,
+    y: TERMS_CONTINUATION_TOP,
+    size: 12,
+    font: bold,
+    color: BLACK,
+  });
+  drawTermsBlock(cont, regular, bold, TERMS_CONTINUATION_TOP - 24, x, width);
+}
+
+function drawTermsBlock(
+  page: PDFPage,
+  regular: PDFFont,
+  bold: PDFFont,
+  top: number,
+  x: number,
+  width: number,
+): void {
+  const heading = 'Terms and Conditions:';
+  page.drawText(heading, {
+    x,
+    y: top - LABEL_SIZE,
+    size: LABEL_SIZE,
+    font: bold,
+    color: BLACK,
+  });
+  drawTextBlock(page, regular, bold, formatBookingConfirmationTermsBody(), {
+    x,
+    top: top - LABEL_SIZE * LINE_HEIGHT - TERMS_ITEM_GAP,
+    width,
+    size: TEXT_SIZE,
+    lineHeightFactor: LINE_HEIGHT,
+  });
 }
 
 /**
@@ -352,6 +452,22 @@ function formatStacked(
 ): string | undefined {
   const lines = [first, second].map((v) => v?.trim()).filter(Boolean);
   return lines.length ? lines.join('\n') : undefined;
+}
+
+/** Omit ETD/ETA cells when the schedule value is blank after formatting. */
+function scheduleGridCell(
+  label: string,
+  value: string | undefined,
+  colStart: number,
+  colEnd: number,
+): GridCell | null {
+  const formatted = formatBookingPdfDateTime(value);
+  if (!formatted) return null;
+  return { label, value: formatted, colStart, colEnd };
+}
+
+function compactGridRow(cells: Array<GridCell | null>): GridCell[] {
+  return cells.filter((cell): cell is GridCell => cell != null);
 }
 
 /**

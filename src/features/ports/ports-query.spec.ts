@@ -29,13 +29,13 @@ describe('PortsQuery', () => {
 
     expect(query).toHaveBeenNthCalledWith(
       1,
-      expect.stringContaining('COUNT(*)::int'),
-      [true, 3, 2, '%da%'],
+      expect.stringMatching(/COUNT\(\*\)::int[\s\S]*port\.code/),
+      [true, 3, 2, '%da%', '%da%'],
     );
     expect(query).toHaveBeenNthCalledWith(
       2,
       expect.stringContaining('SELECT port.id'),
-      [true, 3, 2, '%da%', 2, 2],
+      [true, 3, 2, '%da%', '%da%', 2, 2],
     );
     expect(queryBuilder.where).toHaveBeenCalledWith('port.id IN (:...ids)', {
       ids: [2, 1],
@@ -46,6 +46,33 @@ describe('PortsQuery', () => {
       size: 2,
       totalElements: 2,
     });
+  });
+
+  it('matches port code when searchIn is name', async () => {
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce([{ total: '1' }])
+      .mockResolvedValueOnce([{ id: 7 }]);
+    const queryBuilder = createQueryBuilder([
+      createPort(7, 'Qui Nhon', 'VNIUH'),
+    ]);
+    const portsQuery = new PortsQuery({
+      query,
+      createQueryBuilder: jest.fn().mockReturnValue(queryBuilder),
+    } as unknown as Repository<Port>);
+
+    const page = await portsQuery.listPortsPage({
+      q: 'vniuh',
+      searchIn: 'name',
+      active: true,
+    });
+
+    expect(query).toHaveBeenNthCalledWith(
+      1,
+      expect.stringMatching(/port\.code/),
+      [true, '%vniuh%', '%vniuh%'],
+    );
+    expect(page.content).toMatchObject([{ id: 7, code: 'VNIUH' }]);
   });
 
   it('uses a false condition for an invalid area search', async () => {
@@ -79,7 +106,7 @@ function createQueryBuilder(ports: Port[]) {
   };
 }
 
-function createPort(id: number, name: string): Port {
+function createPort(id: number, name: string, code: string | null = null): Port {
   return {
     id,
     name,
@@ -87,7 +114,7 @@ function createPort(id: number, name: string): Port {
     province: null,
     zoneCode: null,
     countryCode: 'VN',
-    code: null,
+    code,
     longitude: null,
     latitude: null,
     isActive: true,

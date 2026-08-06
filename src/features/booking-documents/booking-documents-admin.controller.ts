@@ -159,9 +159,14 @@ export class BookingDocumentsAdminController {
     @Param('type', new ParseEnumPipe(BookingDocumentType))
     type: BookingDocumentType,
     @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
     @Res() response: Response,
   ): Promise<void> {
-    const preview = await this.bookingDocuments.createPreview(type, body);
+    const preview = await this.bookingDocuments.createPreview(
+      type,
+      body,
+      request.user?.id,
+    );
     response.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="${preview.filename}"`,

@@ -13,8 +13,8 @@ export interface TextBox {
   color?: ReturnType<typeof rgb>;
 }
 
-const PAGE_WIDTH = 595.276;
-const PAGE_HEIGHT = 841.89;
+export const PAGE_WIDTH = 595.276;
+export const PAGE_HEIGHT = 841.89;
 export const BLACK = rgb(0, 0, 0);
 
 /** Single stroke weight for all form rules (boxes, tables, dividers). */

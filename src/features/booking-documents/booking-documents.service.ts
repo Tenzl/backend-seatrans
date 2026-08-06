@@ -1,18 +1,23 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import { Repository } from 'typeorm';
 import {
   syncBillOfLadingCargoFromArrivalNotice,
   syncDeliveryOrderCargoFromArrivalNotice,
 } from './an-container';
+import { resolveBookingPic } from './booking-pic';
 import { BookingDocumentRecordService } from './booking-document-record.service';
 import { BookingDocumentPayloadValidator } from './booking-document-payload.validator';
 import {
   BookingDocumentPayload,
   BookingDocumentPreview,
 } from './booking-document.types';
+import { User } from '../auth/entities/user.entity';
 import { ArrivalNoticePreviewDto } from './dto/arrival-notice-preview.dto';
 import { BillOfLadingPreviewDto } from './dto/bill-of-lading-preview.dto';
+import { BookingConfirmationPreviewDto } from './dto/booking-confirmation-preview.dto';
 import { DeliveryOrderPreviewDto } from './dto/delivery-order-preview.dto';
 import { UpsertBookingDocumentRecordDto } from './dto/upsert-booking-document-record.dto';
 import { BookingDocumentStatus } from './enums/booking-document-status.enum';
@@ -26,6 +31,8 @@ export class BookingDocumentsService {
     private readonly payloadValidator: BookingDocumentPayloadValidator,
     private readonly recordService: BookingDocumentRecordService,
     private readonly pdfRenderer: BookingDocumentPdfRenderer,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
   ) {}
 
   async createRecord(
@@ -55,6 +62,12 @@ export class BookingDocumentsService {
       validatedPayload = await this.overwriteDoCargoFromAn(
         bookingId,
         validatedPayload as DeliveryOrderPreviewDto,
+      );
+    }
+    if (type === BookingDocumentType.BOOKING_CONFIRMATION) {
+      validatedPayload = await this.applyBookingPic(
+        validatedPayload as BookingConfirmationPreviewDto,
+        createdByUserId,
       );
     }
     const created = await this.recordService.create(
@@ -122,6 +135,13 @@ export class BookingDocumentsService {
         validatedPayload as DeliveryOrderPreviewDto,
       );
     }
+    if (type === BookingDocumentType.BOOKING_CONFIRMATION) {
+      validatedPayload = await this.applyBookingPic(
+        validatedPayload as BookingConfirmationPreviewDto,
+        existing.createdByUserId,
+        (existing.payload as BookingConfirmationPreviewDto).pic,
+      );
+    }
     const updated = await this.recordService.update(
       type,
       id,
@@ -179,12 +199,38 @@ export class BookingDocumentsService {
   async createPreview(
     type: BookingDocumentType,
     payload: unknown,
+    actorUserId?: number,
   ): Promise<BookingDocumentPreview> {
-    const validatedPayload = await this.payloadValidator.validate(
+    let validatedPayload = await this.payloadValidator.validate(
       type,
       payload,
     );
+    if (
+      type === BookingDocumentType.BOOKING_CONFIRMATION &&
+      actorUserId != null
+    ) {
+      validatedPayload = await this.applyBookingPic(
+        validatedPayload as BookingConfirmationPreviewDto,
+        actorUserId,
+        (validatedPayload as BookingConfirmationPreviewDto).pic,
+      );
+    }
     return this.pdfRenderer.render(type, validatedPayload);
+  }
+
+  private async applyBookingPic(
+    payload: BookingConfirmationPreviewDto,
+    creatorUserId: number,
+    existingPic?: string | null,
+  ): Promise<BookingConfirmationPreviewDto> {
+    const creator = await this.userRepository.findOne({
+      where: { id: creatorUserId },
+    });
+    const pic = resolveBookingPic(creator, existingPic);
+    return (await this.payloadValidator.validate(
+      BookingDocumentType.BOOKING_CONFIRMATION,
+      { ...payload, pic },
+    )) as BookingConfirmationPreviewDto;
   }
 
   /**

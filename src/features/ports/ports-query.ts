@@ -27,6 +27,8 @@ export class PortsQuery {
   private static readonly MAX_LIST_LIMIT = 5000;
   private static readonly DEFAULT_OPTIONS_LIMIT = 30;
   private static readonly MAX_OPTIONS_LIMIT = 50;
+  private static readonly NAME_OR_CODE_LIKE =
+    "(LOWER(port.name) LIKE :q OR LOWER(COALESCE(port.code, '')) LIKE :q)";
 
   constructor(private readonly portRepository: Repository<Port>) {}
 
@@ -91,7 +93,7 @@ export class PortsQuery {
     } else {
       const query = params.q?.trim();
       if (query) {
-        qb.andWhere('LOWER(port.name) LIKE :q', {
+        qb.andWhere(PortsQuery.NAME_OR_CODE_LIKE, {
           q: `%${query.toLowerCase()}%`,
         });
       }
@@ -152,8 +154,8 @@ export class PortsQuery {
       .orderBy('port.name', 'ASC');
 
     if (normalizedQuery) {
-      queryBuilder.andWhere('LOWER(port.name) LIKE :query', {
-        query: `%${normalizedQuery.toLowerCase()}%`,
+      queryBuilder.andWhere(PortsQuery.NAME_OR_CODE_LIKE, {
+        q: `%${normalizedQuery.toLowerCase()}%`,
       });
     }
 
@@ -270,12 +272,16 @@ export class PortsQuery {
         conditions.push(
           `(LOWER(COALESCE(province.name, '')) LIKE $${values.length - 1} OR LOWER(COALESCE(province.display_name, '')) LIKE $${values.length})`,
         );
+      } else if (searchIn === 'name') {
+        values.push(term, term);
+        conditions.push(
+          `(LOWER(COALESCE(port.name, '')) LIKE $${values.length - 1} OR LOWER(COALESCE(port.code, '')) LIKE $${values.length})`,
+        );
       } else {
         const columnBySearchIn: Record<
-          Exclude<PortSearchIn, 'area' | 'provinceName'>,
+          Exclude<PortSearchIn, 'area' | 'provinceName' | 'name'>,
           string
         > = {
-          name: 'port.name',
           portOfCall: 'port.port_of_call',
           code: 'port.code',
           zoneCode: 'port.zone_code',

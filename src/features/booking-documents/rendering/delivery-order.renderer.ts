@@ -2,6 +2,7 @@ import { rgb } from 'pdf-lib';
 import {
   anContainersToCargoRows,
   normalizeAnContainersPayload,
+  resolveDescriptionOfGoods,
 } from '../an-container';
 import { DeliveryOrderPreviewDto } from '../dto/delivery-order-preview.dto';
 import { BookingDocumentRenderContext } from './booking-document-render-context';
@@ -160,8 +161,14 @@ export function renderDeliveryOrder(
     containers: dto.containers,
     cargoRows: dto.cargoRows,
   });
+  const descriptionOfGoods = resolveDescriptionOfGoods({
+    descriptionOfGoods: dto.descriptionOfGoods,
+    containers,
+  });
   const cargoRows =
-    containers.length > 0 ? anContainersToCargoRows(containers) : (dto.cargoRows ?? []);
+    containers.length > 0
+      ? anContainersToCargoRows(containers, descriptionOfGoods)
+      : (dto.cargoRows ?? []);
 
   finishCargoAndAttentionPage(pdf, page, regular, bold, {
     marksBottom,

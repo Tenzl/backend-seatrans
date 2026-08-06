@@ -15,9 +15,13 @@ describe('BookingDocumentsService', () => {
     findOne: jest.fn(),
     findAndCount: jest.fn(),
   };
+  const userRepository = {
+    findOne: jest.fn().mockResolvedValue(null),
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
+    userRepository.findOne.mockResolvedValue(null);
     service = new BookingDocumentsService(
       new BookingDocumentPayloadValidator(),
       new BookingDocumentRecordService(
@@ -27,6 +31,7 @@ describe('BookingDocumentsService', () => {
         recordRepository as never,
       ),
       new BookingDocumentPdfRenderer(),
+      userRepository as never,
     );
   });
 
@@ -476,5 +481,53 @@ describe('BookingDocumentsService', () => {
     for (const preview of previews) {
       await expect(PDFDocument.load(preview.data)).resolves.toBeDefined();
     }
+  });
+
+  it('derives booking PIC from the creating user on create and update', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 9,
+      fullName: 'Nhung Nguyen',
+      email: 'total.logistics@seatrans.com.vn',
+    });
+    recordRepository.save.mockImplementation(
+      (record: object): Promise<object> =>
+        Promise.resolve({
+          ...record,
+          id: 7,
+          createdAt: new Date('2026-07-29T10:00:00.000Z'),
+          updatedAt: new Date('2026-07-29T10:00:00.000Z'),
+          lockedAt: null,
+          deletedAt: null,
+        }),
+    );
+    recordRepository.findOne.mockResolvedValue({
+      id: 7,
+      payload: { bookingNumber: 'BK-1', pic: 'Legacy PIC' },
+      status: 'PROCESSING',
+      createdByUserId: 9,
+      createdAt: new Date('2026-07-29T10:00:00.000Z'),
+      updatedAt: new Date('2026-07-29T10:00:00.000Z'),
+      lockedAt: null,
+      deletedAt: null,
+    });
+
+    const created = await service.createRecord(
+      BookingDocumentType.BOOKING_CONFIRMATION,
+      { bookingNumber: 'BK-1' },
+      9,
+    );
+    expect(created.payload).toMatchObject({
+      pic: 'Nhung Nguyen, Email: total.logistics@seatrans.com.vn',
+    });
+
+    const updated = await service.updateRecord(
+      BookingDocumentType.BOOKING_CONFIRMATION,
+      7,
+      { bookingNumber: 'BK-2' },
+      12,
+    );
+    expect(updated.payload).toMatchObject({
+      pic: 'Nhung Nguyen, Email: total.logistics@seatrans.com.vn',
+    });
   });
 });

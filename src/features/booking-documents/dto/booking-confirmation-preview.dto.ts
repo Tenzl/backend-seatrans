@@ -36,5 +36,6 @@ export class BookingConfirmationPreviewDto {
   @PreviewText(2_000) specialRemark?: string;
   @PreviewText(300) motherVessel?: string;
   @PreviewText(300) motherVoyage?: string;
+  /** Derived from the booking creator (full name + email); not edited in the form. */
   @PreviewText(500) pic?: string;
 }

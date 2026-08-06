@@ -10,6 +10,7 @@ import { BookingRecord } from './entities/booking-record.entity';
 import { DeliveryOrderRecord } from './entities/delivery-order-record.entity';
 import { BookingDocumentPdfRenderer } from './rendering/booking-document-pdf.renderer';
 import { BookingPartner } from '../booking/entities/booking-partner.entity';
+import { User } from '../auth/entities/user.entity';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { BookingPartner } from '../booking/entities/booking-partner.entity';
       DeliveryOrderRecord,
       BillOfLadingRecord,
       BookingPartner,
+      User,
     ]),
   ],
   controllers: [BookingDocumentsAdminController],

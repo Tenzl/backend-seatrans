@@ -76,10 +76,14 @@ describe('BookingDocumentRecordService lifecycle', () => {
   const arrivalNoticeRepository = createRepositoryMock();
   const deliveryOrderRepository = createRepositoryMock();
   const billOfLadingRepository = createRepositoryMock();
+  const userRepository = {
+    findOne: jest.fn().mockResolvedValue(null),
+  };
   let service: BookingDocumentsService;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    userRepository.findOne.mockResolvedValue(null);
     for (const repository of [
       bookingRepository,
       arrivalNoticeRepository,
@@ -98,6 +102,7 @@ describe('BookingDocumentRecordService lifecycle', () => {
       new BookingDocumentPayloadValidator(),
       recordService,
       new BookingDocumentPdfRenderer(),
+      userRepository as never,
     );
   });
 

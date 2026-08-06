@@ -53,7 +53,7 @@ describe('an-container', () => {
             tare: '',
             packageType: 'CRATE(S)',
             noOfPkgs: '21',
-            note: 'ignored',
+            note: '',
             method: '',
           },
         ],
@@ -64,8 +64,106 @@ describe('an-container', () => {
         containerSealNumber: "SITU2608023 / SITR892061 / 20'DC",
         quantity: '21 CRATE(S)',
         descriptionOfGoods: 'STONE',
-        grossWeight: '21000',
-        measurement: '7.86',
+        grossWeight: '21000 KGS',
+        measurement: '7.86 CBM',
+      },
+    ]);
+  });
+
+  it('appends KGS/CBM on every DO cargo row, not only the first', () => {
+    expect(
+      anContainersToCargoRows(
+        [
+          {
+            type: "20'DC",
+            containerNo: 'A',
+            sealNo: 'S1',
+            grossWeight: '20700',
+            measurement: '7.45',
+            tare: '',
+            packageType: 'PALLETS',
+            noOfPkgs: '20',
+            note: '',
+            method: '',
+          },
+          {
+            type: "20'DC",
+            containerNo: 'B',
+            sealNo: 'S2',
+            grossWeight: '12000',
+            measurement: '4.67',
+            tare: '',
+            packageType: 'PALLETS',
+            noOfPkgs: '30',
+            note: '',
+            method: '',
+          },
+        ],
+        'GOODS',
+      ),
+    ).toEqual([
+      {
+        containerSealNumber: "A / S1 / 20'DC",
+        quantity: '20 PALLETS',
+        descriptionOfGoods: 'GOODS',
+        grossWeight: '20700 KGS',
+        measurement: '7.45 CBM',
+      },
+      {
+        containerSealNumber: "B / S2 / 20'DC",
+        quantity: '30 PALLETS',
+        descriptionOfGoods: 'GOODS',
+        grossWeight: '12000 KGS',
+        measurement: '4.67 CBM',
+      },
+    ]);
+  });
+
+  it('prefers per-container note over shipment description on each row', () => {
+    expect(
+      anContainersToCargoRows(
+        [
+          {
+            type: "20'DC",
+            containerNo: 'A',
+            sealNo: 'S1',
+            grossWeight: '100',
+            measurement: '1',
+            tare: '',
+            packageType: 'PKGS',
+            noOfPkgs: '1',
+            note: 'ROW ONE GOODS',
+            method: '',
+          },
+          {
+            type: "40'HC",
+            containerNo: 'B',
+            sealNo: 'S2',
+            grossWeight: '200',
+            measurement: '2',
+            tare: '',
+            packageType: 'PKGS',
+            noOfPkgs: '2',
+            note: 'ROW TWO GOODS',
+            method: '',
+          },
+        ],
+        'SHIPMENT FALLBACK',
+      ),
+    ).toEqual([
+      {
+        containerSealNumber: "A / S1 / 20'DC",
+        quantity: '1 PKGS',
+        descriptionOfGoods: 'ROW ONE GOODS',
+        grossWeight: '100 KGS',
+        measurement: '1 CBM',
+      },
+      {
+        containerSealNumber: "B / S2 / 40'HC",
+        quantity: '2 PKGS',
+        descriptionOfGoods: 'ROW TWO GOODS',
+        grossWeight: '200 KGS',
+        measurement: '2 CBM',
       },
     ]);
   });
@@ -91,8 +189,8 @@ describe('an-container', () => {
       ),
     ).toEqual({
       descriptionOfGoods: 'STONE',
-      grossWeight: '100',
-      measurement: '2',
+      grossWeight: '100 KGS',
+      measurement: '2 CBM',
       volumeStc: '1x20DC CONTAINER(S) S.T.C',
       numberAndKindOfPackages: '',
     });
@@ -445,8 +543,8 @@ describe('an-container', () => {
     expect(next.descriptionOfGoods).toBe('STONE');
     expect(next.serviceMode).toBe('FCL/FCL - CY/CY');
     expect(next.numberAndKindOfPackages).toBe('3 PKGS');
-    expect(next.grossWeight).toBe('500');
-    expect(next.measurement).toBe('8');
+    expect(next.grossWeight).toBe('500 KGS');
+    expect(next.measurement).toBe('8 CBM');
     expect(next.containers).toEqual([
       {
         type: "20'DC",
@@ -539,8 +637,8 @@ describe('an-container', () => {
         containerSealNumber: "C1 / S1 / 20'DC",
         quantity: '3 PKGS',
         descriptionOfGoods: 'UPDATED STONE',
-        grossWeight: '500',
-        measurement: '8',
+        grossWeight: '500 KGS',
+        measurement: '8 CBM',
       },
     ]);
   });

@@ -28,12 +28,14 @@ describe('BookingDocumentsAdminController', () => {
     await controller.preview(
       BookingDocumentType.ARRIVAL_NOTICE,
       { anNumber: 'AN-001' },
+      { user: { id: 5 } } as never,
       response as never,
     );
 
     expect(createPreview).toHaveBeenCalledWith(
       BookingDocumentType.ARRIVAL_NOTICE,
       { anNumber: 'AN-001' },
+      5,
     );
     expect(response.set).toHaveBeenCalledWith(
       expect.objectContaining({

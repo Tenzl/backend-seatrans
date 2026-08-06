@@ -50,7 +50,7 @@ export class ListPortsQueryDto extends ListQueryDto {
   @IsBoolean()
   active?: boolean;
 
-  /** Column to apply `q` against (default: name) */
+  /** Column to apply `q` against (default: name, also matches port code) */
   @IsOptional()
   @IsIn(PORT_SEARCH_IN_VALUES)
   searchIn?: PortSearchIn;
