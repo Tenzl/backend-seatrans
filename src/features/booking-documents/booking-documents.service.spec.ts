@@ -12,6 +12,7 @@ describe('BookingDocumentsService', () => {
   const recordRepository = {
     create: jest.fn((value: object) => value),
     save: jest.fn(),
+    findOne: jest.fn(),
     findAndCount: jest.fn(),
   };
 
@@ -50,7 +51,12 @@ describe('BookingDocumentsService', () => {
 
     expect(recordRepository.create).toHaveBeenCalledWith({
       bookingId: null,
-      payload: { anNumber: 'AN-001' },
+      payload: {
+        anNumber: 'AN-001',
+        containers: [],
+        cargoRows: [],
+        descriptionOfGoods: '',
+      },
       status: 'PROCESSING',
       createdByUserId: 9,
       updatedByUserId: 9,
@@ -63,6 +69,260 @@ describe('BookingDocumentsService', () => {
       status: 'PROCESSING',
       createdByUserId: 9,
       createdAt: '2026-07-29T10:00:00.000Z',
+    });
+  });
+
+  it('overwrites BL cargo from the linked Arrival Notice on save', async () => {
+    const anPayload = {
+      marks: 'AN MARKS',
+      descriptionOfGoods: 'AN STONE',
+      serviceMode: 'FCL/FCL - CY/CY',
+      volume: "1 x 20'DC",
+      containers: [
+        {
+          type: "20'DC",
+          containerNo: 'C1',
+          sealNo: 'S1',
+          grossWeight: '900',
+          measurement: '12',
+          tare: '',
+          packageType: '',
+          noOfPkgs: '2',
+          note: '',
+          method: '',
+        },
+      ],
+      cargoRows: [],
+    };
+    const blRecord = {
+      id: 70,
+      bookingId: 5,
+      payload: {
+        fblNumber: 'BL-OLD',
+        containers: [],
+        descriptionOfGoods: 'CLIENT DIVERGENT',
+        serviceMode: 'CLIENT MODE',
+      },
+      status: 'COMPLETED',
+      createdByUserId: 1,
+      createdAt: new Date('2026-07-29T10:00:00.000Z'),
+      updatedAt: new Date('2026-07-29T10:00:00.000Z'),
+      lockedAt: null,
+      deletedAt: null,
+    };
+    const anRecord = {
+      id: 60,
+      bookingId: 5,
+      payload: anPayload,
+      status: 'COMPLETED',
+      createdByUserId: 1,
+      createdAt: new Date('2026-07-29T09:00:00.000Z'),
+      updatedAt: new Date('2026-07-29T09:00:00.000Z'),
+      lockedAt: null,
+      deletedAt: null,
+    };
+    const bookingRecord = {
+      id: 5,
+      bookingFlow: 'EXPORT',
+      payload: {},
+      status: 'COMPLETED',
+      createdByUserId: 1,
+      createdAt: new Date('2026-07-29T08:00:00.000Z'),
+      updatedAt: new Date('2026-07-29T08:00:00.000Z'),
+      lockedAt: null,
+      deletedAt: null,
+    };
+    recordRepository.findOne.mockImplementation(
+      (options: { where?: { id?: number; bookingId?: number } }) => {
+        const where = options.where ?? {};
+        if (where.id === 70) return Promise.resolve(blRecord);
+        if (where.id === 5) return Promise.resolve(bookingRecord);
+        if (where.bookingId === 5) return Promise.resolve(anRecord);
+        return Promise.resolve(null);
+      },
+    );
+    recordRepository.save.mockImplementation(
+      (record: object): Promise<object> =>
+        Promise.resolve({
+          ...record,
+          id: 70,
+          bookingId: 5,
+          createdAt: new Date('2026-07-29T10:00:00.000Z'),
+          updatedAt: new Date('2026-07-29T11:00:00.000Z'),
+          lockedAt: null,
+          deletedAt: null,
+        }),
+    );
+
+    const result = await service.updateRecord(
+      BookingDocumentType.BILL_OF_LADING,
+      70,
+      {
+        fblNumber: 'BL-OLD',
+        consignor: 'SHIPPER KEEP',
+        descriptionOfGoods: 'CLIENT DIVERGENT',
+        serviceMode: 'CLIENT MODE',
+        shippingMark: 'KEEP MARK',
+        containers: [
+          {
+            type: "40'HC",
+            containerNo: 'WRONG',
+            sealNo: '',
+            grossWeight: '1',
+            measurement: '1',
+            tare: '',
+            packageType: '',
+            noOfPkgs: '1',
+            note: '',
+            method: '',
+          },
+        ],
+        status: 'COMPLETED',
+      },
+      9,
+    );
+
+    expect(result.payload).toMatchObject({
+      fblNumber: 'BL-OLD',
+      consignor: 'SHIPPER KEEP',
+      shippingMark: 'KEEP MARK',
+      descriptionOfGoods: 'AN STONE',
+      serviceMode: 'FCL/FCL - CY/CY',
+      numberAndKindOfPackages: '2',
+      grossWeight: '900',
+      measurement: '12',
+      containers: [
+        expect.objectContaining({
+          containerNo: 'C1',
+          sealNo: 'S1',
+          type: "20'DC",
+        }),
+      ],
+    });
+  });
+
+  it('overwrites DO cargo/containers from the linked Arrival Notice on save', async () => {
+    const anPayload = {
+      marks: 'AN MARKS',
+      descriptionOfGoods: 'AN STONE',
+      serviceMode: 'FCL/FCL - CY/CY',
+      volume: "1 x 20'DC",
+      containers: [
+        {
+          type: "20'DC",
+          containerNo: 'C1',
+          sealNo: 'S1',
+          grossWeight: '900',
+          measurement: '12',
+          tare: '',
+          packageType: '',
+          noOfPkgs: '2',
+          note: '',
+          method: '',
+        },
+      ],
+      cargoRows: [],
+    };
+    const doRecord = {
+      id: 71,
+      bookingId: 6,
+      payload: {
+        doNumber: 'DO-OLD',
+        containers: [],
+        cargoRows: [],
+        serviceMode: 'CLIENT MODE',
+        descriptionOfGoods: 'CLIENT DIVERGENT',
+      },
+      status: 'COMPLETED',
+      createdByUserId: 1,
+      createdAt: new Date('2026-07-29T10:00:00.000Z'),
+      updatedAt: new Date('2026-07-29T10:00:00.000Z'),
+      lockedAt: null,
+      deletedAt: null,
+    };
+    const anRecord = {
+      id: 61,
+      bookingId: 6,
+      payload: anPayload,
+      status: 'COMPLETED',
+      createdByUserId: 1,
+      createdAt: new Date('2026-07-29T09:00:00.000Z'),
+      updatedAt: new Date('2026-07-29T09:00:00.000Z'),
+      lockedAt: null,
+      deletedAt: null,
+    };
+    const bookingRecord = {
+      id: 6,
+      bookingFlow: 'IMPORT',
+      payload: {},
+      status: 'COMPLETED',
+      createdByUserId: 1,
+      createdAt: new Date('2026-07-29T08:00:00.000Z'),
+      updatedAt: new Date('2026-07-29T08:00:00.000Z'),
+      lockedAt: null,
+      deletedAt: null,
+    };
+    recordRepository.findOne.mockImplementation(
+      (options: { where?: { id?: number; bookingId?: number } }) => {
+        const where = options.where ?? {};
+        if (where.id === 71) return Promise.resolve(doRecord);
+        if (where.id === 6) return Promise.resolve(bookingRecord);
+        if (where.bookingId === 6) return Promise.resolve(anRecord);
+        return Promise.resolve(null);
+      },
+    );
+    recordRepository.save.mockImplementation(
+      (record: object): Promise<object> =>
+        Promise.resolve({
+          ...record,
+          id: 71,
+          bookingId: 6,
+          createdAt: new Date('2026-07-29T10:00:00.000Z'),
+          updatedAt: new Date('2026-07-29T11:00:00.000Z'),
+          lockedAt: null,
+          deletedAt: null,
+        }),
+    );
+
+    const result = await service.updateRecord(
+      BookingDocumentType.DELIVERY_ORDER,
+      71,
+      {
+        doNumber: 'DO-OLD',
+        deliverTo: 'CONSIGNEE KEEP',
+        serviceMode: 'CLIENT MODE',
+        descriptionOfGoods: 'CLIENT DIVERGENT',
+        containers: [
+          {
+            type: "40'HC",
+            containerNo: 'WRONG',
+            sealNo: '',
+            grossWeight: '1',
+            measurement: '1',
+            tare: '',
+            packageType: '',
+            noOfPkgs: '1',
+            note: '',
+            method: '',
+          },
+        ],
+        status: 'COMPLETED',
+      },
+      9,
+    );
+
+    expect(result.payload).toMatchObject({
+      doNumber: 'DO-OLD',
+      deliverTo: 'CONSIGNEE KEEP',
+      serviceMode: 'FCL/FCL - CY/CY',
+      descriptionOfGoods: 'AN STONE',
+      containers: [
+        expect.objectContaining({
+          containerNo: 'C1',
+          sealNo: 'S1',
+          type: "20'DC",
+        }),
+      ],
     });
   });
 

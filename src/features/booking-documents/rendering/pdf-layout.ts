@@ -49,6 +49,7 @@ export const DOC_HEADER_VALUE_H = 10;
  * Shared typography / rhythm for AN, DO, and Booking Confirmation.
  *   DOC_SECTION_LABEL_SIZE — bold section titles (To, Shipper, Marks, Volume, …)
  *   DETAIL_LABEL_SIZE      — bold right-column field labels (MBL No., Vessel/Voyage, …)
+ *   REFERENCE_LABEL_SIZE   — bold + 1pt for Ref. No. (stronger than sibling meta labels)
  *   DOC_BODY_TEXT_SIZE     — all form body / value text (left blocks + right values)
  * DETAIL_LABEL_SIZE aliases DOC_SECTION_LABEL_SIZE so labels stay one family.
  */
@@ -66,6 +67,18 @@ export function contentAwareHeight(
   emptyMinHeight: number,
 ): number {
   return contentHeight > 0 ? contentHeight : emptyMinHeight;
+}
+
+/**
+ * First non-empty line of a party block (Booking Confirmation To / AN Agent).
+ * Strips address / TEL / FAX lines when a full party dump was saved.
+ */
+export function partyDisplayName(text: string | undefined): string {
+  const line = (text ?? '')
+    .split(/\r?\n/)
+    .map((part) => part.replace(/\s+/g, ' ').trim())
+    .find((part) => part.length > 0);
+  return line ?? '';
 }
 
 /**
@@ -90,8 +103,11 @@ export const DOC_RIGHT_W = DOC_FRAME_RIGHT - FRAME_TEXT_INSET - DOC_RIGHT_X;
  * Right-column detail labels (MBL No., Vessel/Voyage, …) — bold, same scale
  * as section labels / body so AN + DO stay visually uniform.
  * Values always render at DOC_BODY_TEXT_SIZE via drawLabelValueLine.
+ * REFERENCE_LABEL_SIZE is slightly larger so "Ref. No." reads stronger than
+ * sibling meta labels when pdf-lib only offers Regular vs Bold.
  */
 export const DETAIL_LABEL_SIZE = DOC_SECTION_LABEL_SIZE;
+export const REFERENCE_LABEL_SIZE = DOC_SECTION_LABEL_SIZE + 1;
 export const DETAIL_ROW_STEP = 14;
 
 /**
@@ -339,6 +355,13 @@ export function drawLabelValueRows(
     y: number;
     /** Bold label size; defaults to DETAIL_LABEL_SIZE. */
     labelSize?: number;
+    /**
+     * Labels in this set render at emphasizedLabelSize (e.g. Ref. No.)
+     * so they read stronger than sibling meta labels.
+     */
+    emphasizedLabels?: ReadonlySet<string>;
+    /** Size for emphasizedLabels; defaults to REFERENCE_LABEL_SIZE. */
+    emphasizedLabelSize?: number;
     /** Body/value size; defaults to DOC_BODY_TEXT_SIZE. */
     valueSize?: number;
     minRowStep?: number;
@@ -346,6 +369,7 @@ export function drawLabelValueRows(
 ): number {
   let y = opts.y;
   const labelSize = opts.labelSize ?? DETAIL_LABEL_SIZE;
+  const emphasizedSize = opts.emphasizedLabelSize ?? REFERENCE_LABEL_SIZE;
   const valueSize = opts.valueSize ?? DOC_BODY_TEXT_SIZE;
   const minRowStep = opts.minRowStep ?? DETAIL_ROW_STEP;
   for (const [label, value] of rows) {
@@ -356,7 +380,7 @@ export function drawLabelValueRows(
       valueX: opts.valueX,
       valueWidth: opts.valueWidth,
       y,
-      labelSize,
+      labelSize: opts.emphasizedLabels?.has(label) ? emphasizedSize : labelSize,
       valueSize,
       minRowStep,
     });
@@ -482,7 +506,7 @@ export function drawLetterhead(
 
 const DEFAULT_CARGO_COLUMNS = [6, 179, 267, 412, 500, 589];
 const CARGO_HEADERS = [
-  'Container No./ Seal No.',
+  'Container No. / Seal No. / Type',
   'Quantity',
   'Description of Goods',
   'Gross Weight',

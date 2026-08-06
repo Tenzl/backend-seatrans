@@ -1,5 +1,15 @@
-import { IsIn, IsInt, IsOptional, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsIn,
+  IsInt,
+  IsOptional,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import { BILL_OF_LADING_FORM_VARIANTS } from '../constants/booking-document.constants';
+import { AnContainerDto } from './an-container.dto';
 import { PreviewText } from './preview-text.decorator';
 
 /** Payload for FIATA FBL overlay on a selectable blank template. */
@@ -20,11 +30,34 @@ export class BillOfLadingPreviewDto {
   @PreviewText(300) portOfDischarge?: string;
   @PreviewText(300) placeOfDelivery?: string;
 
+  /**
+   * AN service mode (e.g. `FCL/FCL - CY/CY`) — PDF marks column row 1.
+   * Structured cargo layout (when containers/serviceMode present):
+   * row1 serviceMode + volume STC; then one marks line per container
+   * (`containerNo / sealNo / type`) with that row’s GW/measurement;
+   * then shippingMark + descriptionOfGoods. Synced from AN `serviceMode`.
+   */
+  @PreviewText(200) serviceMode?: string;
+
+  /**
+   * Editable shipping mark beside descriptionOfGoods on the BL PDF.
+   * BL-owned; empty prints blank (never auto-injected as "N/M").
+   */
+  @PreviewText(2_000) shippingMark?: string;
+  /** @deprecated Legacy alias; migrated to `shippingMark` on validate. */
   @PreviewText(2_000) marksAndNumbers?: string;
   @PreviewText(1_000) numberAndKindOfPackages?: string;
   @PreviewText(4_000) descriptionOfGoods?: string;
-  @PreviewText(200) grossWeight?: string;
-  @PreviewText(200) measurement?: string;
+  @PreviewText(500) grossWeight?: string;
+  @PreviewText(500) measurement?: string;
+
+  /** Canonical multi-container rows (shared with Arrival Notice). */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => AnContainerDto)
+  containers?: AnContainerDto[];
 
   /** e.g. FREIGHT COLLECT */
   @PreviewText(300) freightTerms?: string;

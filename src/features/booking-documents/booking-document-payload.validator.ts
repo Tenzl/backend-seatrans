@@ -6,7 +6,18 @@ import { In, IsNull, Repository } from 'typeorm';
 import { BookingPartner } from '../booking/entities/booking-partner.entity';
 import { CustomerType } from '../booking/enums/customer-type.enum';
 import { PartnerAdditionType } from '../booking/enums/partner-addition-type.enum';
+import {
+  anContainersToBlCargoTextFields,
+  anContainersToCargoRows,
+  anContainersToVolumeText,
+  containerRowHasCargo,
+  legacyBlCargoTextToContainers,
+  normalizeAnContainersPayload,
+  resolveBlShippingMark,
+  resolveDescriptionOfGoods,
+} from './an-container';
 import { BookingDocumentPayload } from './booking-document.types';
+import { normalizeBookingCargoVolumePayload } from './cargo-volume';
 import { ArrivalNoticePreviewDto } from './dto/arrival-notice-preview.dto';
 import { BillOfLadingPreviewDto } from './dto/bill-of-lading-preview.dto';
 import { BookingConfirmationPreviewDto } from './dto/booking-confirmation-preview.dto';
@@ -75,8 +86,103 @@ export class BookingDocumentPayloadValidator {
         details: this.flattenErrors(errors),
       });
     }
+    if (type === BookingDocumentType.BOOKING_CONFIRMATION) {
+      this.normalizeBookingVolumes(dto as BookingConfirmationPreviewDto);
+    }
+    if (type === BookingDocumentType.ARRIVAL_NOTICE) {
+      this.normalizeArrivalNoticeContainers(dto as ArrivalNoticePreviewDto);
+    }
+    if (type === BookingDocumentType.BILL_OF_LADING) {
+      this.normalizeBillOfLadingContainers(dto as BillOfLadingPreviewDto);
+    }
+    if (type === BookingDocumentType.DELIVERY_ORDER) {
+      this.normalizeDeliveryOrderContainers(dto as DeliveryOrderPreviewDto);
+    }
     await this.validateAndNormalizeParties(type, dto);
     return dto;
+  }
+
+  private normalizeBookingVolumes(dto: BookingConfirmationPreviewDto): void {
+    const normalized = normalizeBookingCargoVolumePayload({
+      cargoVolumes: dto.cargoVolumes,
+      volume: dto.volume,
+    });
+    dto.cargoVolumes = normalized.cargoVolumes;
+    dto.volume = normalized.volume;
+  }
+
+  /** Prefer containers; migrate legacy cargoRows; derive cargoRows + volume for PDF. */
+  private normalizeArrivalNoticeContainers(
+    dto: ArrivalNoticePreviewDto,
+  ): void {
+    const containers = normalizeAnContainersPayload({
+      containers: dto.containers,
+      cargoRows: dto.cargoRows,
+    });
+    dto.containers = containers;
+    dto.descriptionOfGoods = resolveDescriptionOfGoods({
+      descriptionOfGoods: dto.descriptionOfGoods,
+      containers,
+    });
+    dto.cargoRows = anContainersToCargoRows(
+      containers,
+      dto.descriptionOfGoods,
+    );
+    const derivedVolume = anContainersToVolumeText(containers);
+    if (derivedVolume) {
+      dto.volume = derivedVolume;
+    }
+  }
+
+  /**
+   * Prefer containers; migrate legacy free-text cargo into rows; derive
+   * blank-form GW / measurement from structured containers. Keep shipment
+   * descriptionOfGoods as free-text (legacy fill from container note).
+   * Migrate legacy `marksAndNumbers` → `shippingMark`.
+   */
+  private normalizeBillOfLadingContainers(dto: BillOfLadingPreviewDto): void {
+    let containers = normalizeAnContainersPayload({
+      containers: dto.containers,
+    });
+    if (containers.length === 0) {
+      containers = legacyBlCargoTextToContainers({
+        descriptionOfGoods: dto.descriptionOfGoods,
+        grossWeight: dto.grossWeight,
+        measurement: dto.measurement,
+        numberAndKindOfPackages: dto.numberAndKindOfPackages,
+      });
+    }
+    dto.containers = containers;
+    dto.descriptionOfGoods = resolveDescriptionOfGoods({
+      descriptionOfGoods: dto.descriptionOfGoods,
+      containers,
+    });
+    dto.shippingMark = resolveBlShippingMark(dto);
+    delete dto.marksAndNumbers;
+    if (containers.some(containerRowHasCargo)) {
+      const derived = anContainersToBlCargoTextFields(
+        containers,
+        dto.descriptionOfGoods,
+      );
+      dto.grossWeight = derived.grossWeight;
+      dto.measurement = derived.measurement;
+      dto.numberAndKindOfPackages = derived.numberAndKindOfPackages;
+    }
+  }
+
+  /**
+   * DO cargo/container rows mirror BL: prefer `containers`; migrate legacy
+   * `cargoRows`; re-derive `cargoRows` (PDF table input) from containers and
+   * the (AN-synced) shipment `descriptionOfGoods`.
+   */
+  private normalizeDeliveryOrderContainers(dto: DeliveryOrderPreviewDto): void {
+    const containers = normalizeAnContainersPayload({
+      containers: dto.containers,
+      cargoRows: dto.cargoRows,
+    });
+    dto.containers = containers;
+    dto.descriptionOfGoods = (dto.descriptionOfGoods ?? '').trim();
+    dto.cargoRows = anContainersToCargoRows(containers, dto.descriptionOfGoods);
   }
 
   private async validateAndNormalizeParties(
@@ -110,6 +216,8 @@ export class BookingDocumentPayloadValidator {
       textKey: keyof PartyPayload,
       additionType?: PartnerAdditionType,
       customerType?: CustomerType,
+      /** Booking Confirmation To: name only. AN Agent stores full block; PDF trims. */
+      nameOnly = false,
     ) => {
       if (id == null) return;
       const partner = byId.get(id);
@@ -133,7 +241,9 @@ export class BookingDocumentPayloadValidator {
           `${label} Party must have customer type ${customerType}`,
         );
       }
-      (payload[textKey] as string | undefined) = this.formatParty(partner);
+      (payload[textKey] as string | undefined) = nameOnly
+        ? this.formatPartyName(partner)
+        : this.formatParty(partner);
     };
 
     if (type === BookingDocumentType.BOOKING_CONFIRMATION) {
@@ -142,6 +252,8 @@ export class BookingDocumentPayloadValidator {
         'Client',
         'to',
         PartnerAdditionType.CUSTOMER,
+        undefined,
+        true,
       );
     } else if (type === BookingDocumentType.ARRIVAL_NOTICE) {
       normalize(
@@ -211,16 +323,37 @@ export class BookingDocumentPayloadValidator {
   }
 
   private normalizeSameAs(payload: PartyPayload): void {
-    if (payload.notifyPartySameAsConsignee) {
-      if (typeof payload.consigneePartyId === 'number') {
-        payload.notifyPartyId = payload.consigneePartyId;
-        payload.notifyParty = payload.consignee ?? '';
-      } else {
-        payload.notifyPartySameAsConsignee = false;
-        payload.notifyPartyId = undefined;
-        payload.notifyParty = '';
-      }
+    if (!payload.notifyPartySameAsConsignee) return;
+
+    const consigneeId =
+      typeof payload.consigneePartyId === 'number'
+        ? payload.consigneePartyId
+        : undefined;
+    const consigneeText = (payload.consignee ?? '').trim();
+
+    // Partner-linked: mirror id + (already normalized) address block.
+    if (consigneeId != null) {
+      payload.notifyPartyId = consigneeId;
+      payload.notifyParty = payload.consignee ?? '';
+      return;
     }
+
+    // Free-text Consignee (no partner id): keep the flag and copy text.
+    // Frontend allows Same as Consignee with text-only Consignee; clearing
+    // the flag here made Save appear to uncheck the box after applyRecord.
+    if (consigneeText.length > 0) {
+      payload.notifyPartyId = undefined;
+      payload.notifyParty = payload.consignee ?? '';
+      return;
+    }
+
+    payload.notifyPartySameAsConsignee = false;
+    payload.notifyPartyId = undefined;
+    payload.notifyParty = '';
+  }
+
+  private formatPartyName(partner: BookingPartner): string {
+    return partner.name?.replace(/\s+/g, ' ').trim() ?? '';
   }
 
   private formatParty(partner: BookingPartner): string {

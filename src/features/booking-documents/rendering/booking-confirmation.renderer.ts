@@ -1,4 +1,5 @@
 import { PDFFont, PDFPage, rgb } from 'pdf-lib';
+import { resolveBookingVolumeDisplay } from '../cargo-volume';
 import { BookingConfirmationPreviewDto } from '../dto/booking-confirmation-preview.dto';
 import { BookingDocumentRenderContext } from './booking-document-render-context';
 import {
@@ -17,12 +18,15 @@ import {
   labeledBlockStackHeight,
   labelValueStartX,
   measureTextHeight,
+  partyDisplayName,
 } from './pdf-layout';
 
 const TEXT_SIZE = DOC_BODY_TEXT_SIZE;
 /** Grid cell headings — regular weight (thinner than bold). */
 const LABEL_SIZE = DOC_SECTION_LABEL_SIZE;
 const HEADER_LABEL_SIZE = DOC_SECTION_LABEL_SIZE;
+/** Client name on To: larger than body (8) and bold. */
+const TO_CLIENT_SIZE = 11;
 const FRAME_LEFT = DOC_FRAME_LEFT;
 const FRAME_RIGHT = DOC_FRAME_RIGHT;
 const PAGE_MIN_BOTTOM = 48;
@@ -147,7 +151,12 @@ export function renderBookingConfirmation(
     ],
     [
       { label: 'Commodity:', value: dto.commodity, colStart: 0, colEnd: 1 },
-      { label: 'Volume:', value: dto.volume, colStart: 1, colEnd: 3 },
+      {
+        label: 'Volume:',
+        value: resolveBookingVolumeDisplay(dto),
+        colStart: 1,
+        colEnd: 3,
+      },
       {
         label: 'Gross Weight (KGS):',
         value: dto.grossWeight,
@@ -249,8 +258,10 @@ function drawBorderlessIntro(
   );
 
   // Band 2 — To + intro on the next rows (below Date / Booking No.).
+  // Client value: name only, bold, larger than body text.
   const toTop = rightCursor - 10;
   const toLabel = 'To:';
+  const toName = partyDisplayName(dto.to);
   const toWidth = FRAME_RIGHT - FRAME_TEXT_INSET - DOC_LEFT_X;
   page.drawText(toLabel, {
     x: DOC_LEFT_X,
@@ -265,21 +276,23 @@ function drawBorderlessIntro(
     bold,
     HEADER_LABEL_SIZE,
   );
-  const toBottom = drawTextBlock(page, regular, regular, dto.to, {
+  const toValueWidth = Math.max(40, toWidth - (toValueX - DOC_LEFT_X));
+  const toBottom = drawTextBlock(page, regular, bold, toName, {
     x: toValueX,
     top: toTop - 1,
-    width: Math.max(40, toWidth - (toValueX - DOC_LEFT_X)),
+    width: toValueWidth,
     minHeight: contentAwareHeight(
       measureTextHeight(
-        dto.to,
-        regular,
-        TEXT_SIZE,
-        Math.max(40, toWidth - (toValueX - DOC_LEFT_X)),
+        toName,
+        bold,
+        TO_CLIENT_SIZE,
+        toValueWidth,
         LINE_HEIGHT,
       ),
       EMPTY_TO_MIN,
     ),
-    size: TEXT_SIZE,
+    size: TO_CLIENT_SIZE,
+    bold: true,
     lineHeightFactor: LINE_HEIGHT,
   });
 

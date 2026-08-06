@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, Min } from 'class-validator';
+import { IsInt, IsObject, IsOptional, Min } from 'class-validator';
 import { PreviewText } from './preview-text.decorator';
 
 export class BookingConfirmationPreviewDto {
@@ -21,7 +21,15 @@ export class BookingConfirmationPreviewDto {
   @PreviewText(100) vgmCutoff?: string;
   @PreviewText(500) contact?: string;
   @PreviewText(1_000) commodity?: string;
-  @PreviewText(300) volume?: string;
+  /** Derived multiline display string for PDF / AN-DO prefill. */
+  @PreviewText(500) volume?: string;
+  /**
+   * Structured cargo volumes (only qty > 0 after normalization).
+   * Example: { "20'DC": 3, "40'RF": 1 }
+   */
+  @IsOptional()
+  @IsObject()
+  cargoVolumes?: Record<string, number>;
   @PreviewText(300) grossWeight?: string;
   @PreviewText(300) measurement?: string;
   @PreviewText(300) transitPort?: string;

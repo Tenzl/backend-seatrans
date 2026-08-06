@@ -1,4 +1,8 @@
 import { rgb } from 'pdf-lib';
+import {
+  anContainersToCargoRows,
+  normalizeAnContainersPayload,
+} from '../an-container';
 import { DeliveryOrderPreviewDto } from '../dto/delivery-order-preview.dto';
 import { BookingDocumentRenderContext } from './booking-document-render-context';
 import {
@@ -150,9 +154,18 @@ export function renderDeliveryOrder(
     }
   }
 
+  // Cargo / container rows mirror BL: same container model (up to 20 rows),
+  // one PDF line per container — see `an-container.ts` shared helpers.
+  const containers = normalizeAnContainersPayload({
+    containers: dto.containers,
+    cargoRows: dto.cargoRows,
+  });
+  const cargoRows =
+    containers.length > 0 ? anContainersToCargoRows(containers) : (dto.cargoRows ?? []);
+
   finishCargoAndAttentionPage(pdf, page, regular, bold, {
     marksBottom,
-    cargoRows: dto.cargoRows,
+    cargoRows,
     title: 'DELIVERY ORDER',
     attentionText: dto.customerAttention,
     includeForSeatrans: true,

@@ -1,9 +1,19 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import {
+  syncBillOfLadingCargoFromArrivalNotice,
+  syncDeliveryOrderCargoFromArrivalNotice,
+} from './an-container';
 import { BookingDocumentRecordService } from './booking-document-record.service';
 import { BookingDocumentPayloadValidator } from './booking-document-payload.validator';
-import { BookingDocumentPreview } from './booking-document.types';
+import {
+  BookingDocumentPayload,
+  BookingDocumentPreview,
+} from './booking-document.types';
+import { ArrivalNoticePreviewDto } from './dto/arrival-notice-preview.dto';
+import { BillOfLadingPreviewDto } from './dto/bill-of-lading-preview.dto';
+import { DeliveryOrderPreviewDto } from './dto/delivery-order-preview.dto';
 import { UpsertBookingDocumentRecordDto } from './dto/upsert-booking-document-record.dto';
 import { BookingDocumentStatus } from './enums/booking-document-status.enum';
 import { BookingDocumentType } from './enums/booking-document-type.enum';
@@ -25,17 +35,52 @@ export class BookingDocumentsService {
   ) {
     const { status, bookingFlow, bookingId, payload } =
       await this.parseUpsertBody(body);
-    const validatedPayload = await this.payloadValidator.validate(
+    let validatedPayload = await this.payloadValidator.validate(
       type,
       payload,
     );
-    return this.recordService.create(
+    if (
+      type === BookingDocumentType.BILL_OF_LADING &&
+      bookingId != null
+    ) {
+      validatedPayload = await this.overwriteBlCargoFromAn(
+        bookingId,
+        validatedPayload as BillOfLadingPreviewDto,
+      );
+    }
+    if (
+      type === BookingDocumentType.DELIVERY_ORDER &&
+      bookingId != null
+    ) {
+      validatedPayload = await this.overwriteDoCargoFromAn(
+        bookingId,
+        validatedPayload as DeliveryOrderPreviewDto,
+      );
+    }
+    const created = await this.recordService.create(
       type,
       validatedPayload,
       createdByUserId,
       status ?? BookingDocumentStatus.PROCESSING,
       { bookingFlow, bookingId },
     );
+    if (
+      type === BookingDocumentType.ARRIVAL_NOTICE &&
+      bookingId != null
+    ) {
+      const anPayload = validatedPayload as ArrivalNoticePreviewDto;
+      await this.patchSiblingBlCargoFromAn(
+        bookingId,
+        anPayload,
+        createdByUserId,
+      );
+      await this.patchSiblingDoCargoFromAn(
+        bookingId,
+        anPayload,
+        createdByUserId,
+      );
+    }
+    return created;
   }
 
   async getRecord(type: BookingDocumentType, id: number) {
@@ -52,18 +97,55 @@ export class BookingDocumentsService {
     body: unknown,
     actorUserId: number,
   ) {
+    const existing = await this.recordService.getById(type, id);
     const { status, payload } = await this.parseUpsertBody(body);
-    const validatedPayload = await this.payloadValidator.validate(
+    let validatedPayload = await this.payloadValidator.validate(
       type,
       payload,
     );
-    return this.recordService.update(
+    const bookingId = existing.bookingId ?? undefined;
+    if (
+      type === BookingDocumentType.BILL_OF_LADING &&
+      bookingId != null
+    ) {
+      validatedPayload = await this.overwriteBlCargoFromAn(
+        bookingId,
+        validatedPayload as BillOfLadingPreviewDto,
+      );
+    }
+    if (
+      type === BookingDocumentType.DELIVERY_ORDER &&
+      bookingId != null
+    ) {
+      validatedPayload = await this.overwriteDoCargoFromAn(
+        bookingId,
+        validatedPayload as DeliveryOrderPreviewDto,
+      );
+    }
+    const updated = await this.recordService.update(
       type,
       id,
       validatedPayload,
       actorUserId,
       status,
     );
+    if (
+      type === BookingDocumentType.ARRIVAL_NOTICE &&
+      bookingId != null
+    ) {
+      const anPayload = validatedPayload as ArrivalNoticePreviewDto;
+      await this.patchSiblingBlCargoFromAn(
+        bookingId,
+        anPayload,
+        actorUserId,
+      );
+      await this.patchSiblingDoCargoFromAn(
+        bookingId,
+        anPayload,
+        actorUserId,
+      );
+    }
+    return updated;
   }
 
   async lockRecord(type: BookingDocumentType, id: number, actorUserId: number) {
@@ -103,6 +185,102 @@ export class BookingDocumentsService {
       payload,
     );
     return this.pdfRenderer.render(type, validatedPayload);
+  }
+
+  /**
+   * BL save must not persist client-divergent cargo — always copy from AN.
+   */
+  private async overwriteBlCargoFromAn(
+    bookingId: number,
+    blPayload: BillOfLadingPreviewDto,
+  ): Promise<BillOfLadingPreviewDto> {
+    const an = await this.recordService.findActiveByBookingId(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      bookingId,
+    );
+    if (!an) return blPayload;
+    const synced = syncBillOfLadingCargoFromArrivalNotice(
+      an.payload as ArrivalNoticePreviewDto,
+      blPayload,
+    );
+    return (await this.payloadValidator.validate(
+      BookingDocumentType.BILL_OF_LADING,
+      synced,
+    )) as BillOfLadingPreviewDto;
+  }
+
+  /** When AN cargo changes, keep the sibling BL cargo in lockstep. */
+  private async patchSiblingBlCargoFromAn(
+    bookingId: number,
+    anPayload: ArrivalNoticePreviewDto,
+    actorUserId: number,
+  ): Promise<void> {
+    const bl = await this.recordService.findActiveByBookingId(
+      BookingDocumentType.BILL_OF_LADING,
+      bookingId,
+    );
+    if (!bl || bl.lockedAt) return;
+    const synced = syncBillOfLadingCargoFromArrivalNotice(
+      anPayload,
+      bl.payload as BillOfLadingPreviewDto,
+    );
+    const validated = (await this.payloadValidator.validate(
+      BookingDocumentType.BILL_OF_LADING,
+      synced,
+    )) as BookingDocumentPayload;
+    await this.recordService.update(
+      BookingDocumentType.BILL_OF_LADING,
+      bl.id,
+      validated,
+      actorUserId,
+    );
+  }
+
+  /** DO cargo/containers mirror BL: owned by AN, read-only on the DO form. */
+  private async overwriteDoCargoFromAn(
+    bookingId: number,
+    doPayload: DeliveryOrderPreviewDto,
+  ): Promise<DeliveryOrderPreviewDto> {
+    const an = await this.recordService.findActiveByBookingId(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      bookingId,
+    );
+    if (!an) return doPayload;
+    const synced = syncDeliveryOrderCargoFromArrivalNotice(
+      an.payload as ArrivalNoticePreviewDto,
+      doPayload,
+    );
+    return (await this.payloadValidator.validate(
+      BookingDocumentType.DELIVERY_ORDER,
+      synced,
+    )) as DeliveryOrderPreviewDto;
+  }
+
+  /** When AN cargo changes, keep the sibling DO cargo in lockstep. */
+  private async patchSiblingDoCargoFromAn(
+    bookingId: number,
+    anPayload: ArrivalNoticePreviewDto,
+    actorUserId: number,
+  ): Promise<void> {
+    const doc = await this.recordService.findActiveByBookingId(
+      BookingDocumentType.DELIVERY_ORDER,
+      bookingId,
+    );
+    if (!doc || doc.lockedAt) return;
+    const synced = syncDeliveryOrderCargoFromArrivalNotice(
+      anPayload,
+      doc.payload as DeliveryOrderPreviewDto,
+    );
+    const validated = (await this.payloadValidator.validate(
+      BookingDocumentType.DELIVERY_ORDER,
+      synced,
+    )) as BookingDocumentPayload;
+    await this.recordService.update(
+      BookingDocumentType.DELIVERY_ORDER,
+      doc.id,
+      validated,
+      actorUserId,
+    );
   }
 
   private async parseUpsertBody(body: unknown): Promise<{

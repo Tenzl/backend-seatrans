@@ -122,6 +122,19 @@ describe('BookingDocumentRecordService lifecycle', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it('persists AN billOfLadingType on create', async () => {
+    const created = await service.createRecord(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      { anNumber: 'AN-LEGACY', billOfLadingType: 'Surrendered' },
+      4,
+    );
+
+    expect(created.payload).toMatchObject({
+      anNumber: 'AN-LEGACY',
+      billOfLadingType: 'Surrendered',
+    });
+  });
+
   it('creates drafts, updates, locks, unlocks, archives, and lists by type', async () => {
     const created = await service.createRecord(
       BookingDocumentType.ARRIVAL_NOTICE,

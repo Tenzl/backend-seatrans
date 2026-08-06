@@ -90,6 +90,17 @@ export class BookingDocumentRecordService {
     return this.toResponse(type, record);
   }
 
+  /** Active child document for a booking, or null when none exists. */
+  async findActiveByBookingId(type: BookingDocumentType, bookingId: number) {
+    if (type === BookingDocumentType.BOOKING_CONFIRMATION) {
+      return this.getById(type, bookingId);
+    }
+    const record = await this.repository(type).findOne({
+      where: { bookingId, deletedAt: IsNull() } as never,
+    });
+    return record ? this.toResponse(type, record) : null;
+  }
+
   async getWorkflow(bookingId: number) {
     const booking = (await this.findActiveOrFail(
       BookingDocumentType.BOOKING_CONFIRMATION,
