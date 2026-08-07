@@ -30,7 +30,7 @@ export const SECTION_CATALOG: readonly SectionDef[] = [
   },
   { key: 'users', label: 'Users', group: 'Data Management', adminOnly: true },
   { key: 'data-ports', label: 'Ports', group: 'Data Management' },
-  { key: 'data-cargo', label: 'Commodities', group: 'Data Management' },
+  { key: 'data-commodities', label: 'Commodities', group: 'Data Management' },
   { key: 'data-images', label: 'Images', group: 'Data Management' },
   { key: 'data-offices', label: 'Offices', group: 'Data Management' },
   { key: 'data-storage', label: 'Storage', group: 'Data Management' },

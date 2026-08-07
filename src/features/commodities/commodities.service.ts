@@ -87,13 +87,18 @@ export class CommoditiesService {
       );
     }
 
+    const cargoType = this.normalizeCargoType(dto.cargoType);
     const duplicate = await this.commodityRepository.findOne({
-      where: { serviceTypeId: dto.serviceTypeId, name: normalizedName },
+      where: {
+        serviceTypeId: dto.serviceTypeId,
+        cargoType,
+        name: normalizedName,
+      },
     });
 
     if (duplicate) {
       throw new ConflictException(
-        'Commodity already exists in this service type',
+        'Commodity already exists in this service type and cargo type',
       );
     }
 
@@ -103,7 +108,7 @@ export class CommoditiesService {
       displayName: normalizedDisplayName,
       description: dto.description?.trim() || null,
       requiredImageCount: dto.requiredImageCount ?? 18,
-      cargoType: this.normalizeCargoType(dto.cargoType),
+      cargoType,
     });
 
     const saved = await this.commodityRepository.save(commodity);
@@ -124,13 +129,25 @@ export class CommoditiesService {
       );
     }
 
+    // Only re-validate when a cargo type is explicitly sent. Editing a legacy
+    // commodity (junk stored type) without touching it keeps its value as-is
+    // rather than failing the save.
+    const cargoType =
+      dto.cargoType !== undefined
+        ? this.normalizeCargoType(dto.cargoType)
+        : commodity.cargoType;
+
     const duplicate = await this.commodityRepository.findOne({
-      where: { serviceTypeId: dto.serviceTypeId, name: normalizedName },
+      where: {
+        serviceTypeId: dto.serviceTypeId,
+        cargoType,
+        name: normalizedName,
+      },
     });
 
     if (duplicate && duplicate.id !== id) {
       throw new ConflictException(
-        'Commodity already exists in this service type',
+        'Commodity already exists in this service type and cargo type',
       );
     }
 
@@ -140,11 +157,8 @@ export class CommoditiesService {
     commodity.description = dto.description?.trim() || null;
     commodity.requiredImageCount =
       dto.requiredImageCount ?? commodity.requiredImageCount;
-    // Only re-validate when a cargo type is explicitly sent. Editing a legacy
-    // commodity (junk stored type) without touching it keeps its value as-is
-    // rather than failing the save.
     if (dto.cargoType !== undefined) {
-      commodity.cargoType = this.normalizeCargoType(dto.cargoType);
+      commodity.cargoType = cargoType;
     }
 
     const updated = await this.commodityRepository.save(commodity);

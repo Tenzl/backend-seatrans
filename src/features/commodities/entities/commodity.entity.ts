@@ -4,9 +4,13 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  Index,
 } from 'typeorm';
 
 @Entity('commodities')
+@Index('uq_commodities_service_cargo_name', ['serviceTypeId', 'cargoType', 'name'], {
+  unique: true,
+})
 export class Commodity {
   @PrimaryGeneratedColumn()
   id: number;

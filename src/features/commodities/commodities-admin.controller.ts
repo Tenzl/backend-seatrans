@@ -22,19 +22,19 @@ import { CreateCommodityDto } from './dto/create-commodity.dto';
 export class CommoditiesAdminController {
   constructor(private readonly commoditiesService: CommoditiesService) {}
 
-  @AdminSection('data-cargo')
+  @AdminSection('data-commodities')
   @Get()
   list(@Query() query: LimitQueryDto): Promise<CommodityDto[]> {
     return this.commoditiesService.list({ limit: query.limit });
   }
 
-  @AdminSection('data-cargo')
+  @AdminSection('data-commodities')
   @Get(':id')
   getById(@Param('id') id: string): Promise<CommodityDto> {
     return this.commoditiesService.getById(Number(id));
   }
 
-  /** Any internal staff may add cargo (matches legacy ROLE_EMPLOYEE access). */
+  /** Any internal staff may add commodities (matches legacy ROLE_EMPLOYEE access). */
   @ApiAdmin()
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -42,7 +42,7 @@ export class CommoditiesAdminController {
     return this.commoditiesService.create(dto);
   }
 
-  @AdminSection('data-cargo')
+  @AdminSection('data-commodities')
   @Put(':id')
   update(
     @Param('id') id: string,
