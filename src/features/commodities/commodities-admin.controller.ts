@@ -24,8 +24,8 @@ export class CommoditiesAdminController {
 
   @AdminSection('data-cargo')
   @Get()
-  getAll(@Query() query: LimitQueryDto): Promise<CommodityDto[]> {
-    return this.commoditiesService.getAllAdmin(query.limit);
+  list(@Query() query: LimitQueryDto): Promise<CommodityDto[]> {
+    return this.commoditiesService.list({ limit: query.limit });
   }
 
   @AdminSection('data-cargo')

@@ -13,7 +13,6 @@ import { User } from '../../auth/entities/user.entity';
 import { InquiryCreatedSource } from '../enums/inquiry-created-source.enum';
 import { InquiryStatus } from '../enums/inquiry-status.enum';
 import { UpdateShippingAgencyEpdaDto } from '../dto/update-shipping-agency-epda.dto';
-import { IssueShippingAgencyEpdaDto } from '../dto/issue-shipping-agency-epda.dto';
 import { LockShippingAgencyEpdaDto } from '../dto/lock-shipping-agency-epda.dto';
 import { CreateInternalShippingAgencyInquiryDto } from '../dto/create-internal-shipping-agency-inquiry.dto';
 import { getDefaultGarbageUsdRate } from '../constants/epda-garbage.defaults';
@@ -146,6 +145,9 @@ export class ShippingAgencyEpdaService {
         agencyFeeMode: this.trimToNull(dto.agencyFeeMode),
         agencyDiscountPercent: this.toNumericString(dto.agencyDiscountPercent),
         agencyLumpsumAmount: this.toNumericString(dto.agencyLumpsumAmount),
+        agencyOtherExpenses: this.normalizeAgencyOtherExpenses(
+          dto.agencyOtherExpenses,
+        ),
         shorecraneHireUsdPerMt: this.toNumericString(
           dto.shorecraneHireUsdPerMt,
         ),
@@ -253,6 +255,9 @@ export class ShippingAgencyEpdaService {
     }
     if (dto.agencyFeeMode !== undefined) {
       row.agencyFeeMode = this.trimToNull(dto.agencyFeeMode);
+      if (row.agencyFeeMode !== 'LUMPSUM' && dto.agencyOtherExpenses === undefined) {
+        row.agencyOtherExpenses = null;
+      }
     }
     if (dto.agencyDiscountPercent !== undefined) {
       row.agencyDiscountPercent = this.toNumericString(
@@ -262,11 +267,15 @@ export class ShippingAgencyEpdaService {
     if (dto.agencyLumpsumAmount !== undefined) {
       row.agencyLumpsumAmount = this.toNumericString(dto.agencyLumpsumAmount);
     }
-    // Snapshot is written only by lockEpda / issueEpdaToCustomer — not by draft saves.
+    if (dto.agencyOtherExpenses !== undefined) {
+      row.agencyOtherExpenses = this.normalizeAgencyOtherExpenses(
+        dto.agencyOtherExpenses,
+      );
+    }
+    // Snapshot is written only by lockEpda — not by draft saves.
 
     // Draft completeness drives the status: COMPLETED when all required fields
-    // are filled, PROCESSING otherwise. Issuing to the customer (separate call)
-    // is what moves it to QUOTED.
+    // are filled, PROCESSING otherwise.
     if (dto.isComplete !== undefined) {
       row.status = dto.isComplete
         ? InquiryStatus.COMPLETED
@@ -294,101 +303,9 @@ export class ShippingAgencyEpdaService {
     };
   }
 
-  async issueEpdaToCustomer(
-    inquiryId: number,
-    dto: IssueShippingAgencyEpdaDto,
-    actorUserId: number,
-  ): Promise<Record<string, unknown>> {
-    const result = await this.inquiryRepository.manager.transaction(
-      async (manager) => {
-        const { row, repository } =
-          await this.requireLockedShippingAgencyInquiry(manager, inquiryId);
-        return this.issueLockedEpdaRow(
-          row,
-          repository,
-          manager,
-          dto,
-          actorUserId,
-        );
-      },
-    );
-    await this.runPostCommitNotification('status changed', () =>
-      this.notificationService.notifyStatusChanged(
-        result.saved,
-        result.previousStatus,
-      ),
-    );
-    await this.runPostCommitNotification('inquiry quoted', () =>
-      this.notificationService.notifyInquiryQuotedIfNeeded(
-        result.saved,
-        result.previousStatus,
-      ),
-    );
-    return result.payload;
-  }
-
-  private async issueLockedEpdaRow(
-    row: ShippingAgencyInquiryEntity,
-    repository: Repository<ShippingAgencyInquiryEntity>,
-    manager: EntityManager,
-    dto: IssueShippingAgencyEpdaDto,
-    actorUserId: number,
-  ): Promise<{
-    payload: Record<string, unknown>;
-    saved: ShippingAgencyInquiryEntity;
-    previousStatus: string;
-  }> {
-    const previousStatus = row.status;
-    const requestedSnapshot =
-      await this.snapshotService.buildAuthoritativeSnapshot(
-        row,
-        dto.epdaSnapshot,
-      );
-    if (row.epdaLockedAt) {
-      if (
-        !this.snapshotService.snapshotsEqual(
-          row.epdaSnapshot,
-          requestedSnapshot,
-        )
-      ) {
-        throw new ConflictException(
-          'EPDA is locked with a different tariff snapshot',
-        );
-      }
-    } else {
-      row.epdaSnapshot = requestedSnapshot;
-      row.epdaLockedAt = new Date();
-    }
-    row.status = InquiryStatus.QUOTED;
-    row.quotedAt = new Date();
-    row.quotedByUserId = actorUserId;
-
-    await this.touchProcessedBy(row, actorUserId, manager);
-    const saved = await repository.save(row);
-    // Audit: record the issue action (status transition).
-    await this.fieldChangeService.logFieldChanges(
-      saved.id,
-      actorUserId,
-      InquiryFieldChangeAction.EPDA_ISSUE,
-      [
-        {
-          field: 'Status',
-          previousValue: String(previousStatus ?? ''),
-          newValue: String(saved.status ?? ''),
-        },
-      ],
-      manager,
-    );
-    return {
-      payload: this.toAdminInquiryPayload(saved),
-      saved,
-      previousStatus,
-    };
-  }
-
   /**
    * Freeze EPDA: persist live snapshot and lock further staff edits.
-   * Does not change inquiry status (Issue still marks QUOTED for the customer).
+   * Does not change inquiry status.
    */
   async lockEpda(
     inquiryId: number,
@@ -817,5 +734,25 @@ export class ShippingAgencyEpdaService {
       return null;
     }
     return String(value);
+  }
+
+  /**
+   * Persist only clean `{ name, amount }` rows. Empty / blank names are dropped.
+   * Returns null when there are no usable rows.
+   */
+  private normalizeAgencyOtherExpenses(
+    value?: { name?: string; amount?: number }[] | null,
+  ): { name: string; amount: number }[] | null {
+    if (value == null) return null;
+    if (!Array.isArray(value)) return null;
+    const normalized = value
+      .map((item) => {
+        const name = typeof item?.name === 'string' ? item.name.trim() : '';
+        const amount = Number(item?.amount);
+        if (!name || !Number.isFinite(amount) || amount < 0) return null;
+        return { name: name.slice(0, 255), amount };
+      })
+      .filter((item): item is { name: string; amount: number } => item != null);
+    return normalized.length > 0 ? normalized : null;
   }
 }

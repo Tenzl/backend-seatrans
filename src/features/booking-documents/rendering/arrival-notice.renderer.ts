@@ -117,7 +117,7 @@ export function resolveArrivalNoticeSchedule(dto: {
 }
 
 export function renderArrivalNotice(
-  { pdf, regular, heading, header }: BookingDocumentRenderContext,
+  { pdf, regular, bold, heading, header }: BookingDocumentRenderContext,
   dto: ArrivalNoticePreviewDto,
 ): void {
   const page = pdf.getPage(0);
@@ -141,7 +141,7 @@ export function renderArrivalNotice(
     left: { label: 'Agent:', value: partyDisplayName(dto.agent) },
     mid: { label: 'Date:', value: formatPdfDateTime(dto.date) || dto.date },
     right: { label: 'AN No.:', value: dto.anNumber },
-  });
+  }, { bold });
 
   // Align values after the widest label, accounting for Ref. No. at larger size.
   const valueRight = FRAME_RIGHT - FRAME_TEXT_INSET;

@@ -354,41 +354,6 @@ describe('ShippingAgencyEpdaService increment 1', () => {
     expect(events).not.toContain('transaction:commit');
   });
 
-  it('rejects changed quote fields after the EPDA is locked', async () => {
-    const lockedSnapshot = {
-      params: { clearanceFee: 50 },
-      grand_total: 100,
-    };
-    const { service, inquiryRepository } = setup({
-      id: 1,
-      serviceType,
-      user: customer,
-      userId: customer.id,
-      processedById: actor.id,
-      epdaSnapshot: lockedSnapshot,
-      epdaLockedAt: new Date('2026-01-01T00:00:00Z'),
-      status: InquiryStatus.COMPLETED,
-    });
-
-    await expect(
-      service.issueEpdaToCustomer(
-        1,
-        {
-          epdaSnapshot: {
-            params: { clearanceFee: 99 },
-            grand_total: 101,
-          },
-        },
-        actor.id,
-      ),
-    ).rejects.toBeInstanceOf(ConflictException);
-    expect(inquiryRepository.save).not.toHaveBeenCalled();
-    expect(lockedSnapshot).toEqual({
-      params: { clearanceFee: 50 },
-      grand_total: 100,
-    });
-  });
-
   it('preserves explicit null clears when updating a draft', async () => {
     const existing = {
       id: 1,
@@ -437,51 +402,6 @@ describe('ShippingAgencyEpdaService increment 1', () => {
         anchorageHours: null,
         pilotage3rdMiles: null,
       }),
-    );
-  });
-
-  it('issues an already locked EPDA only when the frozen snapshot is unchanged', async () => {
-    const lockedSnapshot = {
-      params: { clearanceFee: 50, nested: { rate: 1 } },
-    };
-    const existing = {
-      id: 1,
-      serviceType,
-      user: customer,
-      userId: customer.id,
-      processedById: actor.id,
-      epdaSnapshot: lockedSnapshot,
-      epdaLockedAt: new Date('2026-01-01T00:00:00Z'),
-      status: InquiryStatus.COMPLETED,
-    };
-    const {
-      service,
-      transactionalRepository,
-      lockedQueryBuilder,
-      transaction,
-      events,
-    } = setup(existing);
-
-    await service.issueEpdaToCustomer(
-      1,
-      { epdaSnapshot: { params: { nested: { rate: 1 }, clearanceFee: 50 } } },
-      actor.id,
-    );
-
-    expect(transaction).toHaveBeenCalledTimes(1);
-    expect(lockedQueryBuilder.setLock).toHaveBeenCalledWith(
-      'pessimistic_write',
-      undefined,
-      ['inquiry'],
-    );
-    expect(transactionalRepository.save).toHaveBeenCalledWith(
-      expect.objectContaining({ epdaSnapshot: lockedSnapshot }),
-    );
-    expect(events.indexOf('transaction:commit')).toBeLessThan(
-      events.indexOf('notification:status'),
-    );
-    expect(events.indexOf('transaction:commit')).toBeLessThan(
-      events.indexOf('notification:quoted'),
     );
   });
 
@@ -536,68 +456,6 @@ describe('ShippingAgencyEpdaService increment 1', () => {
     );
   });
 
-  it('rejects stale params when issuing and accepts the recalculated quote', async () => {
-    const existing = {
-      id: 1,
-      serviceType,
-      user: customer,
-      userId: customer.id,
-      processedById: actor.id,
-      portId: 21,
-      epdaSnapshot: null,
-      epdaLockedAt: null,
-      status: InquiryStatus.COMPLETED,
-    };
-    const {
-      service,
-      transactionalRepository,
-      epdaParametersService,
-      effectiveParameters,
-    } = setup(existing);
-
-    await expect(
-      service.issueEpdaToCustomer(
-        1,
-        {
-          epdaSnapshot: {
-            params: { clearanceFee: -999 },
-            grand_total: 5000,
-            AA_ROWS: [{ no: 1, item: 'PILOTAGE', amount: 100 }],
-          },
-        },
-        actor.id,
-      ),
-    ).rejects.toBeInstanceOf(ConflictException);
-
-    expect(epdaParametersService.getEffective).toHaveBeenCalledWith(
-      undefined,
-      21,
-    );
-    expect(transactionalRepository.save).not.toHaveBeenCalled();
-
-    await service.issueEpdaToCustomer(
-      1,
-      {
-        epdaSnapshot: {
-          params: effectiveParameters,
-          grand_total: 5000,
-          AA_ROWS: [{ no: 1, item: 'PILOTAGE', amount: 100 }],
-        },
-      },
-      actor.id,
-    );
-
-    expect(transactionalRepository.save).toHaveBeenCalledWith(
-      expect.objectContaining({
-        epdaSnapshot: {
-          params: effectiveParameters,
-          grand_total: 5000,
-          AA_ROWS: [{ no: 1, item: 'PILOTAGE', amount: 100 }],
-        },
-      }),
-    );
-  });
-
   it('rejects stale params when locking and leaves the EPDA unlocked', async () => {
     const existing = {
       id: 1,
@@ -642,30 +500,6 @@ describe('ShippingAgencyEpdaService increment 1', () => {
       service.lockEpda(
         1,
         { epdaSnapshot: { params: {}, grand_total: -1 } },
-        actor.id,
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    expect(transactionalRepository.save).not.toHaveBeenCalled();
-  });
-
-  it('rejects unsupported snapshot fields when issuing', async () => {
-    const existing = {
-      id: 1,
-      serviceType,
-      user: customer,
-      userId: customer.id,
-      processedById: actor.id,
-      portId: 21,
-      epdaSnapshot: null,
-      epdaLockedAt: null,
-      status: InquiryStatus.COMPLETED,
-    };
-    const { service, transactionalRepository } = setup(existing);
-
-    await expect(
-      service.issueEpdaToCustomer(
-        1,
-        { epdaSnapshot: { params: {}, arbitraryObject: { admin: true } } },
         actor.id,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);

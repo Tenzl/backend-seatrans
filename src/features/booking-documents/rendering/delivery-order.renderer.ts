@@ -77,7 +77,7 @@ const RIGHT_LABELS = [
 ];
 
 export function renderDeliveryOrder(
-  { pdf, regular, heading, header, managerStamp }: BookingDocumentRenderContext,
+  { pdf, regular, bold, heading, header, managerStamp }: BookingDocumentRenderContext,
   dto: DeliveryOrderPreviewDto,
 ): void {
   const page = pdf.getPage(0);
@@ -98,7 +98,7 @@ export function renderDeliveryOrder(
     left: { label: 'To:', value: dto.to },
     mid: { label: 'Date:', value: formatPdfDateTime(dto.date) || dto.date },
     right: { label: 'DO No.:', value: dto.doNumber },
-  });
+  }, { bold });
 
   const { valueX, valueWidth } = columnValueLayout(
     RIGHT_X,

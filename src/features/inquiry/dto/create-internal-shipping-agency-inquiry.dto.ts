@@ -1,5 +1,7 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsDateString,
   IsIn,
@@ -11,7 +13,9 @@ import {
   MaxLength,
   Min,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
+import { AgencyOtherExpenseDto } from './agency-other-expense.dto';
 import {
   EPDA_QUOTE_FORMS,
   type EpdaQuoteForm,
@@ -202,6 +206,17 @@ export class CreateInternalShippingAgencyInquiryDto {
   @Type(() => Number)
   @IsNumber()
   agencyLumpsumAmount?: number;
+
+  /**
+   * Extra agency expense lines under in-lumpsum mode.
+   * Each item: `{ name, amount }`. Omit or send `[]` when unused.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => AgencyOtherExpenseDto)
+  agencyOtherExpenses?: AgencyOtherExpenseDto[];
 
   @IsOptional()
   @Type(() => Number)

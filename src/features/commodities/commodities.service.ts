@@ -6,99 +6,67 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { GalleryImage } from '../gallery/entities/gallery-image.entity';
+import { FreightForwardingInquiryEntity } from '../inquiry/entities/freight-forwarding-inquiry.entity';
+import { ShippingAgencyInquiryEntity } from '../inquiry/entities/shipping-agency-inquiry.entity';
+import { TotalLogisticsInquiryEntity } from '../inquiry/entities/total-logistics-inquiry.entity';
 import { Commodity } from './entities/commodity.entity';
 import { CommodityDto } from './dto/commodity.dto';
 import { CreateCommodityDto } from './dto/create-commodity.dto';
+import { ListCommoditiesQueryDto } from './dto/list-commodities-query.dto';
 
 @Injectable()
 export class CommoditiesService {
   private static readonly DEFAULT_LIST_LIMIT = 100;
+  static readonly IN_USE_MESSAGE =
+    'Commodity is currently in use / đang được sử dụng';
 
   constructor(
     @InjectRepository(Commodity)
     private readonly commodityRepository: Repository<Commodity>,
+    @InjectRepository(GalleryImage)
+    private readonly galleryImageRepository: Repository<GalleryImage>,
+    @InjectRepository(ShippingAgencyInquiryEntity)
+    private readonly shippingAgencyInquiryRepository: Repository<ShippingAgencyInquiryEntity>,
+    @InjectRepository(FreightForwardingInquiryEntity)
+    private readonly freightForwardingInquiryRepository: Repository<FreightForwardingInquiryEntity>,
+    @InjectRepository(TotalLogisticsInquiryEntity)
+    private readonly totalLogisticsInquiryRepository: Repository<TotalLogisticsInquiryEntity>,
   ) {}
 
-  async getActive(
-    limit = CommoditiesService.DEFAULT_LIST_LIMIT,
-  ): Promise<CommodityDto[]> {
-    const commodities = await this.commodityRepository.find({
-      where: { isActive: true },
-      order: { name: 'ASC' },
-    });
+  /**
+   * List commodities with optional filters.
+   * Search (`q`) returns the full matching set (no limit slice).
+   */
+  async list(query: ListCommoditiesQueryDto = {}): Promise<CommodityDto[]> {
+    const search = query.q?.trim();
+    const serviceTypeId = query.serviceTypeId;
 
-    return commodities
-      .slice(0, this.sanitizeLimit(limit))
-      .map((item) => this.toDto(item));
-  }
+    if (search) {
+      const qb = this.commodityRepository
+        .createQueryBuilder('commodity')
+        .where(
+          '(LOWER(commodity.name) LIKE :query OR LOWER(commodity.display_name) LIKE :query)',
+          { query: `%${search.toLowerCase()}%` },
+        )
+        .orderBy('commodity.name', 'ASC');
 
-  async getByServiceType(
-    serviceTypeId: number,
-    limit = CommoditiesService.DEFAULT_LIST_LIMIT,
-  ): Promise<CommodityDto[]> {
-    const commodities = await this.commodityRepository.find({
-      where: { serviceTypeId, isActive: true },
-      order: { name: 'ASC' },
-    });
+      if (serviceTypeId != null) {
+        qb.andWhere('commodity.service_type_id = :serviceTypeId', {
+          serviceTypeId,
+        });
+      }
 
-    return commodities
-      .slice(0, this.sanitizeLimit(limit))
-      .map((item) => this.toDto(item));
-  }
-
-  async search(query?: string): Promise<CommodityDto[]> {
-    const normalizedQuery = query?.trim();
-    if (!normalizedQuery) {
-      return this.getActive();
+      return (await qb.getMany()).map((item) => this.toDto(item));
     }
 
-    const commodities = await this.commodityRepository
-      .createQueryBuilder('commodity')
-      .where('commodity.is_active = :active', { active: true })
-      .andWhere(
-        '(LOWER(commodity.name) LIKE :query OR LOWER(commodity.display_name) LIKE :query)',
-        { query: `%${normalizedQuery.toLowerCase()}%` },
-      )
-      .orderBy('commodity.name', 'ASC')
-      .getMany();
-
-    // Search query returns full matching dataset by migration rule.
-    return commodities.map((item) => this.toDto(item));
-  }
-
-  async searchByServiceType(
-    serviceTypeId: number,
-    query?: string,
-  ): Promise<CommodityDto[]> {
-    const normalizedQuery = query?.trim();
-    if (!normalizedQuery) {
-      return this.getByServiceType(serviceTypeId);
-    }
-
-    const commodities = await this.commodityRepository
-      .createQueryBuilder('commodity')
-      .where('commodity.is_active = :active', { active: true })
-      .andWhere('commodity.service_type_id = :serviceTypeId', { serviceTypeId })
-      .andWhere(
-        '(LOWER(commodity.name) LIKE :query OR LOWER(commodity.display_name) LIKE :query)',
-        { query: `%${normalizedQuery.toLowerCase()}%` },
-      )
-      .orderBy('commodity.name', 'ASC')
-      .getMany();
-
-    // Search query returns full matching dataset by migration rule.
-    return commodities.map((item) => this.toDto(item));
-  }
-
-  async getAllAdmin(
-    limit = CommoditiesService.DEFAULT_LIST_LIMIT,
-  ): Promise<CommodityDto[]> {
     const commodities = await this.commodityRepository.find({
+      where: serviceTypeId != null ? { serviceTypeId } : {},
       order: { name: 'ASC' },
     });
 
     return commodities
-      .slice(0, this.sanitizeLimit(limit))
+      .slice(0, this.sanitizeLimit(query.limit ?? CommoditiesService.DEFAULT_LIST_LIMIT))
       .map((item) => this.toDto(item));
   }
 
@@ -136,7 +104,6 @@ export class CommoditiesService {
       description: dto.description?.trim() || null,
       requiredImageCount: dto.requiredImageCount ?? 18,
       cargoType: this.normalizeCargoType(dto.cargoType),
-      isActive: true,
     });
 
     const saved = await this.commodityRepository.save(commodity);
@@ -189,8 +156,63 @@ export class CommoditiesService {
     if (!commodity) {
       throw new NotFoundException('Commodity not found');
     }
-    commodity.isActive = false;
-    await this.commodityRepository.save(commodity);
+
+    await this.assertNotInUse(commodity);
+
+    try {
+      await this.commodityRepository.delete(id);
+    } catch (error) {
+      const databaseCode = (error as { driverError?: { code?: string } } | null)
+        ?.driverError?.code;
+      if (databaseCode === '23503') {
+        throw new ConflictException(CommoditiesService.IN_USE_MESSAGE);
+      }
+      throw error;
+    }
+  }
+
+  private async assertNotInUse(commodity: Commodity): Promise<void> {
+    const galleryCount = await this.galleryImageRepository.count({
+      where: { commodityId: commodity.id },
+    });
+    if (galleryCount > 0) {
+      throw new ConflictException(CommoditiesService.IN_USE_MESSAGE);
+    }
+
+    const nameKeys = this.usageNameKeys(commodity);
+    if (nameKeys.length === 0) {
+      return;
+    }
+
+    const shippingCount = await this.shippingAgencyInquiryRepository
+      .createQueryBuilder('inquiry')
+      .where('LOWER(inquiry.cargo_name) IN (:...names)', { names: nameKeys })
+      .getCount();
+    if (shippingCount > 0) {
+      throw new ConflictException(CommoditiesService.IN_USE_MESSAGE);
+    }
+
+    const freightCount = await this.freightForwardingInquiryRepository
+      .createQueryBuilder('inquiry')
+      .where('LOWER(inquiry.cargo_name) IN (:...names)', { names: nameKeys })
+      .getCount();
+    if (freightCount > 0) {
+      throw new ConflictException(CommoditiesService.IN_USE_MESSAGE);
+    }
+
+    const logisticsCount = await this.totalLogisticsInquiryRepository
+      .createQueryBuilder('inquiry')
+      .where('LOWER(inquiry.cargo_name) IN (:...names)', { names: nameKeys })
+      .getCount();
+    if (logisticsCount > 0) {
+      throw new ConflictException(CommoditiesService.IN_USE_MESSAGE);
+    }
+  }
+
+  private usageNameKeys(commodity: Commodity): string[] {
+    return [...new Set([commodity.name, commodity.displayName])]
+      .map((value) => value?.trim().toLowerCase())
+      .filter((value): value is string => Boolean(value));
   }
 
   private toDto(item: Commodity): CommodityDto {
@@ -202,7 +224,6 @@ export class CommoditiesService {
       description: item.description,
       requiredImageCount: item.requiredImageCount,
       cargoType: item.cargoType,
-      isActive: item.isActive,
     };
   }
 

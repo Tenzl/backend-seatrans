@@ -61,7 +61,7 @@ Use query param `q` on collection GET routes (not `/search` path segments).
 | Inquiry admin detail | `GET /v1/admin/inquiries/:serviceType/:id` |
 | Shipping EPDA (internal) | `POST /v1/admin/inquiries/shipping-agency` (create with EPDA draft) |
 | Shipping EPDA draft | `PATCH /v1/admin/inquiries/shipping-agency/:id/epda` |
-| Shipping EPDA issue | `POST /v1/admin/inquiries/shipping-agency/:id/epda/issue` → status `QUOTED` |
+| Shipping EPDA lock | `POST /v1/admin/inquiries/shipping-agency/:id/epda/lock` |
 | Inquiry documents admin | `POST|DELETE /v1/admin/inquiries/:slug/:id/documents` |
 | Inquiry document file | `GET /v1/inquiries/:slug/:id/documents/:docId/content?disposition=inline\|attachment` |
 

@@ -6,5 +6,4 @@ export class CommodityDto {
   description: string | null;
   requiredImageCount: number;
   cargoType: string;
-  isActive: boolean;
 }

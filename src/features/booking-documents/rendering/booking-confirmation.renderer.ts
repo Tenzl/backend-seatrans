@@ -436,10 +436,11 @@ function drawBorderlessIntro(
   const rightX = FRAME_RIGHT - FRAME_TEXT_INSET - rightBlockWidth;
 
   // Band 1 — Date then Booking No. only (right-aligned).
+  // Labels = DejaVu Bold; values = Arial Bold (same emphasis as To name).
   let rightCursor = top;
   rightCursor = drawRightAlignedLabeledLine(
     page,
-    regular,
+    bold,
     heading,
     'Date:',
     formatPdfDateTime(dto.date) || dto.date,
@@ -449,7 +450,7 @@ function drawBorderlessIntro(
   );
   rightCursor = drawRightAlignedLabeledLine(
     page,
-    regular,
+    bold,
     heading,
     'Booking No.:',
     dto.bookingNumber,
@@ -499,9 +500,13 @@ function drawBorderlessIntro(
   return introBottom - 4;
 }
 
+/**
+ * Right-aligned "Label: value" line. Label uses DejaVu Bold (`heading`);
+ * value uses the passed value font (Arial Bold for Date / Booking No.).
+ */
 function drawRightAlignedLabeledLine(
   page: PDFPage,
-  regular: PDFFont,
+  valueFont: PDFFont,
   heading: PDFFont,
   label: string,
   value: string | undefined,
@@ -513,7 +518,7 @@ function drawRightAlignedLabeledLine(
   const labelWidth = heading.widthOfTextAtSize(label, SECTION_LABEL_SIZE);
   const gap = valueText ? 4 : 0;
   const valueWidth = valueText
-    ? regular.widthOfTextAtSize(valueText, TEXT_SIZE)
+    ? valueFont.widthOfTextAtSize(valueText, TEXT_SIZE)
     : 0;
   const totalWidth = labelWidth + gap + valueWidth;
   let x = blockX + Math.max(0, blockWidth - totalWidth);
@@ -531,7 +536,7 @@ function drawRightAlignedLabeledLine(
       x,
       y,
       size: TEXT_SIZE,
-      font: regular,
+      font: valueFont,
       color: BLACK,
     });
   }

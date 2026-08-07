@@ -18,7 +18,7 @@ export const PAGE_HEIGHT = 841.89;
 export const BLACK = rgb(0, 0, 0);
 
 /** Single stroke weight for all form rules (boxes, tables, dividers). */
-export const RULE_THICKNESS = 0.5;
+export const RULE_THICKNESS = 1;
 
 /** Horizontal inset from frame / cell vertical rules. */
 export const FRAME_TEXT_INSET = 5;
@@ -139,7 +139,8 @@ export type MetaHeaderCell = { label: string; value?: string };
 /**
  * Draw the shared 3-cell meta header: left | Date mid | doc-no right.
  * Values use fixed DOC_BODY_TEXT_SIZE (no shrink). Row grows with wrapped text.
- * Returns the header bottom Y so callers can continue the body below it.
+ * Date (mid) and doc-no (right) values render in Arial Bold when `bold` is
+ * provided; left-cell values stay regular. Returns the header bottom Y.
  */
 export function drawMetaHeaderRow(
   page: PDFPage,
@@ -150,15 +151,18 @@ export function drawMetaHeaderRow(
     mid: MetaHeaderCell;
     right: MetaHeaderCell;
   },
-  options?: { drawOuterVerticals?: boolean },
+  options?: { drawOuterVerticals?: boolean; bold?: PDFFont },
 ): number {
   const headerTop = DOC_HEADER_TOP;
   const pad = DOC_CELL_PAD;
   const labelSize = DOC_SECTION_LABEL_SIZE;
+  const valueBold = options?.bold;
   const specs: Array<{
     cell?: MetaHeaderCell;
     labelX: number;
     valueRight: number;
+    /** Emphasize Date / doc-no content (not Agent/To). */
+    emphasizeValue?: boolean;
   }> = [
     {
       cell: cells.left,
@@ -169,16 +173,18 @@ export function drawMetaHeaderRow(
       cell: cells.mid,
       labelX: DOC_FRAME_MID + FRAME_TEXT_INSET,
       valueRight: DOC_HEADER_DATE_DIV - FRAME_TEXT_INSET,
+      emphasizeValue: true,
     },
     {
       cell: cells.right,
       labelX: DOC_HEADER_DATE_DIV + FRAME_TEXT_INSET,
       valueRight: DOC_FRAME_RIGHT - FRAME_TEXT_INSET,
+      emphasizeValue: true,
     },
   ];
 
   let deepest = DOC_HEADER_BOTTOM;
-  for (const { cell, labelX, valueRight } of specs) {
+  for (const { cell, labelX, valueRight, emphasizeValue } of specs) {
     if (!cell) continue;
     const labelY = headerTop - pad - labelSize;
     page.drawText(cell.label, {
@@ -190,11 +196,14 @@ export function drawMetaHeaderRow(
     });
     const valueX = labelValueStartX(cell.label, labelX, heading, labelSize);
     const valueWidth = Math.max(20, valueRight - valueX);
-    const valueBottom = drawTextBlock(page, regular, heading, cell.value, {
+    const useBold = Boolean(emphasizeValue && valueBold);
+    const valueFont = useBold && valueBold ? valueBold : regular;
+    const valueBottom = drawTextBlock(page, valueFont, valueFont, cell.value, {
       x: valueX,
       top: headerTop - pad,
       width: valueWidth,
       size: DOC_BODY_TEXT_SIZE,
+      bold: useBold,
     });
     const cellBottom = (cell.value?.trim() ? valueBottom : labelY) - pad;
     deepest = Math.min(deepest, cellBottom);

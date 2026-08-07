@@ -46,6 +46,7 @@ function shippingAgencyInternalEpdaFields(
     agencyFeeMode: row.agencyFeeMode,
     agencyDiscountPercent: row.agencyDiscountPercent,
     agencyLumpsumAmount: row.agencyLumpsumAmount,
+    agencyOtherExpenses: row.agencyOtherExpenses,
     tugAssistanceTrips: row.tugAssistanceTrips,
     berthHours: row.berthHours,
     anchorageHours: row.anchorageHours,

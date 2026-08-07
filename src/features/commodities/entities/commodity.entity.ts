@@ -29,9 +29,6 @@ export class Commodity {
   @Column({ name: 'cargo_type', length: 100, default: 'IN_BULK' })
   cargoType: string;
 
-  @Column({ name: 'is_active', default: true })
-  isActive: boolean;
-
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

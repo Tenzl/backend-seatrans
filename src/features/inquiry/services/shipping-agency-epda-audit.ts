@@ -66,6 +66,7 @@ export function epdaFieldSnapshot(
     'Agency fee mode': stringValue(row.agencyFeeMode),
     'Agency discount %': numericValue(row.agencyDiscountPercent),
     'Agency lumpsum': numericValue(row.agencyLumpsumAmount),
+    'Agency other expenses': stringValue(row.agencyOtherExpenses),
     'Boat hire (agency)': numericValue(row.boatHireAmount),
     'Tally fee': numericValue(row.tallyFeeAmount),
     'Tug assistance': numericValue(row.tugAssistanceAmount),

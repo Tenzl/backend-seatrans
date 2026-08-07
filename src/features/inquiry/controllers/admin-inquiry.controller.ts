@@ -27,7 +27,6 @@ import { UpdateInquiryHoursDto } from '../dto/update-inquiry-hours.dto';
 import { DeleteInquiriesDto } from '../dto/delete-inquiries.dto';
 import { DeleteInquiriesQueryDto } from '../dto/delete-inquiries-query.dto';
 import { UpdateShippingAgencyEpdaDto } from '../dto/update-shipping-agency-epda.dto';
-import { IssueShippingAgencyEpdaDto } from '../dto/issue-shipping-agency-epda.dto';
 import { LockShippingAgencyEpdaDto } from '../dto/lock-shipping-agency-epda.dto';
 import { CreateInternalShippingAgencyInquiryDto } from '../dto/create-internal-shipping-agency-inquiry.dto';
 import { ListInquiryFieldChangesQueryDto } from '../dto/list-inquiry-field-changes-query.dto';
@@ -144,28 +143,6 @@ export class AdminInquiryController {
       throw new BadRequestException('User not authenticated');
     }
     return this.shippingAgencyEpdaService.updateEpda(id, dto, actorUserId);
-  }
-
-  /**
-   * Finalize EPDA: persist snapshot and set status QUOTED for customer PDF access.
-   * POST /api/v1/admin/inquiries/shipping-agency/:id/epda/issue
-   */
-  @Post('shipping-agency/:id/epda/issue')
-  async issueShippingAgencyEpda(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() body: IssueShippingAgencyEpdaDto,
-    @Req() req: StaffRequest,
-  ) {
-    const dto = await validateDto(IssueShippingAgencyEpdaDto, body);
-    const actorUserId = req.user?.id;
-    if (!actorUserId) {
-      throw new BadRequestException('User not authenticated');
-    }
-    return this.shippingAgencyEpdaService.issueEpdaToCustomer(
-      id,
-      dto,
-      actorUserId,
-    );
   }
 
   /**

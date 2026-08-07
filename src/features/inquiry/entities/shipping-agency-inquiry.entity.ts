@@ -2,6 +2,7 @@ import { Entity, Column, JoinColumn, ManyToOne } from 'typeorm';
 import { BaseInquiry } from './base-inquiry.entity';
 import { User } from '../../auth/entities/user.entity';
 import { Port } from '../../ports/entities/port.entity';
+import type { AgencyOtherExpense } from '../dto/agency-other-expense.dto';
 
 @Entity('shipping_agency_inquiries')
 export class ShippingAgencyInquiryEntity extends BaseInquiry {
@@ -235,6 +236,13 @@ export class ShippingAgencyInquiryEntity extends BaseInquiry {
     nullable: true,
   })
   agencyLumpsumAmount!: string | null;
+
+  /**
+   * Custom fee lines under agency "in lumpsum" mode.
+   * JSON array of `{ name: string, amount: number }`. Null when unused.
+   */
+  @Column({ name: 'agency_other_expenses', type: 'jsonb', nullable: true })
+  agencyOtherExpenses!: AgencyOtherExpense[] | null;
 
   @Column({ name: 'epda_snapshot', type: 'jsonb', nullable: true })
   epdaSnapshot!: Record<string, unknown> | null;

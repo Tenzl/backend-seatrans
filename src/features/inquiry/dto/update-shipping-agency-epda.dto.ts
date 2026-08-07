@@ -1,5 +1,7 @@
 import { Transform, Type, type TransformFnParams } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsDateString,
   IsIn,
@@ -13,6 +15,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
+import { AgencyOtherExpenseDto } from './agency-other-expense.dto';
 import { ConfirmedCustomerFieldChangeDto } from './confirmed-customer-field-change.dto';
 import {
   EPDA_QUOTE_FORMS,
@@ -217,6 +220,18 @@ export class UpdateShippingAgencyEpdaDto {
   @IsNumber()
   @Min(0)
   agencyLumpsumAmount?: number | null;
+
+  /**
+   * Extra agency expense lines shown under the lumpsum row (in-lumpsum mode only).
+   * Send `[]` or `null` to clear. Each item: `{ name, amount }`.
+   */
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => AgencyOtherExpenseDto)
+  agencyOtherExpenses?: AgencyOtherExpenseDto[] | null;
 
   /** Render-ready quote payload from admin UI (optional draft save). */
   @IsOptional()

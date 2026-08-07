@@ -57,6 +57,7 @@ const SNAPSHOT_KEYS = new Set([
   'agency_fee_mode',
   'agency_discount_percent',
   'agency_lumpsum_amount',
+  'agency_other_expenses',
   'tally_fee',
   'tug_assistance',
   'shorecrane_hire_usd_per_mt',
@@ -66,6 +67,7 @@ const SNAPSHOT_KEYS = new Set([
   'BB_ROWS',
   'params',
 ]);
+const SNAPSHOT_OTHER_EXPENSE_COLLECTION_KEY = 'agency_other_expenses';
 
 @Injectable()
 export class ShippingAgencyEpdaSnapshotService {
@@ -162,6 +164,10 @@ export class ShippingAgencyEpdaSnapshotService {
         this.validateSnapshotRows(key, value);
         continue;
       }
+      if (key === SNAPSHOT_OTHER_EXPENSE_COLLECTION_KEY) {
+        this.validateAgencyOtherExpenses(value);
+        continue;
+      }
       if (SNAPSHOT_TOTAL_KEYS.has(key)) {
         this.assertNonNegativeFiniteAmount(key, value);
         continue;
@@ -215,6 +221,45 @@ export class ShippingAgencyEpdaSnapshotService {
         ) {
           throw new BadRequestException(
             `EPDA snapshot row field ${key}[${index}].${rowKey} must be primitive`,
+          );
+        }
+      }
+    });
+  }
+
+  private validateAgencyOtherExpenses(value: unknown): void {
+    if (value === null || value === undefined) return;
+    if (!Array.isArray(value) || value.length > 50) {
+      throw new BadRequestException(
+        'EPDA snapshot field agency_other_expenses must be an array of at most 50 items',
+      );
+    }
+    value.forEach((entry, index) => {
+      if (!this.isJsonObject(entry)) {
+        throw new BadRequestException(
+          `agency_other_expenses[${index}] must be an object`,
+        );
+      }
+      const name = entry.name;
+      const amount = entry.amount;
+      if (typeof name !== 'string' || !name.trim()) {
+        throw new BadRequestException(
+          `agency_other_expenses[${index}].name must be a non-empty string`,
+        );
+      }
+      if (name.length > 255) {
+        throw new BadRequestException(
+          `agency_other_expenses[${index}].name exceeds 255 characters`,
+        );
+      }
+      this.assertNonNegativeFiniteAmount(
+        `agency_other_expenses[${index}].amount`,
+        amount,
+      );
+      for (const key of Object.keys(entry)) {
+        if (key !== 'name' && key !== 'amount') {
+          throw new BadRequestException(
+            `Unsupported agency_other_expenses[${index}] field: ${key}`,
           );
         }
       }

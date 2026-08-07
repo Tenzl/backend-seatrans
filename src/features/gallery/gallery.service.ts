@@ -268,7 +268,7 @@ export class GalleryService {
 
   private async requireCommodity(id: number): Promise<Commodity> {
     const commodity = await this.commodityRepository.findOne({
-      where: { id, isActive: true },
+      where: { id },
     });
     if (!commodity) {
       throw new BadRequestException('Commodity not found');
