@@ -6,6 +6,7 @@ import {
 } from '../an-container';
 import { DeliveryOrderPreviewDto } from '../dto/delivery-order-preview.dto';
 import { BookingDocumentRenderContext } from './booking-document-render-context';
+import { formatPdfDateTime } from './pdf-schedule-date';
 import {
   BELOW_RULE_BASELINE,
   BLACK,
@@ -76,11 +77,11 @@ const RIGHT_LABELS = [
 ];
 
 export function renderDeliveryOrder(
-  { pdf, regular, bold, header, managerStamp }: BookingDocumentRenderContext,
+  { pdf, regular, heading, header, managerStamp }: BookingDocumentRenderContext,
   dto: DeliveryOrderPreviewDto,
 ): void {
   const page = pdf.getPage(0);
-  drawLetterhead(page, header, bold, 'DELIVERY ORDER', {
+  drawLetterhead(page, header, heading, 'DELIVERY ORDER', {
     clearBottom: DOC_HEADER_TOP,
     titleY: 708,
   });
@@ -93,9 +94,9 @@ export function renderDeliveryOrder(
     color: rgb(1, 1, 1),
   });
 
-  const headerBottom = drawMetaHeaderRow(page, regular, bold, {
+  const headerBottom = drawMetaHeaderRow(page, regular, heading, {
     left: { label: 'To:', value: dto.to },
-    mid: { label: 'Date:', value: dto.date },
+    mid: { label: 'Date:', value: formatPdfDateTime(dto.date) || dto.date },
     right: { label: 'DO No.:', value: dto.doNumber },
   });
 
@@ -103,7 +104,7 @@ export function renderDeliveryOrder(
     RIGHT_X,
     FRAME_RIGHT - FRAME_TEXT_INSET,
     RIGHT_LABELS,
-    bold,
+    heading,
   );
 
   const sectionTop = headerBottom;
@@ -112,7 +113,7 @@ export function renderDeliveryOrder(
   const { dividers, bottom: rightBandBottom } = drawRightFourFrames(
     page,
     regular,
-    bold,
+    heading,
     dto,
     sectionTop,
     valueX,
@@ -123,7 +124,7 @@ export function renderDeliveryOrder(
   const leftBandBottom = drawDeliverAndNotifyColumn(
     page,
     regular,
-    bold,
+    heading,
     dto,
     sectionTop,
   );
@@ -135,7 +136,7 @@ export function renderDeliveryOrder(
   const marksBottom = drawPairedLabeledBlocks(
     page,
     regular,
-    bold,
+    heading,
     { label: 'Marks', value: dto.marks, x: LEFT_X, width: LEFT_W },
     { label: 'Volume', value: dto.volume, x: RIGHT_X, width: RIGHT_W },
     { sectionTop: bandBottom, emptyMinHeight: EMPTY_MARKS_MIN },
@@ -170,7 +171,7 @@ export function renderDeliveryOrder(
       ? anContainersToCargoRows(containers, descriptionOfGoods)
       : (dto.cargoRows ?? []);
 
-  finishCargoAndAttentionPage(pdf, page, regular, bold, {
+  finishCargoAndAttentionPage(pdf, page, regular, heading, {
     marksBottom,
     cargoRows,
     title: 'DELIVERY ORDER',
@@ -191,7 +192,7 @@ export function renderDeliveryOrder(
 function drawDeliverAndNotifyColumn(
   page: Parameters<typeof drawText>[0],
   regular: Parameters<typeof drawText>[1],
-  bold: Parameters<typeof drawText>[2],
+  heading: Parameters<typeof drawText>[2],
   dto: DeliveryOrderPreviewDto,
   sectionTop: number,
 ): number {
@@ -202,10 +203,10 @@ function drawDeliverAndNotifyColumn(
     x: LEFT_X,
     y: promptTop - LABEL_SIZE,
     size: LABEL_SIZE,
-    font: bold,
+    font: heading,
     color: BLACK,
   });
-  const deliverBottom = drawTextBlock(page, regular, bold, dto.deliverTo, {
+  const deliverBottom = drawTextBlock(page, regular, heading, dto.deliverTo, {
     x: LEFT_X,
     top: promptTop - LABEL_SIZE - LABEL_GAP,
     width: LEFT_W,
@@ -221,10 +222,10 @@ function drawDeliverAndNotifyColumn(
     x: LEFT_X,
     y: notifyLabelTop - LABEL_SIZE,
     size: LABEL_SIZE,
-    font: bold,
+    font: heading,
     color: BLACK,
   });
-  const notifyBottom = drawTextBlock(page, regular, bold, dto.notifyParty, {
+  const notifyBottom = drawTextBlock(page, regular, heading, dto.notifyParty, {
     x: LEFT_X,
     top: notifyLabelTop - LABEL_SIZE - LABEL_GAP,
     width: LEFT_W,
@@ -244,7 +245,7 @@ function drawDeliverAndNotifyColumn(
 function drawRightFourFrames(
   page: Parameters<typeof drawText>[0],
   regular: Parameters<typeof drawText>[1],
-  bold: Parameters<typeof drawText>[2],
+  heading: Parameters<typeof drawText>[2],
   dto: DeliveryOrderPreviewDto,
   sectionTop: number,
   valueX: number,
@@ -256,7 +257,7 @@ function drawRightFourFrames(
   y = drawLabelValueRows(
     page,
     regular,
-    bold,
+    heading,
     [
       ['MBL No.:', dto.mblNumber],
       ['HBL No.:', dto.hblNumber],
@@ -276,10 +277,10 @@ function drawRightFourFrames(
   y = drawLabelValueRows(
     page,
     regular,
-    bold,
+    heading,
     [
-      ['ETD:', dto.etd],
-      ['ETA:', dto.eta],
+      ['ETD:', formatPdfDateTime(dto.etd) || dto.etd],
+      ['ETA:', formatPdfDateTime(dto.eta) || dto.eta],
       ['Shipment No.:', dto.shipmentNumber],
     ],
     {
@@ -297,7 +298,7 @@ function drawRightFourFrames(
   y = drawLabelValueRows(
     page,
     regular,
-    bold,
+    heading,
     [
       ['Vessel/Voyage No.:', dto.vesselVoyage],
       ['Place of Receipt:', dto.placeOfReceipt],
@@ -326,10 +327,10 @@ function drawRightFourFrames(
     x: RIGHT_X,
     y: noteTop - pad - LABEL_SIZE,
     size: LABEL_SIZE,
-    font: bold,
+    font: heading,
     color: BLACK,
   });
-  const noteBottom = drawTextBlock(page, regular, bold, dto.note, {
+  const noteBottom = drawTextBlock(page, regular, heading, dto.note, {
     x: RIGHT_X,
     top: noteTop - pad - LABEL_SIZE - LABEL_GAP,
     width: RIGHT_W,

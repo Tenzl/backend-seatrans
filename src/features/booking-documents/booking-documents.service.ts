@@ -68,6 +68,7 @@ export class BookingDocumentsService {
       validatedPayload = await this.applyBookingPic(
         validatedPayload as BookingConfirmationPreviewDto,
         createdByUserId,
+        (validatedPayload as BookingConfirmationPreviewDto).pic,
       );
     }
     const created = await this.recordService.create(
@@ -139,7 +140,7 @@ export class BookingDocumentsService {
       validatedPayload = await this.applyBookingPic(
         validatedPayload as BookingConfirmationPreviewDto,
         existing.createdByUserId,
-        (existing.payload as BookingConfirmationPreviewDto).pic,
+        (validatedPayload as BookingConfirmationPreviewDto).pic,
       );
     }
     const updated = await this.recordService.update(

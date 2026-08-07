@@ -47,16 +47,35 @@ export const DOC_HEADER_VALUE_H = 10;
 
 /**
  * Shared typography / rhythm for AN, DO, and Booking Confirmation.
- *   DOC_SECTION_LABEL_SIZE — bold section titles (To, Shipper, Marks, Volume, …)
- *   DETAIL_LABEL_SIZE      — bold right-column field labels (MBL No., Vessel/Voyage, …)
- *   REFERENCE_LABEL_SIZE   — bold + 1pt for Ref. No. (stronger than sibling meta labels)
- *   DOC_BODY_TEXT_SIZE     — all form body / value text (left blocks + right values)
- * DETAIL_LABEL_SIZE aliases DOC_SECTION_LABEL_SIZE so labels stay one family.
+ * Fonts (dual family):
+ *   DejaVu Sans Bold  — titles, section/detail labels (via `heading` param)
+ *   Arial Regular/Bold — body values, cargo rows, terms items (`regular`/`bold`)
+ * Sizes:
+ *   DOC_SECTION_LABEL_SIZE — section / field labels
+ *   DOC_TABLE_HEADER_SIZE  — cargo / BC grid column & cell headings
+ *   DETAIL_LABEL_SIZE      — right-column field labels (aliases section)
+ *   REFERENCE_LABEL_SIZE   — Ref. No. (stronger than sibling meta labels)
+ *   DOC_BODY_TEXT_SIZE     — form body / value text
+ *   DOC_CARGO_TEXT_SIZE    — cargo / table cell rows
+ *   DOC_TERMS_TEXT_SIZE    — BC Terms list body (same as body)
+ *   DOC_TITLE_SIZE         — letterhead document titles
  */
-export const DOC_SECTION_LABEL_SIZE = 8;
-export const DOC_BODY_TEXT_SIZE = 8;
+export const DOC_SECTION_LABEL_SIZE = 9.5;
+export const DOC_BODY_TEXT_SIZE = 9;
+/** Cargo table column headers and BC grid cell labels (DejaVu Bold). */
+export const DOC_TABLE_HEADER_SIZE = 8;
+/** Cargo table cell content (slightly denser than form body). */
+export const DOC_CARGO_TEXT_SIZE = 8;
+/** BC Terms list body — same scale as form body (heading stays section label). */
+export const DOC_TERMS_TEXT_SIZE = DOC_BODY_TEXT_SIZE;
+/** Main document titles under the letterhead. */
+export const DOC_TITLE_SIZE = 15;
+/** Continuation-page titles (cargo / terms) — same family, slightly smaller. */
+export const DOC_CONTINUATION_TITLE_SIZE = 14;
 export const DOC_SECTION_GAP = 6;
 export const DOC_LABEL_GAP = 3;
+/** Default line spacing for wrapped body / terms text. */
+export const DOC_LINE_HEIGHT_FACTOR = 1.35;
 
 /**
  * Height for a value box: grow with measured content; keep emptyMin only when blank.
@@ -100,19 +119,18 @@ export const DOC_LEFT_W = DOC_FRAME_MID - FRAME_TEXT_INSET - DOC_LEFT_X;
 export const DOC_RIGHT_W = DOC_FRAME_RIGHT - FRAME_TEXT_INSET - DOC_RIGHT_X;
 
 /**
- * Right-column detail labels (MBL No., Vessel/Voyage, …) — bold, same scale
- * as section labels / body so AN + DO stay visually uniform.
- * Values always render at DOC_BODY_TEXT_SIZE via drawLabelValueLine.
- * REFERENCE_LABEL_SIZE is slightly larger so "Ref. No." reads stronger than
- * sibling meta labels when pdf-lib only offers Regular vs Bold.
+ * Right-column detail labels (MBL No., Vessel/Voyage, …) — DejaVu Bold, same
+ * scale as section labels. Values always render at DOC_BODY_TEXT_SIZE (Arial)
+ * via drawLabelValueLine. REFERENCE_LABEL_SIZE is one step larger for Ref. No.
  */
 export const DETAIL_LABEL_SIZE = DOC_SECTION_LABEL_SIZE;
-export const REFERENCE_LABEL_SIZE = DOC_SECTION_LABEL_SIZE + 1;
+export const REFERENCE_LABEL_SIZE = 10.5;
+/** Min vertical step for right-column label/value rows (scales with body size). */
 export const DETAIL_ROW_STEP = 14;
 
 /**
  * First label baseline below a horizontal section rule at Y.
- * Matches historic `rule at y+4` then `y -= 6` → first label at ruleY - 10.
+ * Keeps ~2pt clearance under the rule for DOC_SECTION_LABEL_SIZE glyphs.
  */
 export const BELOW_RULE_BASELINE = 10;
 
@@ -126,7 +144,7 @@ export type MetaHeaderCell = { label: string; value?: string };
 export function drawMetaHeaderRow(
   page: PDFPage,
   regular: PDFFont,
-  bold: PDFFont,
+  heading: PDFFont,
   cells: {
     left?: MetaHeaderCell;
     mid: MetaHeaderCell;
@@ -167,12 +185,12 @@ export function drawMetaHeaderRow(
       x: labelX,
       y: labelY,
       size: labelSize,
-      font: bold,
+      font: heading,
       color: BLACK,
     });
-    const valueX = labelValueStartX(cell.label, labelX, bold, labelSize);
+    const valueX = labelValueStartX(cell.label, labelX, heading, labelSize);
     const valueWidth = Math.max(20, valueRight - valueX);
-    const valueBottom = drawTextBlock(page, regular, bold, cell.value, {
+    const valueBottom = drawTextBlock(page, regular, heading, cell.value, {
       x: valueX,
       top: headerTop - pad,
       width: valueWidth,
@@ -205,7 +223,7 @@ export function drawMetaHeaderRow(
 export function drawLabeledBlock(
   page: PDFPage,
   regular: PDFFont,
-  bold: PDFFont,
+  heading: PDFFont,
   opts: {
     label: string;
     labelY: number;
@@ -222,7 +240,7 @@ export function drawLabeledBlock(
   const labelSize = opts.labelSize ?? DOC_SECTION_LABEL_SIZE;
   const valueSize = opts.valueSize ?? DOC_BODY_TEXT_SIZE;
   // labelY is the first-line baseline; drawTextBlock uses a box top.
-  const labelBottom = drawTextBlock(page, regular, bold, opts.label, {
+  const labelBottom = drawTextBlock(page, heading, heading, opts.label, {
     x: opts.x,
     top: opts.labelY + labelSize,
     width: opts.width,
@@ -242,7 +260,7 @@ export function drawLabeledBlock(
     valueSize,
     opts.width,
   );
-  const contentBottom = drawTextBlock(page, regular, bold, opts.value, {
+  const contentBottom = drawTextBlock(page, regular, heading, opts.value, {
     x: opts.x,
     top: valueTop,
     width: opts.width,
@@ -264,7 +282,7 @@ export function drawLabeledBlock(
 export function drawPairedLabeledBlocks(
   page: PDFPage,
   regular: PDFFont,
-  bold: PDFFont,
+  heading: PDFFont,
   left: { label: string; value?: string; x: number; width: number },
   right: { label: string; value?: string; x: number; width: number },
   opts: {
@@ -280,14 +298,14 @@ export function drawPairedLabeledBlocks(
   const pad = DOC_CELL_PAD;
   const labelTop = opts.sectionTop - pad;
 
-  const leftLabelBottom = drawTextBlock(page, regular, bold, left.label, {
+  const leftLabelBottom = drawTextBlock(page, heading, heading, left.label, {
     x: left.x,
     top: labelTop,
     width: left.width,
     size: labelSize,
     bold: true,
   });
-  const rightLabelBottom = drawTextBlock(page, regular, bold, right.label, {
+  const rightLabelBottom = drawTextBlock(page, heading, heading, right.label, {
     x: right.x,
     top: labelTop,
     width: right.width,
@@ -302,14 +320,14 @@ export function drawPairedLabeledBlocks(
   );
   const height = contentAwareHeight(contentH, opts.emptyMinHeight);
 
-  drawTextBlock(page, regular, bold, left.value, {
+  drawTextBlock(page, regular, heading, left.value, {
     x: left.x,
     top: valueTop,
     width: left.width,
     minHeight: height,
     size: valueSize,
   });
-  drawTextBlock(page, regular, bold, right.value, {
+  drawTextBlock(page, regular, heading, right.value, {
     x: right.x,
     top: valueTop,
     width: right.width,
@@ -346,7 +364,7 @@ export function columnValueLayout(
 export function drawLabelValueRows(
   page: PDFPage,
   regular: PDFFont,
-  bold: PDFFont,
+  heading: PDFFont,
   rows: LabelValuePair[],
   opts: {
     labelX: number;
@@ -373,7 +391,7 @@ export function drawLabelValueRows(
   const valueSize = opts.valueSize ?? DOC_BODY_TEXT_SIZE;
   const minRowStep = opts.minRowStep ?? DETAIL_ROW_STEP;
   for (const [label, value] of rows) {
-    y = drawLabelValueLine(page, regular, bold, {
+    y = drawLabelValueLine(page, regular, heading, {
       label,
       value,
       labelX: opts.labelX,
@@ -420,7 +438,7 @@ export function labelValueStartX(
 export function drawLabelValueLine(
   page: PDFPage,
   regular: PDFFont,
-  bold: PDFFont,
+  heading: PDFFont,
   opts: {
     label: string;
     value?: string;
@@ -437,13 +455,13 @@ export function drawLabelValueLine(
     x: opts.labelX,
     y: opts.y,
     size: opts.labelSize,
-    font: bold,
+    font: heading,
     color: BLACK,
   });
   if (!opts.value?.trim()) {
     return opts.y - opts.minRowStep;
   }
-  const bottom = drawTextBlock(page, regular, bold, opts.value, {
+  const bottom = drawTextBlock(page, regular, heading, opts.value, {
     x: opts.valueX,
     top: opts.y + opts.valueSize,
     width: opts.valueWidth,
@@ -472,7 +490,7 @@ export function drawRule(
 export function drawLetterhead(
   page: PDFPage,
   image: PDFImage,
-  bold: PDFFont,
+  heading: PDFFont,
   title: string,
   options: { clearBottom: number; titleY: number },
 ): void {
@@ -493,12 +511,11 @@ export function drawLetterhead(
     height,
   });
 
-  const titleSize = title.length > 22 ? 22 : 25;
   page.drawText(title, {
-    x: (PAGE_WIDTH - bold.widthOfTextAtSize(title, titleSize)) / 2,
+    x: (PAGE_WIDTH - heading.widthOfTextAtSize(title, DOC_TITLE_SIZE)) / 2,
     y: options.titleY,
-    size: titleSize,
-    font: bold,
+    size: DOC_TITLE_SIZE,
+    font: heading,
     color: BLACK,
   });
   drawRule(page, 6, options.clearBottom, PAGE_WIDTH - 6, options.clearBottom);
@@ -517,7 +534,7 @@ export function drawCargoRows(
   page: PDFPage,
   rows: CargoRowDto[],
   regular: PDFFont,
-  bold: PDFFont,
+  heading: PDFFont,
   area: {
     top: number;
     /** Fixed-band bottom (equal row heights). Ignored when minRowHeight is set. */
@@ -542,8 +559,8 @@ export function drawCargoRows(
   const right = columns[columns.length - 1];
   const headerHeight = area.headerHeight ?? 0;
   const bodyTop = area.top - headerHeight;
-  const fontSize = area.fontSize ?? DOC_BODY_TEXT_SIZE;
-  const headerSize = DOC_SECTION_LABEL_SIZE;
+  const fontSize = area.fontSize ?? DOC_CARGO_TEXT_SIZE;
+  const headerSize = DOC_TABLE_HEADER_SIZE;
   const cellPadX = 4;
   const cellPadY = 5;
   const cellInner = cellPadX * 2;
@@ -556,7 +573,7 @@ export function drawCargoRows(
         x: columns[column] + cellPadX,
         y: bodyTop + (headerHeight - headerSize) / 2,
         size: headerSize,
-        font: bold,
+        font: heading,
         color: BLACK,
       });
     });
@@ -602,7 +619,7 @@ export function drawCargoRows(
       const rowHeight = rowHeights[index];
       const rowBottom = rowTop - rowHeight;
       cargoValues(row).forEach((value, column) => {
-        drawTextBlock(page, regular, bold, value, {
+        drawTextBlock(page, regular, heading, value, {
           x: columns[column] + cellPadX,
           top: rowTop - cellPadY / 2,
           width: columns[column + 1] - columns[column] - cellInner,
@@ -632,7 +649,7 @@ export function drawCargoRows(
     const y = bodyTop - rowHeight * (index + 1) + cellPadY / 2;
     const height = rowHeight - cellPadY;
     cargoValues(row).forEach((value, column) =>
-      drawText(page, regular, bold, value, {
+      drawText(page, regular, heading, value, {
         x: columns[column] + cellPadX,
         y,
         width: columns[column + 1] - columns[column] - cellInner,
@@ -709,7 +726,7 @@ export function measureAttentionBandHeight(
  */
 export function drawForSeatransBlock(
   page: PDFPage,
-  bold: PDFFont,
+  heading: PDFFont,
   options: {
     top: number;
     pageFloor?: number;
@@ -727,7 +744,7 @@ export function drawForSeatransBlock(
     x,
     y: Math.max(pageFloor + labelSize, titleY),
     size: labelSize,
-    font: bold,
+    font: heading,
     color: BLACK,
   });
 
@@ -768,15 +785,15 @@ export function drawForSeatransBlock(
     x: x + 40,
     y: labelY,
     size: labelSize,
-    font: bold,
+    font: heading,
     color: BLACK,
   });
-  const managerWidth = bold.widthOfTextAtSize(manager, labelSize);
+  const managerWidth = heading.widthOfTextAtSize(manager, labelSize);
   page.drawText(manager, {
     x: stampX + (stampW - managerWidth) / 2,
     y: labelY,
     size: labelSize,
-    font: bold,
+    font: heading,
     color: BLACK,
   });
 
@@ -790,7 +807,7 @@ export function drawForSeatransBlock(
 export function drawAttentionBand(
   page: PDFPage,
   regular: PDFFont,
-  bold: PDFFont,
+  heading: PDFFont,
   options: AttentionBandOptions & {
     top: number;
     pageFloor?: number;
@@ -807,7 +824,7 @@ export function drawAttentionBand(
     x,
     y: labelY,
     size: DOC_SECTION_LABEL_SIZE,
-    font: bold,
+    font: heading,
     color: BLACK,
   });
 
@@ -816,7 +833,7 @@ export function drawAttentionBand(
     measureTextHeight(options.text, regular, DOC_BODY_TEXT_SIZE, width),
     options.emptyMinHeight ?? 0,
   );
-  const attentionBottom = drawTextBlock(page, regular, bold, options.text, {
+  const attentionBottom = drawTextBlock(page, regular, heading, options.text, {
     x,
     top: bodyTop,
     width,
@@ -826,7 +843,7 @@ export function drawAttentionBand(
 
   let bottom = attentionBottom - pad;
   if (options.includeForSeatrans) {
-    bottom = drawForSeatransBlock(page, bold, {
+    bottom = drawForSeatransBlock(page, heading, {
       top: attentionBottom - pad,
       pageFloor,
       managerStamp: options.managerStamp,
@@ -855,7 +872,7 @@ export function addCargoContinuationPages(
   pdf: PDFDocument,
   rows: CargoRowDto[],
   regular: PDFFont,
-  bold: PDFFont,
+  heading: PDFFont,
   title: string,
   options?: CargoContinuationOptions,
 ): void {
@@ -869,11 +886,11 @@ export function addCargoContinuationPages(
     page.drawText(`${title} - CARGO CONTINUATION`, {
       x: 28,
       y: 790,
-      size: 17,
-      font: bold,
+      size: DOC_CONTINUATION_TITLE_SIZE,
+      font: heading,
       color: BLACK,
     });
-    drawAttentionBand(page, regular, bold, {
+    drawAttentionBand(page, regular, heading, {
       ...attentionAfter,
       top: 760,
       pageFloor: contPageFloor,
@@ -887,16 +904,16 @@ export function addCargoContinuationPages(
     page.drawText(`${title} - CARGO CONTINUATION`, {
       x: 28,
       y: 790,
-      size: 17,
-      font: bold,
+      size: DOC_CONTINUATION_TITLE_SIZE,
+      font: heading,
       color: BLACK,
     });
     const columns = [28, 190, 278, 430, 505, 568];
     const headerTop = 760;
     const headerHeight = 20;
     const bodyTop = headerTop - headerHeight;
-    const fontSize = DOC_BODY_TEXT_SIZE;
-    const headerSize = DOC_SECTION_LABEL_SIZE;
+    const fontSize = DOC_CARGO_TEXT_SIZE;
+    const headerSize = DOC_TABLE_HEADER_SIZE;
     const cellPad = 6;
     const minRowHeight = 30;
 
@@ -910,7 +927,7 @@ export function addCargoContinuationPages(
         x: columns[index] + 3,
         y: bodyTop + (headerHeight - headerSize) / 2,
         size: headerSize,
-        font: bold,
+        font: heading,
         color: BLACK,
       }),
     );
@@ -980,7 +997,7 @@ export function addCargoContinuationPages(
     batch.forEach((row, rowIndex) => {
       const rowHeight = rowHeights[rowIndex];
       cargoValues(row).forEach((value, columnIndex) => {
-        drawTextBlock(page, regular, bold, value, {
+        drawTextBlock(page, regular, heading, value, {
           x: columns[columnIndex] + 3,
           top: rowTop - 3,
           width: columns[columnIndex + 1] - columns[columnIndex] - 6,
@@ -995,7 +1012,7 @@ export function addCargoContinuationPages(
     // Attention only after the final container table — never above cargo.
     if (remaining.length === 0 && attentionAfter) {
       if (tableBottom - needed >= contPageFloor) {
-        drawAttentionBand(page, regular, bold, {
+        drawAttentionBand(page, regular, heading, {
           ...attentionAfter,
           top: tableBottom,
           pageFloor: contPageFloor,
@@ -1006,11 +1023,11 @@ export function addCargoContinuationPages(
         attnPage.drawText(`${title} - CARGO CONTINUATION`, {
           x: 28,
           y: 790,
-          size: 17,
-          font: bold,
+          size: DOC_CONTINUATION_TITLE_SIZE,
+          font: heading,
           color: BLACK,
         });
-        drawAttentionBand(attnPage, regular, bold, {
+        drawAttentionBand(attnPage, regular, heading, {
           ...attentionAfter,
           top: 760,
           pageFloor: contPageFloor,
@@ -1032,7 +1049,7 @@ export function finishCargoAndAttentionPage(
   pdf: PDFDocument,
   page: PDFPage,
   regular: PDFFont,
-  bold: PDFFont,
+  heading: PDFFont,
   opts: {
     marksBottom: number;
     cargoRows?: CargoRowDto[];
@@ -1070,18 +1087,18 @@ export function finishCargoAndAttentionPage(
 
   if (canFitCargo) {
     // Try cargo + attention on page 1 (reserve band under the table).
-    const withRoom = drawCargoRows(page, remaining, regular, bold, {
+    const withRoom = drawCargoRows(page, remaining, regular, heading, {
       top: opts.marksBottom,
       minBottom: pageFloor + needed,
       maxRows,
       columns,
       headerHeight,
       minRowHeight,
-      fontSize: DOC_BODY_TEXT_SIZE,
+      fontSize: DOC_CARGO_TEXT_SIZE,
     });
 
     if (withRoom.remaining.length === 0) {
-      drawAttentionBand(page, regular, bold, {
+      drawAttentionBand(page, regular, heading, {
         ...attentionOpts,
         top: withRoom.bottom,
         pageFloor,
@@ -1097,18 +1114,18 @@ export function finishCargoAndAttentionPage(
       height: opts.marksBottom - pageFloor + 2,
       color: rgb(1, 1, 1),
     });
-    const filled = drawCargoRows(page, remaining, regular, bold, {
+    const filled = drawCargoRows(page, remaining, regular, heading, {
       top: opts.marksBottom,
       minBottom: pageFloor,
       maxRows,
       columns,
       headerHeight,
       minRowHeight,
-      fontSize: DOC_BODY_TEXT_SIZE,
+      fontSize: DOC_CARGO_TEXT_SIZE,
     });
     remaining = filled.remaining;
 
-    addCargoContinuationPages(pdf, remaining, regular, bold, opts.title, {
+    addCargoContinuationPages(pdf, remaining, regular, heading, opts.title, {
       attentionAfterCargo: attentionOpts,
     });
     return;
@@ -1116,7 +1133,7 @@ export function finishCargoAndAttentionPage(
 
   if (remaining.length > 0) {
     // No room for cargo on page 1 — all cargo (+ attention after it) on continuation.
-    addCargoContinuationPages(pdf, remaining, regular, bold, opts.title, {
+    addCargoContinuationPages(pdf, remaining, regular, heading, opts.title, {
       attentionAfterCargo: attentionOpts,
     });
     return;
@@ -1124,7 +1141,7 @@ export function finishCargoAndAttentionPage(
 
   // No cargo: attention directly under Marks/Volume.
   if (anchorTop - needed >= pageFloor) {
-    drawAttentionBand(page, regular, bold, {
+    drawAttentionBand(page, regular, heading, {
       ...attentionOpts,
       top: anchorTop,
       pageFloor,
@@ -1132,7 +1149,7 @@ export function finishCargoAndAttentionPage(
     return;
   }
 
-  addCargoContinuationPages(pdf, [], regular, bold, opts.title, {
+  addCargoContinuationPages(pdf, [], regular, heading, opts.title, {
     attentionAfterCargo: attentionOpts,
   });
 }
@@ -1146,7 +1163,7 @@ export function measureTextHeight(
   font: PDFFont,
   size: number,
   width: number,
-  lineHeightFactor = 1.2,
+  lineHeightFactor = DOC_LINE_HEIGHT_FACTOR,
 ): number {
   if (!text?.trim()) return 0;
   const lineHeight = size * lineHeightFactor;
@@ -1172,14 +1189,14 @@ export function drawTextBlock(
     minHeight?: number;
     size?: number;
     bold?: boolean;
-    /** Multiplier on font size for inter-line spacing (default 1.2). */
+    /** Multiplier on font size for inter-line spacing (default DOC_LINE_HEIGHT_FACTOR). */
     lineHeightFactor?: number;
     color?: ReturnType<typeof rgb>;
   },
 ): number {
   const size = box.size ?? DOC_BODY_TEXT_SIZE;
   const font = box.bold ? bold : regular;
-  const lineHeightFactor = box.lineHeightFactor ?? 1.2;
+  const lineHeightFactor = box.lineHeightFactor ?? DOC_LINE_HEIGHT_FACTOR;
   const lineHeight = size * lineHeightFactor;
   const contentHeight = measureTextHeight(
     value,

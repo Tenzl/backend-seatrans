@@ -483,7 +483,7 @@ describe('BookingDocumentsService', () => {
     }
   });
 
-  it('derives booking PIC from the creating user on create and update', async () => {
+  it('fills booking PIC from creator when empty, keeps selected PIC on update', async () => {
     userRepository.findOne.mockResolvedValue({
       id: 9,
       fullName: 'Nhung Nguyen',
@@ -523,11 +523,14 @@ describe('BookingDocumentsService', () => {
     const updated = await service.updateRecord(
       BookingDocumentType.BOOKING_CONFIRMATION,
       7,
-      { bookingNumber: 'BK-2' },
+      {
+        bookingNumber: 'BK-2',
+        pic: 'Selected User, Email: selected@seatrans.com.vn',
+      },
       12,
     );
     expect(updated.payload).toMatchObject({
-      pic: 'Nhung Nguyen, Email: total.logistics@seatrans.com.vn',
+      pic: 'Selected User, Email: selected@seatrans.com.vn',
     });
   });
 });

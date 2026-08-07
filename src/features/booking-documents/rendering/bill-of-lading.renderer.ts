@@ -11,20 +11,27 @@ import {
 } from '../an-container';
 import type { BillOfLadingPreviewDto } from '../dto/bill-of-lading-preview.dto';
 import type { BookingDocumentRenderContext } from './booking-document-render-context';
+import { formatPdfDateTime } from './pdf-schedule-date';
 
 /** A4 — matches `FILLED UP_ SUR BL.pdf` page size. */
 export const BL_PAGE_WIDTH = 595.28;
 export const BL_PAGE_HEIGHT = 841.89;
+/**
+ * Global vertical shift for all drawn overlay content (text, stamps, marks,
+ * underlines) in "top-from-page-top" space. Negative moves content toward
+ * the page top. Does not move the blank template image.
+ */
+const BL_CONTENT_Y_OFFSET = -3;
 
 /**
- * Fit text to BL blank PNG grid (A4). Official sample uses Roboto 8.1
- * on a blank whose horizontals sit ~7.5pt lower; values here are absolute tops
- * on our blank, just below each cell label (not on the bottom rule).
+ * Fit text to BL blank PNG grid (A4).
+ * Body / cargo: Arial Regular. Stamp-like FBL / SURRENDERED: DejaVu Bold.
+ * Body 9pt, cargo columns 8pt, FBL number 12pt bold.
  * Party / route cells add LABEL_TO_VALUE_GAP under the printed label.
  */
-const FONT_SIZE = 8.0;
-const FONT_SIZE_SMALL = 7.5;
-const FONT_SIZE_FBL = 10.5;
+const FONT_SIZE = 9.0;
+const FONT_SIZE_SMALL = 8.0;
+const FONT_SIZE_FBL = 12;
 const LINE_GAP = 1.15;
 /** Cargo body leading (looser than party cells) + pad between logical rows. */
 const CARGO_LINE_GAP = 2.3;
@@ -157,9 +164,14 @@ const BOX = {
 
 function pdfYFromTop(top: number, fontSize: number, font: PDFFont): number {
   // Baseline so glyph tops land on `top` (pdf-lib origin = bottom-left).
-  // DejaVuSans heightAtSize(descender:false) under-reports ink top by ~0.25*size.
+  // Arial heightAtSize(descender:false) under-reports ink top by ~0.25*size.
   const height = font.heightAtSize(fontSize, { descender: false });
-  return BL_PAGE_HEIGHT - top - height - fontSize * 0.25;
+  return (
+    BL_PAGE_HEIGHT -
+    (top + BL_CONTENT_Y_OFFSET) -
+    height -
+    fontSize * 0.25
+  );
 }
 
 function wrapLines(
@@ -364,7 +376,7 @@ function drawCargoTotalUnderline(
   top: number,
   width: number,
 ) {
-  const y = BL_PAGE_HEIGHT - top;
+  const y = BL_PAGE_HEIGHT - (top + BL_CONTENT_Y_OFFSET);
   const w = Math.min(Math.max(width, 0), field.maxWidth);
   if (w <= 0) return;
   // Right-aligned: same right edge as value/total text; width is measured text + pad.
@@ -433,7 +445,7 @@ function drawAlignedBlCargoRows(
   font: PDFFont,
   rows: BlCargoPdfRow[],
 ) {
-  const fontSize = FONT_SIZE;
+  const fontSize = FONT_SIZE_SMALL;
   const lineStep = fontSize + CARGO_LINE_GAP;
   const cargoTop = BOX.marksAndNumbers.top;
   // Leave a small gap above freightTerms / cleanOnBoard.
@@ -716,6 +728,7 @@ export function renderBillOfLading(
   const page = context.pdf.getPage(0);
   const font = context.regular;
   const bold = context.bold;
+  const heading = context.heading;
 
   const containers = normalizeAnContainersPayload({
     containers: payload.containers,
@@ -729,10 +742,10 @@ export function renderBillOfLading(
     containers.some(containerRowHasCargo) || Boolean(serviceMode);
 
   if (payload.blFormVariant === 'surrendered') {
-    drawBillOfLadingSurrenderedMark(page, bold);
+    drawBillOfLadingSurrenderedMark(page, heading);
   }
 
-  drawBoxText(page, bold, payload.fblNumber, BOX.fblNumber, FONT_SIZE_FBL);
+  drawBoxText(page, heading, payload.fblNumber, BOX.fblNumber, FONT_SIZE_FBL);
   drawBoxText(page, font, payload.consignor, BOX.consignor);
   drawBoxText(page, font, payload.consignedToOrderOf, BOX.consignedToOrderOf);
   drawBoxText(page, font, payload.notifyAddress, BOX.notifyAddress);
@@ -808,7 +821,12 @@ export function renderBillOfLading(
   drawBoxText(page, font, payload.freightAmount, BOX.freightAmount);
   drawBoxText(page, font, payload.freightPayableAt, BOX.freightPayableAt);
   drawBoxText(page, font, payload.placeOfIssue, BOX.placeOfIssue);
-  drawBoxText(page, font, payload.dateOfIssue, BOX.dateOfIssue);
+  drawBoxText(
+    page,
+    font,
+    formatPdfDateTime(payload.dateOfIssue) || payload.dateOfIssue,
+    BOX.dateOfIssue,
+  );
   drawBoxText(page, font, payload.numberOfOriginals, BOX.numberOfOriginals);
   drawBoxText(page, font, payload.deliveryApplyTo, BOX.deliveryApplyTo);
 
@@ -828,7 +846,8 @@ export function renderBillOfLading(
     const stampH =
       (context.managerStamp.height / context.managerStamp.width) * stampW;
     let stampX = BOX.stamp.x + 20;
-    let stampY = BL_PAGE_HEIGHT - BOX.stamp.top - stampH;
+    let stampY =
+      BL_PAGE_HEIGHT - (BOX.stamp.top + BL_CONTENT_Y_OFFSET) - stampH;
     if (stampX + stampW > BL_PAGE_WIDTH) {
       stampX = BL_PAGE_WIDTH - stampW;
     }

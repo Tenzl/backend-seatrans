@@ -7,6 +7,7 @@ import {
 } from '../an-container';
 import { ArrivalNoticePreviewDto } from '../dto/arrival-notice-preview.dto';
 import { BookingDocumentRenderContext } from './booking-document-render-context';
+import { formatPdfDateTime } from './pdf-schedule-date';
 import {
   BELOW_RULE_BASELINE,
   DETAIL_LABEL_SIZE,
@@ -79,15 +80,14 @@ const RIGHT_LABELS = [
 /** Ref. No. stays visually stronger than sibling meta labels (bold + size). */
 const EMPHASIZED_RIGHT_LABELS = new Set(['Ref. No.:']);
 
-/** PDF value only — strip a leading ETD/ETA label from one date string. */
+/** PDF value — normalize schedule dates via the shared PDF datetime lib. */
 export function formatScheduleDateForPdf(value?: string): string {
-  if (!value?.trim()) return value ?? '';
-  return value.replace(/^\s*(ETD|ETA)\b[:\s-]*/i, '').trim();
+  return formatPdfDateTime(value);
 }
 
-/** PDF value only — strip leading ETD/ETA from each side of "a / b". */
+/** PDF value — format each side of a combined "a / b" ETD/ETA string. */
 export function formatEtdEtaForPdf(value?: string): string {
-  if (!value?.trim()) return value ?? '';
+  if (!value?.trim()) return '';
   return value
     .split('/')
     .map((part) => formatScheduleDateForPdf(part))
@@ -117,11 +117,11 @@ export function resolveArrivalNoticeSchedule(dto: {
 }
 
 export function renderArrivalNotice(
-  { pdf, regular, bold, header }: BookingDocumentRenderContext,
+  { pdf, regular, heading, header }: BookingDocumentRenderContext,
   dto: ArrivalNoticePreviewDto,
 ): void {
   const page = pdf.getPage(0);
-  drawLetterhead(page, header, bold, 'ARRIVAL NOTICE', {
+  drawLetterhead(page, header, heading, 'ARRIVAL NOTICE', {
     clearBottom: DOC_HEADER_TOP,
     titleY: 708,
   });
@@ -137,9 +137,9 @@ export function renderArrivalNotice(
 
   // Meta header grows with wrapped Agent (and Date / AN No.); body starts below it.
   // Agent: name only (mirror Booking Confirmation To) — never address / TEL / FAX.
-  const headerBottom = drawMetaHeaderRow(page, regular, bold, {
+  const headerBottom = drawMetaHeaderRow(page, regular, heading, {
     left: { label: 'Agent:', value: partyDisplayName(dto.agent) },
-    mid: { label: 'Date:', value: dto.date },
+    mid: { label: 'Date:', value: formatPdfDateTime(dto.date) || dto.date },
     right: { label: 'AN No.:', value: dto.anNumber },
   });
 
@@ -150,12 +150,12 @@ export function renderArrivalNotice(
     Math.max(
       maxLabelWidth(
         RIGHT_LABELS.filter((label) => !EMPHASIZED_RIGHT_LABELS.has(label)),
-        bold,
+        heading,
         DETAIL_LABEL_SIZE,
       ),
       maxLabelWidth(
         [...EMPHASIZED_RIGHT_LABELS],
-        bold,
+        heading,
         REFERENCE_LABEL_SIZE,
       ),
     ) +
@@ -168,7 +168,7 @@ export function renderArrivalNotice(
   const introBottom = drawTextBlock(
     page,
     regular,
-    bold,
+    regular,
     'We are pleased to inform that you have an incoming shipment with details as follows:',
     {
       x: RIGHT_X,
@@ -201,7 +201,7 @@ export function renderArrivalNotice(
       drawRule(page, FRAME_MID, rightY + 4, FRAME_RIGHT, rightY + 4);
       rightY -= 6;
     }
-    rightY = drawLabelValueRows(page, regular, bold, group, {
+    rightY = drawLabelValueRows(page, regular, heading, group, {
       labelX: RIGHT_X,
       valueX,
       valueWidth,
@@ -214,7 +214,7 @@ export function renderArrivalNotice(
   const rightShipperDividerY = rightY + 4;
 
   // Shipper flows under Agent — same rhythm as Consignee under Shipper.
-  const shipperBottom = drawLabeledBlock(page, regular, bold, {
+  const shipperBottom = drawLabeledBlock(page, regular, heading, {
     label: 'Shipper:',
     labelY: shipperLabelTop - LABEL_SIZE,
     value: dto.shipper,
@@ -236,7 +236,7 @@ export function renderArrivalNotice(
     ['Service Mode:', dto.serviceMode],
   ];
   const rightBottom =
-    drawLabelValueRows(page, regular, bold, routingGroup, {
+    drawLabelValueRows(page, regular, heading, routingGroup, {
       labelX: RIGHT_X,
       valueX,
       valueWidth,
@@ -247,7 +247,7 @@ export function renderArrivalNotice(
 
   const consigneeLabelY = shipperDividerY - DOC_CELL_PAD;
   const consigneeTop = consigneeLabelY - LABEL_SIZE - LABEL_GAP;
-  const consigneeBottom = drawLabeledBlock(page, regular, bold, {
+  const consigneeBottom = drawLabeledBlock(page, regular, heading, {
     label: 'Consignee:',
     labelY: consigneeLabelY - LABEL_SIZE,
     value: dto.consignee,
@@ -263,7 +263,7 @@ export function renderArrivalNotice(
   const pairBottom = drawPairedLabeledBlocks(
     page,
     regular,
-    bold,
+    heading,
     {
       label: 'Notify party:',
       value: dto.notifyParty,
@@ -288,7 +288,7 @@ export function renderArrivalNotice(
   const marksBottom = drawPairedLabeledBlocks(
     page,
     regular,
-    bold,
+    heading,
     { label: 'Marks', value: dto.marks, x: LEFT_X, width: LEFT_W },
     { label: 'Volume', value: volumeText, x: RIGHT_X, width: RIGHT_W },
     { sectionTop: pairBottom, emptyMinHeight: EMPTY_MARKS_MIN },
@@ -310,7 +310,7 @@ export function renderArrivalNotice(
       ? anContainersToCargoRows(containers, descriptionOfGoods)
       : (dto.cargoRows ?? []);
 
-  finishCargoAndAttentionPage(pdf, page, regular, bold, {
+  finishCargoAndAttentionPage(pdf, page, regular, heading, {
     marksBottom,
     cargoRows,
     title: 'ARRIVAL NOTICE',

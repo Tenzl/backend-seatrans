@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import fontkit from '@pdf-lib/fontkit';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, PDFFont } from 'pdf-lib';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
@@ -27,6 +27,13 @@ import { renderBookingConfirmation } from './booking-confirmation.renderer';
 import { BookingDocumentRenderContext } from './booking-document-render-context';
 import { renderDeliveryOrder } from './delivery-order.renderer';
 
+type EmbeddedDocFonts = {
+  regular: PDFFont;
+  bold: PDFFont;
+  heading: PDFFont;
+  headingRegular: PDFFont;
+};
+
 @Injectable()
 export class BookingDocumentPdfRenderer {
   private readonly assetCache = new Map<string, Promise<Buffer>>();
@@ -42,14 +49,7 @@ export class BookingDocumentPdfRenderer {
     const pdf = await this.openTemplate(type);
     pdf.registerFontkit(fontkit);
 
-    const [regularBytes, boldBytes] = await Promise.all([
-      this.readAsset('fonts', 'DejaVuSans.ttf'),
-      this.readAsset('fonts', 'DejaVuSans-Bold.ttf'),
-    ]);
-    // pdf-lib mutates the document context while allocating embedded objects.
-    // Keep these sequential so concurrent HTTP previews cannot corrupt refs.
-    const regular = await pdf.embedFont(regularBytes, { subset: true });
-    const bold = await pdf.embedFont(boldBytes, { subset: true });
+    const fonts = await this.embedDocFonts(pdf);
     const header = await pdf.embedPng(
       await this.readAsset('author-header.png'),
     );
@@ -58,8 +58,7 @@ export class BookingDocumentPdfRenderer {
     );
     const context: BookingDocumentRenderContext = {
       pdf,
-      regular,
-      bold,
+      ...fonts,
       header,
       managerStamp,
     };
@@ -109,16 +108,12 @@ export class BookingDocumentPdfRenderer {
     const variant = this.resolveBillOfLadingVariant(payload);
     const templateFile = BILL_OF_LADING_TEMPLATE_BY_VARIANT[variant];
 
-    const [regularBytes, boldBytes, templateBytes, signatureBytes] =
-      await Promise.all([
-        this.readAsset('fonts', 'DejaVuSans.ttf'),
-        this.readAsset('fonts', 'DejaVuSans-Bold.ttf'),
-        this.readAsset('templates', templateFile),
-        this.readAsset(BILL_OF_LADING_AUTHOR_SIGNATURE_PNG),
-      ]);
+    const [fonts, templateBytes, signatureBytes] = await Promise.all([
+      this.embedDocFonts(pdf),
+      this.readAsset('templates', templateFile),
+      this.readAsset(BILL_OF_LADING_AUTHOR_SIGNATURE_PNG),
+    ]);
 
-    const regular = await pdf.embedFont(regularBytes, { subset: true });
-    const bold = await pdf.embedFont(boldBytes, { subset: true });
     const template = await pdf.embedJpg(templateBytes);
     const managerStamp = await pdf.embedPng(signatureBytes);
 
@@ -132,8 +127,7 @@ export class BookingDocumentPdfRenderer {
     renderBillOfLading(
       {
         pdf,
-        regular,
-        bold,
+        ...fonts,
         header: template,
         managerStamp,
       },
@@ -145,6 +139,28 @@ export class BookingDocumentPdfRenderer {
       data: Buffer.from(bytes),
       filename: BOOKING_DOCUMENT_FILENAMES[BookingDocumentType.BILL_OF_LADING],
     };
+  }
+
+  /**
+   * Arial = content; DejaVu = headings/labels.
+   * Embed sequentially so concurrent previews cannot corrupt pdf-lib refs.
+   */
+  private async embedDocFonts(pdf: PDFDocument): Promise<EmbeddedDocFonts> {
+    const [arialRegular, arialBold, dejaVuRegular, dejaVuBold] =
+      await Promise.all([
+        this.readAsset('fonts', 'Arial.ttf'),
+        this.readAsset('fonts', 'Arial-Bold.ttf'),
+        this.readAsset('fonts', 'DejaVuSans.ttf'),
+        this.readAsset('fonts', 'DejaVuSans-Bold.ttf'),
+      ]);
+
+    const regular = await pdf.embedFont(arialRegular, { subset: true });
+    const bold = await pdf.embedFont(arialBold, { subset: true });
+    const headingRegular = await pdf.embedFont(dejaVuRegular, {
+      subset: true,
+    });
+    const heading = await pdf.embedFont(dejaVuBold, { subset: true });
+    return { regular, bold, heading, headingRegular };
   }
 
   private async openTemplate(type: BookingDocumentType): Promise<PDFDocument> {

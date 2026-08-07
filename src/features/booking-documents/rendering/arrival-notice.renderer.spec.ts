@@ -5,23 +5,23 @@ import {
 } from './arrival-notice.renderer';
 
 describe('formatEtdEtaForPdf', () => {
-  it('strips ETD/ETA prefixes before each date', () => {
+  it('strips ETD/ETA prefixes and formats each date', () => {
     expect(formatEtdEtaForPdf('ETD 14 Aug 2026 / ETA 22 Aug 2026')).toBe(
-      '14 Aug 2026 / 22 Aug 2026',
+      'Aug 14, 2026 / Aug 22, 2026',
     );
   });
 
-  it('leaves bare dates unchanged', () => {
+  it('normalizes bare and ISO dates', () => {
     expect(formatEtdEtaForPdf('14 Aug 2026 / 22 Aug 2026')).toBe(
-      '14 Aug 2026 / 22 Aug 2026',
+      'Aug 14, 2026 / Aug 22, 2026',
     );
     expect(formatEtdEtaForPdf('2026-08-14 / 2026-08-22')).toBe(
-      '2026-08-14 / 2026-08-22',
+      'Aug 14, 2026 / Aug 22, 2026',
     );
   });
 
   it('handles single side and empty input', () => {
-    expect(formatEtdEtaForPdf('ETD 14 Aug 2026')).toBe('14 Aug 2026');
+    expect(formatEtdEtaForPdf('ETD 14 Aug 2026')).toBe('Aug 14, 2026');
     expect(formatEtdEtaForPdf('')).toBe('');
     expect(formatEtdEtaForPdf(undefined)).toBe('');
   });
@@ -35,7 +35,7 @@ describe('resolveArrivalNoticeSchedule', () => {
         eta: '2026-08-12',
         etdEta: 'ignored / legacy',
       }),
-    ).toEqual({ etd: '2026-08-06', eta: '2026-08-12' });
+    ).toEqual({ etd: 'Aug 06, 2026', eta: 'Aug 12, 2026' });
   });
 
   it('falls back to legacy combined etdEta', () => {
@@ -43,11 +43,11 @@ describe('resolveArrivalNoticeSchedule', () => {
       resolveArrivalNoticeSchedule({
         etdEta: 'ETD 14 Aug 2026 / ETA 22 Aug 2026',
       }),
-    ).toEqual({ etd: '14 Aug 2026', eta: '22 Aug 2026' });
+    ).toEqual({ etd: 'Aug 14, 2026', eta: 'Aug 22, 2026' });
   });
 
-  it('strips prefixes on single schedule dates', () => {
-    expect(formatScheduleDateForPdf('ETD 2026-08-06')).toBe('2026-08-06');
-    expect(formatScheduleDateForPdf('ETA: 2026-08-12')).toBe('2026-08-12');
+  it('formats single schedule dates via shared lib', () => {
+    expect(formatScheduleDateForPdf('ETD 2026-08-06')).toBe('Aug 06, 2026');
+    expect(formatScheduleDateForPdf('ETA: 2026-08-12')).toBe('Aug 12, 2026');
   });
 });

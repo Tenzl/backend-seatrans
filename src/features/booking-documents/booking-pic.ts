@@ -12,11 +12,15 @@ export function formatBookingPic(
   return name || mail;
 }
 
+/**
+ * Prefer an explicit PIC selection (form / payload). Fall back to creator
+ * fullName+email when empty (new bookings before a user is picked).
+ */
 export function resolveBookingPic(
   creator: { fullName?: string | null; email?: string | null } | null | undefined,
   existingPic?: string | null,
 ): string {
-  const fromCreator = formatBookingPic(creator?.fullName, creator?.email);
-  if (fromCreator) return fromCreator;
-  return existingPic?.trim() ?? '';
+  const selected = existingPic?.trim() ?? '';
+  if (selected) return selected;
+  return formatBookingPic(creator?.fullName, creator?.email);
 }

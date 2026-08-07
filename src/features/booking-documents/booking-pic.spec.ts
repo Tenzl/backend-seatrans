@@ -12,11 +12,17 @@ describe('booking pic formatting', () => {
     expect(formatBookingPic('', 'ops@seatrans.com.vn')).toBe('ops@seatrans.com.vn');
   });
 
-  it('prefers creator info and keeps legacy pic when creator is missing', () => {
+  it('prefers selected pic over creator, then falls back to creator', () => {
+    expect(
+      resolveBookingPic(
+        { fullName: 'Creator', email: 'creator@seatrans.com.vn' },
+        'Selected User, Email: selected@seatrans.com.vn',
+      ),
+    ).toBe('Selected User, Email: selected@seatrans.com.vn');
     expect(
       resolveBookingPic(
         { fullName: 'Nhung Nguyen', email: 'total.logistics@seatrans.com.vn' },
-        'Legacy PIC',
+        '',
       ),
     ).toBe('Nhung Nguyen, Email: total.logistics@seatrans.com.vn');
     expect(resolveBookingPic(null, 'Legacy PIC')).toBe('Legacy PIC');
