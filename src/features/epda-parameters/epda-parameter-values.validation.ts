@@ -95,6 +95,12 @@ export function validateEpdaParameterValues(
   if (serializedSize > MAX_VALUES_BYTES) {
     fail(`EPDA parameter values must not exceed ${MAX_VALUES_BYTES} bytes`);
   }
+  // PS→port miles belong on the EPDA inquiry form, not parameter sets.
+  if (values.hours) {
+    const hours = values.hours as Record<string, unknown>;
+    const { pilotageThirdMiles: _a, qnPilotageMiles: _b, ...rest } = hours;
+    values.hours = rest as PartialEpdaParameterValues['hours'];
+  }
   validateObjectNumbers(values.hours, 'hours');
   validateObjectNumbers(values.garbage, 'garbage');
   validateObjectNumbers(values.quarantine, 'quarantine');

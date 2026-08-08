@@ -441,13 +441,21 @@ export class ServiceInquiryService {
   ): Promise<string[]> {
     const ids = Array.isArray(inquiryIds) ? inquiryIds : [inquiryIds];
     if (!ids.length) return [];
+    // Pass text[] → bigint[] so node-pg/TypeORM never mis-bind JS number[].
+    const idParams = ids.map(String);
     if (slug === 'shipping-agency') {
       await manager.query(
         `DELETE FROM shipping_agency_field_change_logs
          WHERE inquiry_id = ANY($1::bigint[])`,
-        [ids],
+        [idParams],
       );
     }
+    await manager.query(
+      `DELETE FROM inquiry_idempotency_keys
+       WHERE inquiry_id = ANY($1::bigint[])
+         AND (service_slug = $2 OR service_slug IS NULL)`,
+      [idParams, slug],
+    );
     // Scope by serviceSlug: inquiry ids were not globally unique historically.
     // Match exact slug always. Also remove legacy rows with null/empty slug
     // only when those ids are absent from every other service table — avoids
@@ -474,7 +482,7 @@ export class ServiceInquiryService {
              AND NOT EXISTS (${otherIdExistsSql})
            )
          )`,
-      [ids, slug],
+      [idParams, slug],
     );
     return this.inquiryDocumentService.removeMetadataByInquiryIds(
       slug,
@@ -605,7 +613,7 @@ export class ServiceInquiryService {
           const tableName = this.repositories.tableNameForSlug(slug);
           await manager.query(
             `DELETE FROM ${tableName} WHERE id = ANY($1::bigint[])`,
-            [[row.id]],
+            [[String(row.id)]],
           );
           return storedObjectIds;
         },
@@ -617,16 +625,28 @@ export class ServiceInquiryService {
     ids: number[],
     serviceSlug?: string,
   ): Promise<{ deletedCount: number }> {
-    if (!ids.length) return { deletedCount: 0 };
+    const normalizedIds = [
+      ...new Set(
+        ids
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      ),
+    ];
+    if (!normalizedIds.length) return { deletedCount: 0 };
 
     const manager = this.repositories.shippingAgency.manager;
     const grouped = await this.queries.groupIdsBySlug(
-      ids,
+      normalizedIds,
       { includeDeleted: true, serviceSlug },
       manager,
     );
     if (!grouped.size) {
-      throw new NotFoundException('One or more inquiries were not found');
+      const hint = serviceSlug?.trim()
+        ? ` for service "${serviceSlug.trim()}"`
+        : '';
+      throw new NotFoundException(
+        `One or more inquiries were not found${hint}: ${normalizedIds.slice(0, 20).join(', ')}`,
+      );
     }
 
     const publicIds: string[] = [];
@@ -640,10 +660,12 @@ export class ServiceInquiryService {
             `DELETE FROM ${tableName}
              WHERE id = ANY($1::bigint[])
              RETURNING id`,
-            [chunk],
+            [chunk.map(String)],
           );
           if (rows.length !== chunk.length) {
-            throw new NotFoundException('One or more inquiries were not found');
+            throw new NotFoundException(
+              'One or more inquiries were not found during permanent delete',
+            );
           }
           deletedCount += rows.length;
           return stored;
@@ -652,7 +674,7 @@ export class ServiceInquiryService {
       }
     }
 
-    if (deletedCount !== ids.length) {
+    if (deletedCount !== normalizedIds.length) {
       throw new NotFoundException('One or more inquiries were not found');
     }
 

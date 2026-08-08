@@ -211,7 +211,7 @@ describe('ServiceInquiryService user batch delete', () => {
       expect.stringMatching(
         /DELETE FROM notifications[\s\S]*inquiry_id = ANY\(\$1::bigint\[\]\)[\s\S]*serviceSlug[\s\S]*NOT EXISTS/,
       ),
-      [[7], 'shipping-agency'],
+      [['7'], 'shipping-agency'],
     );
     expect(documentService.deleteStoredObjectsBestEffort).toHaveBeenCalledWith([
       'inquiries/shipping-agency/document-7',
@@ -223,6 +223,7 @@ describe('ServiceInquiryService user batch delete', () => {
     managerQuery
       .mockResolvedValueOnce([{ id: 7 }, { id: 8 }]) // groupIdsBySlug SELECT
       .mockResolvedValueOnce([]) // field change logs delete
+      .mockResolvedValueOnce([]) // idempotency keys delete
       .mockResolvedValueOnce([]) // notifications delete
       .mockResolvedValueOnce([{ id: 7 }, { id: 8 }]); // inquiry DELETE RETURNING
     documentService.removeMetadataByInquiryIds.mockResolvedValue([
@@ -243,7 +244,7 @@ describe('ServiceInquiryService user batch delete', () => {
       String(call[0]).includes('DELETE FROM notifications'),
     );
     expect(notificationDeletes).toHaveLength(1);
-    expect(notificationDeletes[0][1]).toEqual([[7, 8], 'shipping-agency']);
+    expect(notificationDeletes[0][1]).toEqual([['7', '8'], 'shipping-agency']);
     expect(shippingRepo.remove).not.toHaveBeenCalled();
     expect(documentService.deleteStoredObjectsBestEffort).toHaveBeenCalledWith([
       'obj-7',

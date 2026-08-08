@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayUnique,
   IsArray,
@@ -14,11 +14,17 @@ import {
   ValidateNested,
 } from 'class-validator';
 
+/** Drop legacy PS→port miles so older clients do not trip forbidNonWhitelisted. */
+function stripLegacyPilotageMiles(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const hours = value as Record<string, unknown>;
+  const { pilotageThirdMiles: _a, qnPilotageMiles: _b, ...rest } = hours;
+  return rest;
+}
+
 class HoursDto {
   @IsOptional() @IsNumber() @Min(0) berthHours?: number;
   @IsOptional() @IsNumber() @Min(0) anchorageHours?: number;
-  @IsOptional() @IsNumber() @Min(0) pilotageThirdMiles?: number;
-  @IsOptional() @IsNumber() @Min(0) qnPilotageMiles?: number;
 }
 
 class GarbageDto {
@@ -79,7 +85,11 @@ class CargoAgencyRateDto {
 }
 
 export class EpdaParameterValuesDto {
-  @IsOptional() @ValidateNested() @Type(() => HoursDto) hours?: HoursDto;
+  @IsOptional()
+  @Transform(({ value }) => stripLegacyPilotageMiles(value))
+  @ValidateNested()
+  @Type(() => HoursDto)
+  hours?: HoursDto;
   @IsOptional() @ValidateNested() @Type(() => GarbageDto) garbage?: GarbageDto;
   @IsOptional()
   @ValidateNested()

@@ -36,8 +36,6 @@ export interface EpdaParameterValues {
   hours: {
     berthHours: number;
     anchorageHours: number;
-    pilotageThirdMiles: number; // HCM template
-    qnPilotageMiles: number; // QN template
   };
   garbage: {
     atBerthUsd: number;

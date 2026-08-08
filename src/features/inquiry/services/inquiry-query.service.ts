@@ -194,7 +194,7 @@ export class InquiryQueryService {
         manager ?? this.repositories.shippingAgency.manager
       ).query(
         `SELECT id FROM ${tableName} WHERE id = ANY($1::bigint[])${deletedFilter}`,
-        [ids],
+        [ids.map(String)],
       );
       if (rows.length !== ids.length) {
         return new Map();
@@ -384,7 +384,7 @@ export class InquiryQueryService {
     const qb = repo
       .createQueryBuilder('inquiry')
       .leftJoinAndSelect('inquiry.serviceType', 'serviceType')
-      .orderBy('inquiry.submitted_at', 'DESC')
+      .orderBy('inquiry.submittedAt', 'DESC')
       .addOrderBy('inquiry.id', 'DESC');
 
     if (filters.archivedFilter === 'active') {

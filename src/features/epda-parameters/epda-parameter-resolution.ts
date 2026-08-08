@@ -37,8 +37,6 @@ export function defaultValuesForArea(
     hours: {
       berthHours: 96,
       anchorageHours: 24,
-      pilotageThirdMiles: 17,
-      qnPilotageMiles: 5,
     },
     garbage: { atBerthUsd: 54, atBuoyUsd: 54 },
     quarantine: {
@@ -120,6 +118,21 @@ export function defaultValuesForArea(
   };
 }
 
+/** PS→port miles live on the EPDA form, not on tariff parameter sets. */
+export function sanitizeEpdaHours(
+  hours?:
+    | (Partial<EpdaParameterValues['hours']> & Record<string, unknown>)
+    | null,
+): Partial<EpdaParameterValues['hours']> | undefined {
+  if (!hours || typeof hours !== 'object') return undefined;
+  const next: Partial<EpdaParameterValues['hours']> = {};
+  if (hours.berthHours !== undefined) next.berthHours = Number(hours.berthHours);
+  if (hours.anchorageHours !== undefined) {
+    next.anchorageHours = Number(hours.anchorageHours);
+  }
+  return next;
+}
+
 /** Later layers win; nested objects merge while tier/rate arrays replace. */
 export function resolveEpdaParameterValues(
   area: string | null,
@@ -128,7 +141,12 @@ export function resolveEpdaParameterValues(
   const resolved = defaultValuesForArea(area);
   for (const layer of layers) {
     if (!layer) continue;
-    if (layer.hours) resolved.hours = { ...resolved.hours, ...layer.hours };
+    if (layer.hours) {
+      resolved.hours = {
+        ...resolved.hours,
+        ...(sanitizeEpdaHours(layer.hours) ?? {}),
+      };
+    }
     if (layer.garbage)
       resolved.garbage = { ...resolved.garbage, ...layer.garbage };
     if (layer.quarantine) {
@@ -162,13 +180,23 @@ export function resolveEpdaParameterValues(
       }));
     }
   }
+  resolved.hours = {
+    berthHours: resolved.hours.berthHours,
+    anchorageHours: resolved.hours.anchorageHours,
+  };
   return resolved;
 }
 
 export function cloneEpdaOverrideDocument(
   values: PartialEpdaParameterValues,
 ): PartialEpdaParameterValues {
-  return structuredClone(values);
+  const clone = structuredClone(values);
+  if (clone.hours) {
+    const hours = sanitizeEpdaHours(clone.hours);
+    if (hours && Object.keys(hours).length > 0) clone.hours = hours;
+    else delete clone.hours;
+  }
+  return clone;
 }
 
 export function hydrateEpdaParameterRows(
@@ -185,12 +213,13 @@ export function hydrateEpdaParameterRows(
   const areaByPort = new Map(
     ports.map((port) => {
       const area = normalizeProvinceAreaCode(port.province?.area ?? null);
-      return [port.id, area ? String(area) : null] as const;
+      return [Number(port.id), area ? String(area) : null] as const;
     }),
   );
 
   return rows.map((row) => {
     if (row.scope === 'PORT' && row.portId != null) {
+      row.portId = Number(row.portId);
       row.area = areaByPort.get(row.portId) ?? null;
     } else {
       row.area = normalizeEpdaAreaKey(row.area);
