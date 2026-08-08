@@ -238,6 +238,14 @@ export class UpdateShippingAgencyEpdaDto {
   @IsObject()
   epdaSnapshot?: Record<string, unknown>;
 
+  /**
+   * Soft-snapshot of tariff params currently pinned on the unlocked draft.
+   * Written on each save so reopen can diff against live getEffective.
+   */
+  @IsOptional()
+  @IsObject()
+  epdaWorkingParams?: Record<string, unknown>;
+
   /** Staff-confirmed overrides of customer-submitted values (audit log). */
   @IsOptional()
   @ValidateNested({ each: true })

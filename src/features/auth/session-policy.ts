@@ -122,6 +122,11 @@ export interface SessionJwtClaims {
   /** Unix seconds at original login — never changes on sliding refresh. */
   auth_time: number;
   remember: boolean;
+  /**
+   * Must match `users.session_version`. Bumped on disable / password reset /
+   * role change / logout to revoke outstanding tokens.
+   */
+  sessionVersion: number;
   iat?: number;
   exp?: number;
 }

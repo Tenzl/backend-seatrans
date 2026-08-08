@@ -43,6 +43,11 @@ export class ArrivalNoticePreviewDto {
   @PreviewText(200) serviceMode?: string;
   @PreviewText(2_000) note?: string;
   @PreviewText(2_000) marks?: string;
+  /**
+   * Optional FF commodity id. When set (and description empty), validation
+   * fills descriptionOfGoods as `{commodityName} IN {groupName}`.
+   */
+  @IsOptional() @IsInt() @Min(1) commodityId?: number;
   /** Shipment-level goods description (PDF cargo “Description of Goods”). */
   @PreviewText(4_000) descriptionOfGoods?: string;
   @PreviewText(300) volume?: string;

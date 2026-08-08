@@ -21,17 +21,17 @@ export const BL_PAGE_HEIGHT = 841.89;
  * underlines) in "top-from-page-top" space. Negative moves content toward
  * the page top. Does not move the blank template image.
  */
-const BL_CONTENT_Y_OFFSET = -3;
+const BL_CONTENT_Y_OFFSET = -1;
 
 /**
  * Fit text to BL blank PNG grid (A4).
  * Body / cargo: Arial Regular. Stamp-like FBL / SURRENDERED: DejaVu Bold.
- * Body 9pt, cargo columns 8pt, FBL number 12pt bold.
+ * Body + cargo columns 8pt, FBL number 11pt bold.
  * Party / route cells add LABEL_TO_VALUE_GAP under the printed label.
  */
-const FONT_SIZE = 9.0;
+const FONT_SIZE = 8.0;
 const FONT_SIZE_SMALL = 8.0;
-const FONT_SIZE_FBL = 12;
+const FONT_SIZE_FBL = 11;
 const LINE_GAP = 1.15;
 /** Cargo body leading (looser than party cells) + pad between logical rows. */
 const CARGO_LINE_GAP = 2.3;
@@ -155,7 +155,7 @@ const BOX = {
   freightPayableAt: { x: 258.0, top: 715.0, maxWidth: 121, maxLines: 2 },
   placeOfIssue: { x: 385.5, top: 715.0, maxWidth: 115, maxLines: 2 },
   dateOfIssue: { x: 507.8, top: 715.0, maxWidth: 70, maxLines: 1 },
-  numberOfOriginals: { x: 267.8, top: 735.5, maxWidth: 80, maxLines: 1 },
+  numberOfOriginals: { x: 267.8, top: 737.5, maxWidth: 80, maxLines: 1 },
   deliveryApplyTo: { x: 74.2, top: 761.0, maxWidth: 280, maxLines: 5 },
   stamp: { x: 400.0, top: 740.0, maxWidth: 160, maxLines: 1 },
   insuranceNotCovered: { x: 68.5, top: 735.5 },

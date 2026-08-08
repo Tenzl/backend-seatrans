@@ -35,3 +35,35 @@ describe('PublicInquiryController batch delete', () => {
     );
   });
 });
+
+describe('PublicInquiryController submit idempotency header', () => {
+  it('forwards Idempotency-Key to the service', async () => {
+    const inquiryService = {
+      submitInquiry: jest.fn().mockResolvedValue({
+        message: 'ok',
+        serviceSlug: 'shipping-agency',
+        targetId: 1,
+      }),
+    };
+    const controller = new PublicInquiryController(
+      inquiryService as unknown as ServiceInquiryService,
+    );
+
+    await controller.submitInquiry(
+      undefined,
+      {
+        serviceTypeId: 1,
+        vesselName: 'MV Test',
+      },
+      { user: { id: 42 } } as Request & { user: { id: number } },
+      'retry-key-1',
+    );
+
+    expect(inquiryService.submitInquiry).toHaveBeenCalledWith(
+      expect.objectContaining({ serviceTypeId: 1 }),
+      [],
+      42,
+      'retry-key-1',
+    );
+  });
+});

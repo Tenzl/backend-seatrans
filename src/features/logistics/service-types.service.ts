@@ -10,6 +10,9 @@ import { ServiceType } from './entities/service-type.entity';
 import { CreateServiceTypeDto } from './dto/create-service-type.dto';
 import { ServiceTypeDto } from './dto/service-type.dto';
 import { Commodity } from '../commodities/entities/commodity.entity';
+import { ShortTtlCacheService } from '../../shared/redis/short-ttl-cache.service';
+
+const PUBLIC_SERVICE_TYPES_CACHE_PREFIX = 'public:service-types:';
 
 @Injectable()
 export class ServiceTypesService {
@@ -20,6 +23,7 @@ export class ServiceTypesService {
     private readonly serviceTypeRepository: Repository<ServiceType>,
     @InjectRepository(Commodity)
     private readonly commodityRepository: Repository<Commodity>,
+    private readonly cache: ShortTtlCacheService,
   ) {}
 
   async getAll(
@@ -36,13 +40,23 @@ export class ServiceTypesService {
   async getActive(
     limit = ServiceTypesService.DEFAULT_LIMIT,
   ): Promise<ServiceTypeDto[]> {
+    const safeLimit = this.sanitizeLimit(limit);
+    const cacheKey = `${PUBLIC_SERVICE_TYPES_CACHE_PREFIX}active:${safeLimit}`;
+    if (this.cache.isEnabled()) {
+      const cached = await this.cache.getJson<ServiceTypeDto[]>(cacheKey);
+      if (cached) return cached;
+    }
+
     const rows = await this.serviceTypeRepository.find({
       where: { isActive: true },
       order: { name: 'ASC' },
     });
-    return rows
-      .slice(0, this.sanitizeLimit(limit))
+    const result = rows
+      .slice(0, safeLimit)
       .map((item) => this.toDto(item));
+
+    await this.cache.setJson(cacheKey, result);
+    return result;
   }
 
   async search(query?: string): Promise<ServiceTypeDto[]> {
@@ -94,6 +108,7 @@ export class ServiceTypesService {
     });
 
     const saved = await this.serviceTypeRepository.save(row);
+    await this.invalidatePublicCache();
     return this.toDto(saved);
   }
 
@@ -121,6 +136,7 @@ export class ServiceTypesService {
     row.description = dto.description?.trim() || null;
 
     const saved = await this.serviceTypeRepository.save(row);
+    await this.invalidatePublicCache();
     return this.toDto(saved);
   }
 
@@ -140,6 +156,11 @@ export class ServiceTypesService {
     }
 
     await this.serviceTypeRepository.delete(id);
+    await this.invalidatePublicCache();
+  }
+
+  private async invalidatePublicCache(): Promise<void> {
+    await this.cache.deleteByPrefix(PUBLIC_SERVICE_TYPES_CACHE_PREFIX);
   }
 
   private toDto(item: ServiceType): ServiceTypeDto {

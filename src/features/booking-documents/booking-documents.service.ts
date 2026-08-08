@@ -2,11 +2,8 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { Repository } from 'typeorm';
-import {
-  syncBillOfLadingCargoFromArrivalNotice,
-  syncDeliveryOrderCargoFromArrivalNotice,
-} from './an-container';
+import { DataSource, EntityManager, Repository } from 'typeorm';
+import { syncDeliveryOrderCargoFromArrivalNotice } from './an-container';
 import { resolveBookingPic } from './booking-pic';
 import { BookingDocumentRecordService } from './booking-document-record.service';
 import { BookingDocumentPayloadValidator } from './booking-document-payload.validator';
@@ -16,7 +13,6 @@ import {
 } from './booking-document.types';
 import { User } from '../auth/entities/user.entity';
 import { ArrivalNoticePreviewDto } from './dto/arrival-notice-preview.dto';
-import { BillOfLadingPreviewDto } from './dto/bill-of-lading-preview.dto';
 import { BookingConfirmationPreviewDto } from './dto/booking-confirmation-preview.dto';
 import { DeliveryOrderPreviewDto } from './dto/delivery-order-preview.dto';
 import { UpsertBookingDocumentRecordDto } from './dto/upsert-booking-document-record.dto';
@@ -33,6 +29,7 @@ export class BookingDocumentsService {
     private readonly pdfRenderer: BookingDocumentPdfRenderer,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    private readonly dataSource: DataSource,
   ) {}
 
   async createRecord(
@@ -46,15 +43,6 @@ export class BookingDocumentsService {
       type,
       payload,
     );
-    if (
-      type === BookingDocumentType.BILL_OF_LADING &&
-      bookingId != null
-    ) {
-      validatedPayload = await this.overwriteBlCargoFromAn(
-        bookingId,
-        validatedPayload as BillOfLadingPreviewDto,
-      );
-    }
     if (
       type === BookingDocumentType.DELIVERY_ORDER &&
       bookingId != null
@@ -71,30 +59,31 @@ export class BookingDocumentsService {
         (validatedPayload as BookingConfirmationPreviewDto).pic,
       );
     }
-    const created = await this.recordService.create(
-      type,
-      validatedPayload,
-      createdByUserId,
-      status ?? BookingDocumentStatus.PROCESSING,
-      { bookingFlow, bookingId },
-    );
-    if (
-      type === BookingDocumentType.ARRIVAL_NOTICE &&
-      bookingId != null
-    ) {
-      const anPayload = validatedPayload as ArrivalNoticePreviewDto;
-      await this.patchSiblingBlCargoFromAn(
-        bookingId,
-        anPayload,
+
+    // ARCH-01: AN create + sibling DO cargo sync must commit or roll back together.
+    return this.dataSource.transaction(async (manager) => {
+      const created = await this.recordService.create(
+        type,
+        validatedPayload,
         createdByUserId,
+        status ?? BookingDocumentStatus.PROCESSING,
+        { bookingFlow, bookingId },
+        manager,
       );
-      await this.patchSiblingDoCargoFromAn(
-        bookingId,
-        anPayload,
-        createdByUserId,
-      );
-    }
-    return created;
+      if (
+        type === BookingDocumentType.ARRIVAL_NOTICE &&
+        bookingId != null
+      ) {
+        const anPayload = validatedPayload as ArrivalNoticePreviewDto;
+        await this.patchSiblingDoCargoFromAn(
+          bookingId,
+          anPayload,
+          createdByUserId,
+          manager,
+        );
+      }
+      return created;
+    });
   }
 
   async getRecord(type: BookingDocumentType, id: number) {
@@ -119,15 +108,6 @@ export class BookingDocumentsService {
     );
     const bookingId = existing.bookingId ?? undefined;
     if (
-      type === BookingDocumentType.BILL_OF_LADING &&
-      bookingId != null
-    ) {
-      validatedPayload = await this.overwriteBlCargoFromAn(
-        bookingId,
-        validatedPayload as BillOfLadingPreviewDto,
-      );
-    }
-    if (
       type === BookingDocumentType.DELIVERY_ORDER &&
       bookingId != null
     ) {
@@ -143,30 +123,31 @@ export class BookingDocumentsService {
         (validatedPayload as BookingConfirmationPreviewDto).pic,
       );
     }
-    const updated = await this.recordService.update(
-      type,
-      id,
-      validatedPayload,
-      actorUserId,
-      status,
-    );
-    if (
-      type === BookingDocumentType.ARRIVAL_NOTICE &&
-      bookingId != null
-    ) {
-      const anPayload = validatedPayload as ArrivalNoticePreviewDto;
-      await this.patchSiblingBlCargoFromAn(
-        bookingId,
-        anPayload,
+
+    // ARCH-01: AN update + sibling DO cargo sync must commit or roll back together.
+    return this.dataSource.transaction(async (manager) => {
+      const updated = await this.recordService.update(
+        type,
+        id,
+        validatedPayload,
         actorUserId,
+        status,
+        manager,
       );
-      await this.patchSiblingDoCargoFromAn(
-        bookingId,
-        anPayload,
-        actorUserId,
-      );
-    }
-    return updated;
+      if (
+        type === BookingDocumentType.ARRIVAL_NOTICE &&
+        bookingId != null
+      ) {
+        const anPayload = validatedPayload as ArrivalNoticePreviewDto;
+        await this.patchSiblingDoCargoFromAn(
+          bookingId,
+          anPayload,
+          actorUserId,
+          manager,
+        );
+      }
+      return updated;
+    });
   }
 
   async lockRecord(type: BookingDocumentType, id: number, actorUserId: number) {
@@ -234,63 +215,16 @@ export class BookingDocumentsService {
     )) as BookingConfirmationPreviewDto;
   }
 
-  /**
-   * BL save must not persist client-divergent cargo — always copy from AN.
-   */
-  private async overwriteBlCargoFromAn(
-    bookingId: number,
-    blPayload: BillOfLadingPreviewDto,
-  ): Promise<BillOfLadingPreviewDto> {
-    const an = await this.recordService.findActiveByBookingId(
-      BookingDocumentType.ARRIVAL_NOTICE,
-      bookingId,
-    );
-    if (!an) return blPayload;
-    const synced = syncBillOfLadingCargoFromArrivalNotice(
-      an.payload as ArrivalNoticePreviewDto,
-      blPayload,
-    );
-    return (await this.payloadValidator.validate(
-      BookingDocumentType.BILL_OF_LADING,
-      synced,
-    )) as BillOfLadingPreviewDto;
-  }
-
-  /** When AN cargo changes, keep the sibling BL cargo in lockstep. */
-  private async patchSiblingBlCargoFromAn(
-    bookingId: number,
-    anPayload: ArrivalNoticePreviewDto,
-    actorUserId: number,
-  ): Promise<void> {
-    const bl = await this.recordService.findActiveByBookingId(
-      BookingDocumentType.BILL_OF_LADING,
-      bookingId,
-    );
-    if (!bl || bl.lockedAt) return;
-    const synced = syncBillOfLadingCargoFromArrivalNotice(
-      anPayload,
-      bl.payload as BillOfLadingPreviewDto,
-    );
-    const validated = (await this.payloadValidator.validate(
-      BookingDocumentType.BILL_OF_LADING,
-      synced,
-    )) as BookingDocumentPayload;
-    await this.recordService.update(
-      BookingDocumentType.BILL_OF_LADING,
-      bl.id,
-      validated,
-      actorUserId,
-    );
-  }
-
   /** DO cargo/containers mirror BL: owned by AN, read-only on the DO form. */
   private async overwriteDoCargoFromAn(
     bookingId: number,
     doPayload: DeliveryOrderPreviewDto,
+    manager?: EntityManager,
   ): Promise<DeliveryOrderPreviewDto> {
     const an = await this.recordService.findActiveByBookingId(
       BookingDocumentType.ARRIVAL_NOTICE,
       bookingId,
+      manager,
     );
     if (!an) return doPayload;
     const synced = syncDeliveryOrderCargoFromArrivalNotice(
@@ -308,10 +242,12 @@ export class BookingDocumentsService {
     bookingId: number,
     anPayload: ArrivalNoticePreviewDto,
     actorUserId: number,
+    manager: EntityManager,
   ): Promise<void> {
     const doc = await this.recordService.findActiveByBookingId(
       BookingDocumentType.DELIVERY_ORDER,
       bookingId,
+      manager,
     );
     if (!doc || doc.lockedAt) return;
     const synced = syncDeliveryOrderCargoFromArrivalNotice(
@@ -327,6 +263,8 @@ export class BookingDocumentsService {
       doc.id,
       validated,
       actorUserId,
+      undefined,
+      manager,
     );
   }
 

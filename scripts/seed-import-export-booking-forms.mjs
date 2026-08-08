@@ -1,6 +1,7 @@
 /**
  * Seed one Import + one Export Booking Confirmation (transport document forms)
  * into the four split booking-document tables for UI / workflow testing.
+ * Export workflow children: BL only (no AN). Import: AN → DO.
  *
  * Usage:
  *   node scripts/seed-import-export-booking-forms.mjs
@@ -223,47 +224,6 @@ function importDeliveryOrderPayload() {
         descriptionOfGoods: 'ELECTRONIC COMPONENTS',
         grossWeight: '12,450 KGS',
         measurement: '58.20 CBM',
-      },
-    ],
-  };
-}
-
-function exportArrivalNoticePayload() {
-  return {
-    agent: 'SEATRANS SHIPPING AGENCY',
-    date: '05 Aug 2026',
-    anNumber: EXPORT_AN_REF,
-    shipper:
-      'AN THINH STONE CO., LTD\n92 HAI BA TRUNG STREET, QUI NHON WARD, GIA LAI PROVINCE, VIETNAM',
-    consignee:
-      'SEKIGAHARA STONE CO., LTD.\n2682 SEKIGAHARA, FUWA-GUN, GIFU-KEN, 503-1595 JAPAN',
-    notifyParty: 'SAME AS CONSIGNEE',
-    mblNumber: 'SITC2615N088',
-    hblNumber: EXPORT_AN_REF,
-    vesselVoyage: 'SITC MINHE / 2615N',
-    etd: '14 Aug 2026',
-    eta: '22 Aug 2026',
-    cfsTerminal: 'DA NANG CFS',
-    shipmentNumber: 'EXP-SHP-260805',
-    referenceNumber: EXPORT_REF,
-    billOfLadingType: 'Original',
-    placeOfReceipt: 'QUI NHON, VN (VNUIH)',
-    portOfLoading: 'DA NANG, VN (VNDAD)',
-    portOfDischarge: 'HAKATA, FUKUOKA, JP (JPHKT)',
-    placeOfDelivery: 'HAKATA, FUKUOKA, JP (JPHKT)',
-    finalDestination: 'HAKATA, JP',
-    serviceMode: 'FCL / CY-CY',
-    note: 'SEED EXPORT AN — for workflow testing.',
-    marks: "FCL/FCL - CY/CY\nSITU2631620 / SITR892044 / 20'DC\nN/M",
-    volume: '1x20\'DC',
-    customerAttention: 'Original B/L to be released after freight collect.',
-    cargoRows: [
-      {
-        containerSealNumber: "SITU2631620 / SITR892044 / 20'DC",
-        quantity: '20 PALLET(S)',
-        descriptionOfGoods: 'GRANITE STONES, BASALT STONES',
-        grossWeight: '20,700 KGS',
-        measurement: '7.26 CBM',
       },
     ],
   };
@@ -549,13 +509,6 @@ async function main() {
           bookingId: importBooking.id,
           referenceNumber: IMPORT_DO_REF,
           payload: importDeliveryOrderPayload(),
-          userId,
-        }),
-        await insertChild(client, {
-          documentType: 'an',
-          bookingId: exportBooking.id,
-          referenceNumber: EXPORT_AN_REF,
-          payload: exportArrivalNoticePayload(),
           userId,
         }),
         await insertChild(client, {

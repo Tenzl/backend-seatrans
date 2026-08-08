@@ -10,6 +10,7 @@ import {
   type CommonPrefix,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
 import {
   BadRequestException,
   Injectable,
@@ -27,6 +28,14 @@ import {
   normalizePrefix,
   parentPrefixOf,
 } from './storage-key.util';
+import {
+  hasUploadedContent,
+  openUploadedFileStream,
+  type UploadedFileLike,
+} from '../uploads/uploaded-file.util';
+import type { Readable } from 'stream';
+import { abortSignalAfter } from '../utils/with-timeout';
+import { readPositiveInt } from '../utils/env-int';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -51,11 +60,23 @@ export interface StorageListResultDto {
   files: StorageObjectDto[];
 }
 
+export interface StorageFolderMutationResultDto extends StorageObjectDto {
+  objectCount: number;
+  warning?: string;
+}
+
+/** Sync folder rename/delete hard cap — larger trees need split or a future async job. */
+const DEFAULT_FOLDER_SYNC_MAX_OBJECTS = 250;
+const DEFAULT_R2_TIMEOUT_MS = 30_000;
+const FOLDER_WARN_RATIO = 0.8;
+
 @Injectable()
 export class R2StorageService {
   private readonly client: S3Client | null;
   private readonly bucket: string;
   private readonly configured: boolean;
+  private readonly requestTimeoutMs: number;
+  private readonly folderSyncMaxObjects: number;
 
   constructor(private readonly configService: ConfigService) {
     const accountId = this.configService.get<string>('R2_ACCOUNT_ID')?.trim();
@@ -67,6 +88,17 @@ export class R2StorageService {
       ?.trim();
     this.bucket =
       this.configService.get<string>('R2_BUCKET_NAME')?.trim() ?? '';
+
+    this.requestTimeoutMs = readPositiveInt(
+      this.configService.get<string>('R2_REQUEST_TIMEOUT_MS'),
+      DEFAULT_R2_TIMEOUT_MS,
+      { min: 1_000, max: 120_000 },
+    );
+    this.folderSyncMaxObjects = readPositiveInt(
+      this.configService.get<string>('R2_FOLDER_SYNC_MAX_OBJECTS'),
+      DEFAULT_FOLDER_SYNC_MAX_OBJECTS,
+      { min: 1, max: 5_000 },
+    );
 
     this.configured = !!(
       accountId &&
@@ -83,6 +115,10 @@ export class R2StorageService {
           accessKeyId: accessKeyId!,
           secretAccessKey: secretAccessKey!,
         },
+        requestHandler: new NodeHttpHandler({
+          connectionTimeout: this.requestTimeoutMs,
+          requestTimeout: this.requestTimeoutMs,
+        }),
       });
     } else {
       this.client = null;
@@ -102,6 +138,10 @@ export class R2StorageService {
     return this.client;
   }
 
+  private abortSignal() {
+    return abortSignalAfter(this.requestTimeoutMs);
+  }
+
   async list(prefix = ''): Promise<StorageListResultDto> {
     const client = this.requireClient();
     const normalized = normalizePrefix(prefix);
@@ -113,6 +153,7 @@ export class R2StorageService {
           Prefix: normalized || undefined,
           Delimiter: '/',
         }),
+        { abortSignal: this.abortSignal() },
       )
       .catch((error: unknown) => {
         throw new InternalServerErrorException(
@@ -149,6 +190,7 @@ export class R2StorageService {
           Body: Buffer.alloc(0),
           ContentType: 'application/x-directory',
         }),
+        { abortSignal: this.abortSignal() },
       )
       .catch((error: unknown) => {
         throw new InternalServerErrorException(
@@ -171,19 +213,44 @@ export class R2StorageService {
     buffer: Buffer,
     contentType?: string,
   ): Promise<StorageObjectDto> {
+    return this.uploadFile(prefix, filename, { buffer }, contentType);
+  }
+
+  async uploadFile(
+    prefix: string,
+    filename: string,
+    file: UploadedFileLike,
+    contentType?: string,
+  ): Promise<StorageObjectDto> {
+    if (!hasUploadedContent(file)) {
+      throw new BadRequestException('File is required');
+    }
+
     const client = this.requireClient();
     assertSafeKeySegment(filename, 'filename');
     const key = joinKey(prefix, filename);
     assertSafeKey(key, 'key');
+
+    const body: Buffer | Readable = file.path
+      ? openUploadedFileStream(file)
+      : (file.buffer as Buffer);
+    const size =
+      typeof file.size === 'number' && file.size >= 0
+        ? file.size
+        : Buffer.isBuffer(body)
+          ? body.length
+          : undefined;
 
     const response = await client
       .send(
         new PutObjectCommand({
           Bucket: this.bucket,
           Key: key,
-          Body: buffer,
+          Body: body,
           ContentType: contentType || 'application/octet-stream',
+          ...(typeof size === 'number' ? { ContentLength: size } : {}),
         }),
+        { abortSignal: this.abortSignal() },
       )
       .catch((error: unknown) => {
         throw new InternalServerErrorException(
@@ -195,14 +262,17 @@ export class R2StorageService {
       key,
       name: basename(key),
       type: 'file',
-      size: buffer.length,
+      size: size ?? 0,
       contentType: contentType || 'application/octet-stream',
       lastModified: new Date().toISOString(),
       etag: response.ETag?.replace(/"/g, ''),
     };
   }
 
-  async rename(fromKey: string, toKey: string): Promise<StorageObjectDto> {
+  async rename(
+    fromKey: string,
+    toKey: string,
+  ): Promise<StorageObjectDto | StorageFolderMutationResultDto> {
     const client = this.requireClient();
     assertSafeKey(fromKey, 'fromKey');
     assertSafeKey(toKey, 'toKey');
@@ -220,14 +290,20 @@ export class R2StorageService {
     }
 
     if (isFolderKey(normalizedFrom)) {
-      await this.renameFolderPrefix(normalizedFrom, normalizedTo);
+      const objectCount = await this.renameFolderPrefix(
+        normalizedFrom,
+        normalizedTo,
+      );
       return {
         key: normalizedTo,
         name: basename(normalizedTo.replace(/\/$/, '')),
         type: 'folder',
+        objectCount,
+        warning: this.folderSizeWarning(objectCount),
       };
     }
 
+    // Single-file rename stays fully synchronous (PERF-04).
     await client
       .send(
         new CopyObjectCommand({
@@ -235,6 +311,7 @@ export class R2StorageService {
           CopySource: `${this.bucket}/${normalizedFrom}`,
           Key: normalizedTo,
         }),
+        { abortSignal: this.abortSignal() },
       )
       .catch((error: unknown) => {
         throw new InternalServerErrorException(
@@ -244,6 +321,7 @@ export class R2StorageService {
 
     await client.send(
       new DeleteObjectCommand({ Bucket: this.bucket, Key: normalizedFrom }),
+      { abortSignal: this.abortSignal() },
     );
 
     return {
@@ -262,8 +340,11 @@ export class R2StorageService {
       return;
     }
 
+    // Single-file delete stays fully synchronous (PERF-04).
     await client
-      .send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }))
+      .send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }), {
+        abortSignal: this.abortSignal(),
+      })
       .catch((error: unknown) => {
         throw new InternalServerErrorException(
           `Failed to delete object: ${errorMessage(error)}`,
@@ -323,8 +404,58 @@ export class R2StorageService {
     };
   }
 
+  private folderSizeWarning(objectCount: number): string | undefined {
+    const warnAt = Math.floor(this.folderSyncMaxObjects * FOLDER_WARN_RATIO);
+    if (objectCount < warnAt) {
+      return undefined;
+    }
+    return `Folder operation touched ${objectCount} objects (sync limit ${this.folderSyncMaxObjects}). Prefer smaller folders for rename/delete.`;
+  }
+
+  private async assertFolderWithinSyncLimit(prefix: string): Promise<number> {
+    const count = await this.countObjectsUnderPrefix(prefix);
+    if (count > this.folderSyncMaxObjects) {
+      throw new BadRequestException(
+        `Folder has ${count} objects; sync rename/delete is limited to ${this.folderSyncMaxObjects}. ` +
+          'Split the folder or delete/rename in smaller batches. Single-file operations remain unlimited.',
+      );
+    }
+    return count;
+  }
+
+  private async countObjectsUnderPrefix(prefix: string): Promise<number> {
+    const client = this.requireClient();
+    let continuationToken: string | undefined;
+    let total = 0;
+
+    do {
+      const listed = await client.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucket,
+          Prefix: prefix,
+          ContinuationToken: continuationToken,
+          MaxKeys: 1000,
+        }),
+        { abortSignal: this.abortSignal() },
+      );
+
+      total += listed.KeyCount ?? listed.Contents?.length ?? 0;
+      if (total > this.folderSyncMaxObjects) {
+        return total;
+      }
+
+      continuationToken = listed.IsTruncated
+        ? listed.NextContinuationToken
+        : undefined;
+    } while (continuationToken);
+
+    return total;
+  }
+
   private async deleteFolderRecursive(prefix: string): Promise<void> {
     const client = this.requireClient();
+    await this.assertFolderWithinSyncLimit(prefix);
+
     let continuationToken: string | undefined;
 
     do {
@@ -334,6 +465,7 @@ export class R2StorageService {
           Prefix: prefix,
           ContinuationToken: continuationToken,
         }),
+        { abortSignal: this.abortSignal() },
       );
 
       const keys = (listed.Contents ?? [])
@@ -346,6 +478,7 @@ export class R2StorageService {
             Bucket: this.bucket,
             Delete: { Objects: keys.map((Key) => ({ Key })), Quiet: true },
           }),
+          { abortSignal: this.abortSignal() },
         );
       }
 
@@ -358,8 +491,9 @@ export class R2StorageService {
   private async renameFolderPrefix(
     fromPrefix: string,
     toPrefix: string,
-  ): Promise<void> {
+  ): Promise<number> {
     const client = this.requireClient();
+    const objectCount = await this.assertFolderWithinSyncLimit(fromPrefix);
     let continuationToken: string | undefined;
 
     do {
@@ -369,6 +503,7 @@ export class R2StorageService {
           Prefix: fromPrefix,
           ContinuationToken: continuationToken,
         }),
+        { abortSignal: this.abortSignal() },
       );
 
       for (const obj of listed.Contents ?? []) {
@@ -382,9 +517,11 @@ export class R2StorageService {
             CopySource: `${this.bucket}/${obj.Key}`,
             Key: destKey,
           }),
+          { abortSignal: this.abortSignal() },
         );
         await client.send(
           new DeleteObjectCommand({ Bucket: this.bucket, Key: obj.Key }),
+          { abortSignal: this.abortSignal() },
         );
       }
 
@@ -392,5 +529,7 @@ export class R2StorageService {
         ? listed.NextContinuationToken
         : undefined;
     } while (continuationToken);
+
+    return objectCount;
   }
 }

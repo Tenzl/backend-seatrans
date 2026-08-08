@@ -6,7 +6,7 @@ import { AppModule } from './../src/app.module';
 import { ConfigService } from '@nestjs/config';
 import { configureApplication } from './../src/configure-app';
 
-describe('AppController (e2e)', () => {
+describe('App (e2e)', () => {
   let app: INestApplication<App>;
 
   beforeEach(async () => {
@@ -17,18 +17,6 @@ describe('AppController (e2e)', () => {
     app = moduleFixture.createNestApplication();
     configureApplication(app, app.get(ConfigService));
     await app.init();
-  });
-
-  it('/api (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/api')
-      .expect(200)
-      .expect(({ body }) => {
-        expect(body).toMatchObject({
-          success: true,
-          data: 'Hello World!',
-        });
-      });
   });
 
   it('/api/health/live (GET)', () => {

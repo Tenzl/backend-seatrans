@@ -15,7 +15,7 @@ import {
   SECTION_CATALOG,
   SECTION_KEYS,
 } from './section-catalog';
-import { isAdminRoleName } from './section-access.service';
+import { isAdminRoleName, SectionAccessService } from './section-access.service';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 
@@ -39,6 +39,7 @@ export class RolesAdminService {
     @InjectRepository(RoleSectionAccess)
     private readonly accessRepo: Repository<RoleSectionAccess>,
     private readonly dataSource: DataSource,
+    private readonly sectionAccess: SectionAccessService,
   ) {}
 
   getCatalog() {
@@ -351,5 +352,6 @@ export class RolesAdminService {
         sections.map((sectionKey) => ({ roleId, sectionKey })),
       );
     }
+    this.sectionAccess.invalidateRole(roleId);
   }
 }

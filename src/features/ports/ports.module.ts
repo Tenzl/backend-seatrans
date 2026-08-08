@@ -7,6 +7,8 @@ import { Port } from './entities/port.entity';
 import { Province } from '../provinces/entities/province.entity';
 import { EpdaParameterGroupMember } from '../epda-parameters/entities/epda-parameter-group-member.entity';
 import { EpdaParameterSet } from '../epda-parameters/entities/epda-parameter-set.entity';
+import { EPDA_PORT_MEMBERSHIP_READER } from './epda-port-membership.reader';
+import { TypeOrmEpdaPortMembershipReader } from './typeorm-epda-port-membership.reader';
 
 @Module({
   imports: [
@@ -18,7 +20,14 @@ import { EpdaParameterSet } from '../epda-parameters/entities/epda-parameter-set
     ]),
   ],
   controllers: [PortsController, PortsAdminController],
-  providers: [PortsService],
+  providers: [
+    TypeOrmEpdaPortMembershipReader,
+    {
+      provide: EPDA_PORT_MEMBERSHIP_READER,
+      useExisting: TypeOrmEpdaPortMembershipReader,
+    },
+    PortsService,
+  ],
   exports: [PortsService],
 })
 export class PortsModule {}

@@ -5,7 +5,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { createHash } from 'crypto';
 import { EntityManager, Repository } from 'typeorm';
 import { InquiryDocument } from '../entities/inquiry-document.entity';
 import { BaseInquiry } from '../entities/base-inquiry.entity';
@@ -18,6 +17,15 @@ import { InquiryDocumentType } from '../enums/inquiry-document-type.enum';
 import { InquiryDocumentDto } from '../dto/inquiry-document.dto';
 import { CloudinaryService } from '../../../shared/services/cloudinary.service';
 import { User } from '../../auth/entities/user.entity';
+import {
+  hasUploadedContent,
+  hashUploadedFile,
+} from '../../../shared/uploads/uploaded-file.util';
+import { assertInquiryAttachmentSafe } from '../../../shared/uploads/inquiry-file-validation';
+import { mapWithConcurrency } from '../../../shared/utils/map-with-concurrency';
+
+/** Parallel Cloudinary uploads for multi-attachment inquiry submits. */
+const INQUIRY_UPLOAD_CONCURRENCY = 3;
 
 @Injectable()
 export class InquiryDocumentService {
@@ -60,25 +68,92 @@ export class InquiryDocumentService {
     description: string | undefined,
     uploaderUserId: number,
   ): Promise<InquiryDocumentDto> {
-    if (!file?.buffer?.length) {
+    if (!hasUploadedContent(file)) {
       throw new BadRequestException('file is required');
     }
 
     const inquiry = await this.requireInquiry(serviceSlug, targetId);
     const inquirySlug = this.toServiceSlug(inquiry.serviceType?.name);
+    const uploader = await this.requireUploader(uploaderUserId);
 
-    const uploader = await this.userRepository.findOne({
-      where: { id: uploaderUserId },
-    });
-    if (!uploader) {
-      throw new BadRequestException('User not found');
+    return this.uploadResolved(
+      inquirySlug,
+      targetId,
+      documentType,
+      file,
+      description,
+      uploader,
+    );
+  }
+
+  async saveAttachmentsForInquiry(
+    inquiry: BaseInquiry,
+    files: Express.Multer.File[],
+    uploaderUserId: number,
+  ): Promise<void> {
+    if (!files?.length) {
+      return;
     }
-    const upload = await this.cloudinaryService.uploadRawBuffer(
-      file.buffer,
+
+    const inquirySlug = this.toServiceSlug(inquiry.serviceType.name);
+    const uploader = await this.requireUploader(uploaderUserId);
+    const persistedDocumentIds: number[] = [];
+
+    try {
+      // Resolve inquiry + uploader once; upload with bounded concurrency (PERF-02).
+      await mapWithConcurrency(files, INQUIRY_UPLOAD_CONCURRENCY, async (file) => {
+        const saved = await this.uploadResolved(
+          inquirySlug,
+          inquiry.id,
+          InquiryDocumentType.OTHER,
+          file,
+          undefined,
+          uploader,
+        );
+        persistedDocumentIds.push(saved.id);
+        return saved;
+      });
+    } catch (error) {
+      // Treat the submitted attachment set as one unit from the customer's
+      // perspective: if one file fails, remove every earlier file in the set.
+      for (const documentId of persistedDocumentIds.reverse()) {
+        try {
+          await this.deleteDocument(documentId);
+        } catch (cleanupError) {
+          this.logger.error(
+            `Could not roll back inquiry document ${documentId}`,
+            cleanupError instanceof Error
+              ? cleanupError.stack
+              : String(cleanupError),
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
+  private async uploadResolved(
+    inquirySlug: string,
+    targetId: number,
+    documentType: InquiryDocumentType,
+    file: Express.Multer.File,
+    description: string | undefined,
+    uploader: User,
+  ): Promise<InquiryDocumentDto> {
+    if (!hasUploadedContent(file)) {
+      throw new BadRequestException('file is required');
+    }
+
+    // SEC-03: extension + magic bytes; never trust client Content-Type alone.
+    const detected = await assertInquiryAttachmentSafe(file);
+
+    const upload = await this.cloudinaryService.uploadRaw(
+      file,
       `inquiries/${inquirySlug}`,
     );
 
     try {
+      const checksum = await hashUploadedFile(file);
       const row = this.inquiryDocumentRepository.create({
         serviceSlug: inquirySlug,
         targetId,
@@ -87,13 +162,13 @@ export class InquiryDocumentService {
         originalFileName: file.originalname,
         filePath: upload.secureUrl,
         fileSize: String(file.size),
-        mimeType: file.mimetype || null,
+        mimeType: detected.mimeType,
         description: this.trimToNull(description),
         cloudinaryUrl: upload.secureUrl,
         cloudinaryPublicId: upload.publicId,
         uploadedBy: uploader,
         version: 1,
-        checksum: createHash('sha256').update(file.buffer).digest('hex'),
+        checksum,
         isActive: true,
       });
 
@@ -116,42 +191,14 @@ export class InquiryDocumentService {
     }
   }
 
-  async saveAttachmentsForInquiry(
-    inquiry: BaseInquiry,
-    files: Express.Multer.File[],
-    uploaderUserId: number,
-  ): Promise<void> {
-    const persistedDocumentIds: number[] = [];
-
-    try {
-      for (const file of files) {
-        const saved = await this.uploadDocument(
-          this.toServiceSlug(inquiry.serviceType.name),
-          inquiry.id,
-          InquiryDocumentType.OTHER,
-          file,
-          undefined,
-          uploaderUserId,
-        );
-        persistedDocumentIds.push(saved.id);
-      }
-    } catch (error) {
-      // Treat the submitted attachment set as one unit from the customer's
-      // perspective: if one file fails, remove every earlier file in the set.
-      for (const documentId of persistedDocumentIds.reverse()) {
-        try {
-          await this.deleteDocument(documentId);
-        } catch (cleanupError) {
-          this.logger.error(
-            `Could not roll back inquiry document ${documentId}`,
-            cleanupError instanceof Error
-              ? cleanupError.stack
-              : String(cleanupError),
-          );
-        }
-      }
-      throw error;
+  private async requireUploader(uploaderUserId: number): Promise<User> {
+    const uploader = await this.userRepository.findOne({
+      where: { id: uploaderUserId },
+    });
+    if (!uploader) {
+      throw new BadRequestException('User not found');
     }
+    return uploader;
   }
 
   async getDocuments(
@@ -231,13 +278,17 @@ export class InquiryDocumentService {
   }
 
   /**
-   * Delete all documents for an inquiry by its (globally-unique) id. Inquiry ids
-   * are unique across every service table (shared sequence), so the bare
-   * targetId match is safe.
+   * Delete all documents for an inquiry scoped by service slug.
+   * Different service tables can reuse the same numeric id, so target_id alone
+   * is not safe.
    */
-  async hardDeleteByInquiry(inquiryId: number): Promise<void> {
+  async hardDeleteByInquiry(
+    serviceSlug: string,
+    inquiryId: number,
+  ): Promise<void> {
     const publicIds = await this.inquiryDocumentRepository.manager.transaction(
-      (manager) => this.removeMetadataByInquiry(inquiryId, manager),
+      (manager) =>
+        this.removeMetadataByInquiry(serviceSlug, inquiryId, manager),
     );
     await this.deleteStoredObjectsBestEffort(publicIds);
   }
@@ -248,16 +299,35 @@ export class InquiryDocumentService {
    * commits, because Cloudinary cannot participate in a PostgreSQL rollback.
    */
   async removeMetadataByInquiry(
+    serviceSlug: string,
     inquiryId: number,
     manager: EntityManager,
   ): Promise<string[]> {
-    const repository = manager.getRepository(InquiryDocument);
-    const rows = await repository.find({
-      where: { targetId: inquiryId },
-    });
-    await repository.delete({ targetId: inquiryId });
+    return this.removeMetadataByInquiryIds(serviceSlug, [inquiryId], manager);
+  }
+
+  /**
+   * Set-based document metadata delete for batch hard-delete.
+   * Must filter by service_slug: inquiry ids are only unique within a service.
+   * External object cleanup stays post-commit (see deleteStoredObjectsBestEffort).
+   */
+  async removeMetadataByInquiryIds(
+    serviceSlug: string,
+    inquiryIds: number[],
+    manager: EntityManager,
+  ): Promise<string[]> {
+    if (!inquiryIds.length) return [];
+    const slug = this.normalizeServiceSlug(serviceSlug);
+    const rows: Array<{ cloudinary_public_id: string | null }> =
+      await manager.query(
+        `DELETE FROM inquiry_documents
+         WHERE target_id = ANY($1::bigint[])
+           AND service_slug = $2
+         RETURNING cloudinary_public_id`,
+        [inquiryIds, slug],
+      );
     return rows
-      .map((row) => row.cloudinaryPublicId?.trim())
+      .map((row) => row.cloudinary_public_id?.trim())
       .filter((publicId): publicId is string => Boolean(publicId));
   }
 
@@ -284,7 +354,7 @@ export class InquiryDocumentService {
     targetId: number,
   ): Promise<void> {
     await this.requireInquiry(serviceSlug, targetId);
-    await this.hardDeleteByInquiry(targetId);
+    await this.hardDeleteByInquiry(serviceSlug, targetId);
   }
 
   private async requireInquiry(

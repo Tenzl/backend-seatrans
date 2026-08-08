@@ -102,14 +102,24 @@ export class InquiryRepositoryRegistry {
   }
 
   forSlug(value: string, manager?: EntityManager): Repository<BaseInquiry> {
+    const source = this.requireSource(value);
+    return manager
+      ? manager.getRepository(source.entity)
+      : this.repositories[source.slug];
+  }
+
+  /** Whitelisted physical table name for set-based SQL (never interpolate user input). */
+  tableNameForSlug(value: string): string {
+    return this.requireSource(value).tableName;
+  }
+
+  private requireSource(value: string): InquirySource {
     const slug = this.toSlug(value);
     const source = SOURCE_BY_SLUG.get(slug as InquiryServiceSlug);
     if (!source) {
       throw new BadRequestException(`Unsupported service type: ${value}`);
     }
-    return manager
-      ? manager.getRepository(source.entity)
-      : this.repositories[source.slug];
+    return source;
   }
 
   toServiceName(value: string): string {

@@ -5,6 +5,7 @@ import {
   ManyToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
+  VersionColumn,
 } from 'typeorm';
 import { User } from '../../auth/entities/user.entity';
 import { BookingDocumentStatus } from '../enums/booking-document-status.enum';
@@ -19,6 +20,10 @@ import { BookingDocumentStatus } from '../enums/booking-document-status.enum';
 export abstract class BookingDocumentRecordBase {
   @PrimaryGeneratedColumn('increment', { type: 'bigint' })
   id!: number;
+
+  /** Optimistic concurrency token; concurrent writers lose with HTTP 409. */
+  @VersionColumn({ type: 'int', default: 1 })
+  version!: number;
 
   @Column({ type: 'jsonb' })
   payload!: Record<string, unknown>;

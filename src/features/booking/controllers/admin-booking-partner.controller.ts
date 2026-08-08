@@ -19,6 +19,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { BookingPartnerService } from '../services/booking-partner.service';
 import { BookingPartnerImportService } from '../services/booking-partner-import.service';
+import { BookingPartnerImportJobsService } from '../services/booking-partner-import-jobs.service';
 import { ListBookingPartnersDto } from '../dto/list-booking-partners.dto';
 import { ListPartnerOptionsQueryDto } from '../dto/list-partner-options-query.dto';
 import { ListPartnerFieldChangesQueryDto } from '../dto/list-partner-field-changes-query.dto';
@@ -28,6 +29,7 @@ import { Request } from 'express';
 import { AdminSection } from '../../../shared/decorators/admin-section.decorator';
 import { PermanentDelete } from '../../../shared/decorators/permanent-delete.decorator';
 import { DeleteAllBookingPartnersDto } from '../dto/delete-all-booking-partners.dto';
+import { CommitBookingPartnerImportDto } from '../dto/commit-booking-partner-import.dto';
 
 type AuthenticatedRequest = Request & {
   user?: {
@@ -43,6 +45,7 @@ export class AdminBookingPartnerController {
   constructor(
     private readonly bookingPartnerService: BookingPartnerService,
     private readonly importService: BookingPartnerImportService,
+    private readonly importJobs: BookingPartnerImportJobsService,
   ) {}
 
   @Get('import/template')
@@ -63,6 +66,23 @@ export class AdminBookingPartnerController {
     return this.importService.preview(file.buffer);
   }
 
+  /**
+   * Opt-in async preview (P3-A / PERF-03). Requires QUEUE_ENABLED=true.
+   * Sync {@link previewImport} remains the default path.
+   */
+  @Post('import/preview-async')
+  @UseInterceptors(FileInterceptor('file'))
+  previewImportAsync(
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [new MaxFileSizeValidator({ maxSize: 10 * 1024 * 1024 })],
+      }),
+    )
+    file: Express.Multer.File,
+  ) {
+    return this.importJobs.enqueuePreview(file.buffer);
+  }
+
   @Post('import/commit')
   @UseInterceptors(FileInterceptor('file'))
   commitImport(
@@ -75,6 +95,47 @@ export class AdminBookingPartnerController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.importService.commit(file.buffer, this.currentActor(req));
+  }
+
+  /**
+   * Opt-in async commit (P3-A / PERF-03). Requires QUEUE_ENABLED=true.
+   * Sync {@link commitImport} / {@link commitImportRows} remain available.
+   */
+  @Post('import/commit-async')
+  @UseInterceptors(FileInterceptor('file'))
+  commitImportAsync(
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [new MaxFileSizeValidator({ maxSize: 10 * 1024 * 1024 })],
+      }),
+    )
+    file: Express.Multer.File,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.importJobs.enqueueCommit(
+      file.buffer,
+      this.currentActor(req),
+    );
+  }
+
+  @Get('import/jobs/:jobId')
+  getImportJob(@Param('jobId') jobId: string) {
+    return this.importJobs.getJob(jobId);
+  }
+
+  /**
+   * Prefer after a successful preview: commit validated DTOs without re-parsing
+   * the workbook (PERF-03).
+   */
+  @Post('import/commit-rows')
+  commitImportRows(
+    @Body() dto: CommitBookingPartnerImportDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.importService.commitValidatedRows(
+      dto.rows,
+      this.currentActor(req),
+    );
   }
 
   @Get('options')

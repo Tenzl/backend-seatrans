@@ -13,6 +13,9 @@ import { InquiryDocumentService } from './inquiry-document.service';
 import { NotificationService } from '../../notification/notification.service';
 import { InquiryRepositoryRegistry } from './inquiry-repository.registry';
 import { InquiryQueryService } from './inquiry-query.service';
+import { InquiryIdempotencyService } from './inquiry-idempotency.service';
+import { InquiryCodeAllocator } from './inquiry-code-allocator';
+import { InquirySubmissionLifecycle } from './inquiry-submission-lifecycle';
 
 type RepositoryMock = {
   find: jest.Mock;
@@ -22,14 +25,8 @@ type RepositoryMock = {
   delete: jest.Mock;
   manager?: {
     transaction: jest.Mock;
+    query: jest.Mock;
   };
-};
-
-type SavedDeleteRow = {
-  id: number;
-  userId: number;
-  deletedById: number | null;
-  deletedAt: Date | null;
 };
 
 const repositoryMock = (): RepositoryMock => ({
@@ -44,9 +41,11 @@ describe('ServiceInquiryService user batch delete', () => {
   let shippingRepo: RepositoryMock;
   let charteringRepo: RepositoryMock;
   let transaction: jest.Mock;
+  let managerQuery: jest.Mock;
   let transactionEvents: string[];
   let documentService: {
     removeMetadataByInquiry: jest.Mock;
+    removeMetadataByInquiryIds: jest.Mock;
     deleteStoredObjectsBestEffort: jest.Mock;
   };
   let service: ServiceInquiryService;
@@ -61,6 +60,7 @@ describe('ServiceInquiryService user batch delete', () => {
     transactionEvents = [];
     documentService = {
       removeMetadataByInquiry: jest.fn().mockResolvedValue([]),
+      removeMetadataByInquiryIds: jest.fn().mockResolvedValue([]),
       deleteStoredObjectsBestEffort: jest.fn().mockResolvedValue(undefined),
     };
     const repositoryByEntity = new Map<EntityTarget<unknown>, RepositoryMock>([
@@ -71,12 +71,14 @@ describe('ServiceInquiryService user batch delete', () => {
       [SpecialRequestInquiryEntity, specialRequestRepo],
       [InquiryFieldChangeLog, fieldChangeLogRepo],
     ]);
+    managerQuery = jest.fn();
     const manager = {
       getRepository: jest.fn((entity: EntityTarget<unknown>) => {
         const repository = repositoryByEntity.get(entity);
         if (!repository) throw new Error('Unexpected repository');
         return repository;
       }),
+      query: managerQuery,
     } as unknown as EntityManager;
     transaction = jest.fn(
       async (work: (transactionManager: EntityManager) => Promise<unknown>) => {
@@ -86,7 +88,7 @@ describe('ServiceInquiryService user batch delete', () => {
         return result;
       },
     );
-    shippingRepo.manager = { transaction };
+    shippingRepo.manager = { transaction, query: managerQuery };
 
     const repositories = new InquiryRepositoryRegistry(
       shippingRepo as unknown as Repository<ShippingAgencyInquiryEntity>,
@@ -102,65 +104,67 @@ describe('ServiceInquiryService user batch delete', () => {
       repositoryMock() as unknown as Repository<User>,
       documentService as unknown as InquiryDocumentService,
       {} as NotificationService,
+      {
+        hashSubmitRequest: jest.fn(),
+        beginSubmit: jest.fn(),
+        completeSubmit: jest.fn(),
+        abandonSubmit: jest.fn(),
+      } as unknown as InquiryIdempotencyService,
+      new InquirySubmissionLifecycle(repositories, new InquiryCodeAllocator()),
     );
   });
 
-  it('queries and deletes only the requested service for records owned by the user', async () => {
-    const row = {
-      id: 7,
-      userId: 42,
-      deletedAt: null,
-      deletedById: null,
-    };
-    let savedRow: SavedDeleteRow | undefined;
-    shippingRepo.find.mockResolvedValue([row]);
-    shippingRepo.save.mockImplementation((value: SavedDeleteRow) => {
-      savedRow = value;
-      return Promise.resolve(value);
-    });
+  it('soft-deletes with set-based UPDATE ANY for the requested service', async () => {
+    managerQuery
+      .mockResolvedValueOnce([{ id: 7 }]) // ownership check
+      .mockResolvedValueOnce([{ id: 7 }]); // UPDATE RETURNING
 
     await expect(
       service.softDeleteBatchByUser(42, [7], 'shipping-agency'),
     ).resolves.toEqual({ deletedCount: 1 });
 
-    expect(shippingRepo.find).toHaveBeenCalledTimes(1);
+    expect(managerQuery).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('SELECT id FROM shipping_agency_inquiries'),
+      [[7], 42],
+    );
+    expect(managerQuery).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(/UPDATE shipping_agency_inquiries[\s\S]*ANY\(\$1::bigint\[\]\)/),
+      [[7], expect.any(Date), 42, 42],
+    );
+    expect(shippingRepo.save).not.toHaveBeenCalled();
     expect(charteringRepo.find).not.toHaveBeenCalled();
-    expect(shippingRepo.save).toHaveBeenCalledTimes(1);
     expect(transaction).toHaveBeenCalledTimes(1);
-    expect(savedRow).toMatchObject({ id: 7, userId: 42, deletedById: 42 });
-    expect(savedRow?.deletedAt).toBeInstanceOf(Date);
   });
 
   it('does not delete a record owned by another user', async () => {
-    shippingRepo.find.mockResolvedValue([
-      { id: 7, userId: 99, deletedAt: null, deletedById: null },
-    ]);
+    managerQuery.mockResolvedValueOnce([]); // ownership check fails
 
     await expect(
       service.softDeleteBatchByUser(42, [7], 'shipping-agency'),
     ).rejects.toBeInstanceOf(ForbiddenException);
 
     expect(shippingRepo.save).not.toHaveBeenCalled();
-    expect(charteringRepo.find).not.toHaveBeenCalled();
-    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(transaction).not.toHaveBeenCalled();
   });
 
-  it('propagates a batch write failure through one transaction boundary', async () => {
-    shippingRepo.find.mockResolvedValue([
-      { id: 7, userId: 42, deletedAt: null, deletedById: null },
-      { id: 8, userId: 42, deletedAt: null, deletedById: null },
-    ]);
-    shippingRepo.save
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error('second write failed'));
+  it('uses one set-based UPDATE per chunk instead of O(N) save()', async () => {
+    const ids = Array.from({ length: 3 }, (_, i) => i + 1);
+    managerQuery
+      .mockResolvedValueOnce(ids.map((id) => ({ id })))
+      .mockResolvedValueOnce(ids.map((id) => ({ id })));
 
     await expect(
-      service.softDeleteBatchByUser(42, [7, 8], 'shipping-agency'),
-    ).rejects.toThrow('second write failed');
+      service.softDeleteBatchByUser(42, ids, 'shipping-agency'),
+    ).resolves.toEqual({ deletedCount: 3 });
 
-    expect(transaction).toHaveBeenCalledTimes(1);
-    expect(shippingRepo.save).toHaveBeenCalledTimes(2);
-    expect(transactionEvents).toEqual(['begin']);
+    expect(shippingRepo.save).not.toHaveBeenCalled();
+    const updateCalls = managerQuery.mock.calls.filter((call) =>
+      String(call[0]).includes('UPDATE shipping_agency_inquiries'),
+    );
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0][1][0]).toEqual(ids);
   });
 
   it('commits document metadata and inquiry deletion before Cloudinary cleanup', async () => {
@@ -170,13 +174,23 @@ describe('ServiceInquiryService user batch delete', () => {
       deletedAt: new Date(),
       serviceType: { name: 'SHIPPING AGENCY' },
     });
-    shippingRepo.remove.mockImplementation(() => {
-      transactionEvents.push('parent-delete');
-      return Promise.resolve();
-    });
-    documentService.removeMetadataByInquiry.mockImplementation(() => {
+    documentService.removeMetadataByInquiryIds.mockImplementation(() => {
       transactionEvents.push('metadata-delete');
       return Promise.resolve(['inquiries/shipping-agency/document-7']);
+    });
+    managerQuery.mockImplementation((sql: string) => {
+      if (String(sql).includes('DELETE FROM shipping_agency_inquiries')) {
+        transactionEvents.push('parent-delete');
+        return Promise.resolve([{ id: 7 }]);
+      }
+      if (String(sql).includes('DELETE FROM notifications')) {
+        transactionEvents.push('notification-delete');
+        return Promise.resolve([]);
+      }
+      if (String(sql).includes('shipping_agency_field_change_logs')) {
+        return Promise.resolve([]);
+      }
+      return Promise.resolve([]);
     });
     documentService.deleteStoredObjectsBestEffort.mockImplementation(() => {
       transactionEvents.push('external-cleanup');
@@ -187,13 +201,53 @@ describe('ServiceInquiryService user batch delete', () => {
 
     expect(transactionEvents).toEqual([
       'begin',
+      'notification-delete',
       'metadata-delete',
       'parent-delete',
       'commit',
       'external-cleanup',
     ]);
+    expect(managerQuery).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /DELETE FROM notifications[\s\S]*inquiry_id = ANY\(\$1::bigint\[\]\)[\s\S]*serviceSlug[\s\S]*NOT EXISTS/,
+      ),
+      [[7], 'shipping-agency'],
+    );
     expect(documentService.deleteStoredObjectsBestEffort).toHaveBeenCalledWith([
       'inquiries/shipping-agency/document-7',
+    ]);
+    expect(shippingRepo.remove).not.toHaveBeenCalled();
+  });
+
+  it('hard-deletes a batch with set-based DELETE ANY and no per-row remove()', async () => {
+    managerQuery
+      .mockResolvedValueOnce([{ id: 7 }, { id: 8 }]) // groupIdsBySlug SELECT
+      .mockResolvedValueOnce([]) // field change logs delete
+      .mockResolvedValueOnce([]) // notifications delete
+      .mockResolvedValueOnce([{ id: 7 }, { id: 8 }]); // inquiry DELETE RETURNING
+    documentService.removeMetadataByInquiryIds.mockResolvedValue([
+      'obj-7',
+      'obj-8',
+    ]);
+
+    await expect(
+      service.hardDeleteBatchByAdmin([7, 8], 'shipping-agency'),
+    ).resolves.toEqual({ deletedCount: 2 });
+
+    expect(documentService.removeMetadataByInquiryIds).toHaveBeenCalledWith(
+      'shipping-agency',
+      [7, 8],
+      expect.anything(),
+    );
+    const notificationDeletes = managerQuery.mock.calls.filter((call) =>
+      String(call[0]).includes('DELETE FROM notifications'),
+    );
+    expect(notificationDeletes).toHaveLength(1);
+    expect(notificationDeletes[0][1]).toEqual([[7, 8], 'shipping-agency']);
+    expect(shippingRepo.remove).not.toHaveBeenCalled();
+    expect(documentService.deleteStoredObjectsBestEffort).toHaveBeenCalledWith([
+      'obj-7',
+      'obj-8',
     ]);
   });
 });

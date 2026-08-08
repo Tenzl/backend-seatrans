@@ -26,6 +26,7 @@ function toSessionClaims(payload: Record<string, unknown>): SessionJwtClaims {
   const roles = Array.isArray(payload.roles)
     ? payload.roles.filter((r): r is string => typeof r === 'string')
     : [];
+  const sessionVersion = Number(payload.sessionVersion);
 
   return {
     sub,
@@ -34,6 +35,7 @@ function toSessionClaims(payload: Record<string, unknown>): SessionJwtClaims {
     roles,
     auth_time: Number.isFinite(auth_time) ? auth_time : 0,
     remember: payload.remember === true,
+    sessionVersion: Number.isInteger(sessionVersion) ? sessionVersion : 0,
     iat: typeof payload.iat === 'number' ? payload.iat : undefined,
     exp: typeof payload.exp === 'number' ? payload.exp : undefined,
   };
@@ -67,8 +69,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!claims.auth_time || claims.auth_time <= 0) {
       throw new UnauthorizedException('Invalid session (missing auth_time)');
     }
+    if (!Number.isInteger(claims.sessionVersion) || claims.sessionVersion < 1) {
+      throw new UnauthorizedException('Invalid session (missing sessionVersion)');
+    }
 
-    const user = await this.authService.validateUserContext(claims.sub);
+    const user = await this.authService.validateUserContext(
+      claims.sub,
+      claims.sessionVersion,
+    );
     if (!user) {
       throw new UnauthorizedException('User not found or disabled');
     }

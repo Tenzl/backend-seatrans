@@ -1,16 +1,9 @@
 import { ConflictException } from '@nestjs/common';
 import { PortsService } from './ports.service';
+import type { EpdaPortMembershipReader } from './epda-port-membership.reader';
 
 describe('PortsService EPDA group area guard', () => {
-  it('blocks an area change when only legacy JSONB membership exists', async () => {
-    const legacyQuery = {
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      getOne: jest.fn().mockResolvedValue({
-        id: 12,
-        name: 'Legacy group',
-      }),
-    };
+  it('blocks an area change when EPDA membership reader finds a group', async () => {
     const portRepository = {
       findOne: jest.fn().mockResolvedValue({
         id: 38,
@@ -22,17 +15,17 @@ describe('PortsService EPDA group area guard', () => {
     const provinceRepository = {
       findOne: jest.fn().mockResolvedValue({ id: 2, area: 2 }),
     };
-    const membershipRepository = {
-      findOne: jest.fn().mockResolvedValue(null),
+    const epdaMembershipReader: EpdaPortMembershipReader = {
+      findGroupLabel: jest.fn().mockResolvedValue('Legacy group'),
     };
-    const parameterSetRepository = {
-      createQueryBuilder: jest.fn().mockReturnValue(legacyQuery),
+    const cache = {
+      deleteByPrefix: jest.fn().mockResolvedValue(undefined),
     };
     const service = new PortsService(
       portRepository as never,
       provinceRepository as never,
-      membershipRepository as never,
-      parameterSetRepository as never,
+      epdaMembershipReader,
+      cache as never,
     );
 
     await expect(
@@ -42,9 +35,6 @@ describe('PortsService EPDA group area guard', () => {
       }),
     ).rejects.toBeInstanceOf(ConflictException);
 
-    expect(legacyQuery.andWhere).toHaveBeenCalledWith(
-      'parameterSet.memberPortIds @> :portIds::jsonb',
-      { portIds: '[38]' },
-    );
+    expect(epdaMembershipReader.findGroupLabel).toHaveBeenCalledWith(38);
   });
 });

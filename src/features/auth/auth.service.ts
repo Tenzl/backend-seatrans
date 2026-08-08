@@ -27,6 +27,7 @@ import {
   type SessionJwtClaims,
   type SessionPolicyConfig,
 } from './session-policy';
+import { SectionAccessService } from '../roles/section-access.service';
 
 export type AuthUserPayload = {
   id: number;
@@ -58,6 +59,7 @@ export class AuthService {
     private readonly roleRepository: Repository<Role>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly sectionAccess: SectionAccessService,
   ) {
     this.sessionPolicy = loadSessionPolicyFromEnv({
       get: (key, defaultValue) =>
@@ -191,6 +193,10 @@ export class AuthService {
     const roles = [user.role?.name].filter(
       (name): name is string => typeof name === 'string' && name.length > 0,
     );
+    const sessionVersion =
+      Number.isInteger(user.sessionVersion) && user.sessionVersion >= 1
+        ? user.sessionVersion
+        : 1;
     const payload: SessionJwtClaims = {
       sub: user.id,
       email: user.email,
@@ -198,6 +204,7 @@ export class AuthService {
       roles,
       auth_time,
       remember,
+      sessionVersion,
     };
 
     return {
@@ -445,15 +452,52 @@ export class AuthService {
     );
   }
 
-  async validateUserContext(userId: number) {
+  /**
+   * Resolve the authenticated user for JWT validation.
+   * Fail closed when missing, inactive, or sessionVersion does not match.
+   */
+  async validateUserContext(
+    userId: number,
+    sessionVersion?: number,
+  ): Promise<User | null> {
     const user = await this.userRepository.findOne({
       where: { id: userId },
       relations: ['role'],
     });
     if (!user) return null;
+    if (!user.isActive) return null;
+    if (
+      sessionVersion !== undefined &&
+      (user.sessionVersion ?? 1) !== sessionVersion
+    ) {
+      return null;
+    }
     // Never attach password hash to req.user (defense in depth)
     delete user.password;
     return user;
+  }
+
+  /** Bump session_version so all outstanding JWTs for this user fail closed. */
+  async revokeUserSessions(userId: number): Promise<void> {
+    if (!Number.isInteger(userId) || userId <= 0) return;
+    await this.userRepository.increment({ id: userId }, 'sessionVersion', 1);
+    this.sectionAccess.invalidateUser(userId);
+  }
+
+  /**
+   * Best-effort logout revoke: verify the presented token and bump the user's
+   * session version. Always safe to call after clearing the cookie.
+   */
+  async revokeSessionFromToken(token: string | null | undefined): Promise<void> {
+    if (!token?.trim()) return;
+    try {
+      const payload = this.jwtService.verify<Record<string, unknown>>(token);
+      const sub = Number(payload.sub);
+      if (!Number.isInteger(sub) || sub <= 0) return;
+      await this.revokeUserSessions(sub);
+    } catch {
+      // Expired / forged tokens are already unusable; cookie clear is enough.
+    }
   }
 
   async updateMe(userId: number, dto: UpdateMeDto) {

@@ -11,6 +11,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { SessionSlidingInterceptor } from './session-sliding.interceptor';
+import { LoginThrottleService } from './login-throttle.service';
 import { loadSessionPolicyFromEnv, toJwtExpiresIn } from './session-policy';
 
 @Module({
@@ -42,6 +43,7 @@ import { loadSessionPolicyFromEnv, toJwtExpiresIn } from './session-policy';
   providers: [
     AuthService,
     JwtStrategy,
+    LoginThrottleService,
     { provide: APP_INTERCEPTOR, useClass: SessionSlidingInterceptor },
   ],
   exports: [AuthService, JwtStrategy, PassportModule],

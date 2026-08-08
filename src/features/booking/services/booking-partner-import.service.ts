@@ -12,6 +12,12 @@ import { Workbook } from 'exceljs';
 import { Readable } from 'node:stream';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
+import { AsyncSemaphore } from '../../../shared/utils/async-semaphore';
+import {
+  BOOKING_PARTNER_IMPORT_MAX_COLUMNS,
+  BOOKING_PARTNER_IMPORT_MAX_ROWS,
+  BOOKING_PARTNER_IMPORT_PARSE_CONCURRENCY,
+} from '../constants/booking-partner-import.limits';
 
 export interface ImportPreviewRow {
   index: number;
@@ -37,6 +43,10 @@ export interface ImportCommitResult {
 
 @Injectable()
 export class BookingPartnerImportService {
+  private readonly parseGate = new AsyncSemaphore(
+    BOOKING_PARTNER_IMPORT_PARSE_CONCURRENCY,
+  );
+
   constructor(private readonly partnerService: BookingPartnerService) {}
 
   /**
@@ -86,6 +96,12 @@ export class BookingPartnerImportService {
   public async parseWorkbook(
     buffer: Buffer,
   ): Promise<Record<string, unknown>[]> {
+    return this.parseGate.run(() => this.parseWorkbookUnsafe(buffer));
+  }
+
+  private async parseWorkbookUnsafe(
+    buffer: Buffer,
+  ): Promise<Record<string, unknown>[]> {
     const workbook = new Workbook();
     const isXlsxZip =
       buffer.length >= 4 &&
@@ -104,9 +120,23 @@ export class BookingPartnerImportService {
     if (!sheet || sheet.rowCount < 2) return [];
 
     const headers: string[] = [];
+    let columnCount = 0;
     sheet.getRow(1).eachCell({ includeEmpty: true }, (cell, column) => {
+      if (column > BOOKING_PARTNER_IMPORT_MAX_COLUMNS) {
+        throw new BadRequestException(
+          `Import exceeds column limit of ${BOOKING_PARTNER_IMPORT_MAX_COLUMNS}`,
+        );
+      }
       headers[column] = cell.text.replace(/^\uFEFF/, '').trim();
+      columnCount = Math.max(columnCount, column);
     });
+
+    const dataRowCount = Math.max(0, sheet.rowCount - 1);
+    if (dataRowCount > BOOKING_PARTNER_IMPORT_MAX_ROWS) {
+      throw new BadRequestException(
+        `Import exceeds row limit of ${BOOKING_PARTNER_IMPORT_MAX_ROWS} (got ${dataRowCount})`,
+      );
+    }
 
     const rows: Record<string, unknown>[] = [];
     for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber += 1) {
@@ -114,7 +144,7 @@ export class BookingPartnerImportService {
       const row: Record<string, unknown> = {};
       let hasValue = false;
 
-      for (let column = 1; column < headers.length; column += 1) {
+      for (let column = 1; column <= columnCount; column += 1) {
         const header = headers[column];
         if (!header) continue;
         const cell = source.getCell(column);
@@ -295,6 +325,71 @@ export class BookingPartnerImportService {
 
   public async preview(buffer: Buffer): Promise<ImportPreviewResult> {
     const rawRows = await this.parseWorkbook(buffer);
+    return this.previewFromRawRows(rawRows);
+  }
+
+  /**
+   * Commit from already-previewed/validated DTOs — skips workbook re-parse (PERF-03).
+   * Rows are re-validated lightly so a stale client payload cannot bypass checks.
+   */
+  public async commitValidatedRows(
+    rows: UpsertBookingPartnerDto[],
+    actor: string,
+  ): Promise<ImportCommitResult> {
+    if (!rows?.length) {
+      throw new BadRequestException('No rows to import');
+    }
+    if (rows.length > BOOKING_PARTNER_IMPORT_MAX_ROWS) {
+      throw new BadRequestException(
+        `Import exceeds row limit of ${BOOKING_PARTNER_IMPORT_MAX_ROWS}`,
+      );
+    }
+
+    const validated: UpsertBookingPartnerDto[] = [];
+    for (let i = 0; i < rows.length; i += 1) {
+      const instance = plainToInstance(UpsertBookingPartnerDto, rows[i]);
+      const errors = await validate(instance);
+      if (errors.length > 0) {
+        throw new BadRequestException(
+          `Validation failed for row ${i + 1}. Please resolve errors in preview mode.`,
+        );
+      }
+      validated.push(instance);
+    }
+
+    const result = await this.partnerService.createPartnersBulk(
+      validated,
+      actor,
+    );
+
+    return {
+      totalInput: validated.length,
+      successCount: result.successCount,
+      errorCount: result.errorCount,
+      successIndexes: [],
+      errorDetails: result.errors,
+    };
+  }
+
+  public async commit(
+    buffer: Buffer,
+    actor: string,
+  ): Promise<ImportCommitResult> {
+    // Single parse+validate pass (do not call preview() then re-parse elsewhere).
+    const previewResult = await this.preview(buffer);
+    if (previewResult.invalid > 0) {
+      throw new BadRequestException(
+        'Validation failed for one or more rows. Please resolve errors in preview mode.',
+      );
+    }
+
+    const dtos = previewResult.rows.map((row: ImportPreviewRow) => row.data);
+    return this.commitValidatedRows(dtos, actor);
+  }
+
+  private async previewFromRawRows(
+    rawRows: Record<string, unknown>[],
+  ): Promise<ImportPreviewResult> {
     const results = await Promise.all(
       rawRows.map((row, i) => this.mapAndValidateRow(i + 1, row)),
     );
@@ -304,31 +399,6 @@ export class BookingPartnerImportService {
       valid: results.length - invalidCount,
       invalid: invalidCount,
       rows: results,
-    };
-  }
-
-  public async commit(
-    buffer: Buffer,
-    actor: string,
-  ): Promise<ImportCommitResult> {
-    const previewResult = await this.preview(buffer);
-    if (previewResult.invalid > 0) {
-      throw new BadRequestException(
-        'Validation failed for one or more rows. Please resolve errors in preview mode.',
-      );
-    }
-
-    // Single-transaction bulk insert (fast: one connection, one reserved id
-    // block, chunked save) instead of one transaction per row.
-    const dtos = previewResult.rows.map((row: ImportPreviewRow) => row.data);
-    const result = await this.partnerService.createPartnersBulk(dtos, actor);
-
-    return {
-      totalInput: previewResult.rows.length,
-      successCount: result.successCount,
-      errorCount: result.errorCount,
-      successIndexes: [],
-      errorDetails: result.errors,
     };
   }
 

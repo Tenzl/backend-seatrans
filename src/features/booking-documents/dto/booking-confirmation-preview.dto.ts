@@ -20,6 +20,11 @@ export class BookingConfirmationPreviewDto {
   @PreviewText(100) siCutoff?: string;
   @PreviewText(100) vgmCutoff?: string;
   @PreviewText(500) contact?: string;
+  /**
+   * Freight-forwarding commodity id from booking picker. When set, payload
+   * validation resolves `commodity` to `{name} IN {group}` displayLabel.
+   */
+  @IsOptional() @IsInt() @Min(1) commodityId?: number;
   @PreviewText(1_000) commodity?: string;
   /** Derived multiline display string for PDF / AN-DO prefill. */
   @PreviewText(500) volume?: string;

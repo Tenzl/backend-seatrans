@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import fontkit from '@pdf-lib/fontkit';
 import { PDFDocument, PDFFont } from 'pdf-lib';
 import { readFile } from 'node:fs/promises';
@@ -26,6 +26,8 @@ import {
 import { renderBookingConfirmation } from './booking-confirmation.renderer';
 import { BookingDocumentRenderContext } from './booking-document-render-context';
 import { renderDeliveryOrder } from './delivery-order.renderer';
+import { AsyncSemaphore } from '../../../shared/utils/async-semaphore';
+import { readPositiveInt } from '../../../shared/utils/env-int';
 
 type EmbeddedDocFonts = {
   regular: PDFFont;
@@ -34,11 +36,57 @@ type EmbeddedDocFonts = {
   headingRegular: PDFFont;
 };
 
+/** Disk assets shared across booking PDF previews — warmed at bootstrap. */
+const WARM_ASSET_SEGMENTS: string[][] = [
+  ['author-header.jpg'],
+  ['authorSignature.jpg'],
+  [BILL_OF_LADING_AUTHOR_SIGNATURE_PNG],
+  ['fonts', 'Arial.ttf'],
+  ['fonts', 'Arial-Bold.ttf'],
+  ['fonts', 'DejaVuSans.ttf'],
+  ['fonts', 'DejaVuSans-Bold.ttf'],
+  ['templates', 'an.pdf'],
+  ['templates', 'booking.pdf'],
+  ['templates', 'do.pdf'],
+  ['templates', 'bl-non-negotiable.jpg'],
+  ['templates', 'bl-original.jpg'],
+];
+
+/** Cap concurrent PDF renders so preview storms do not stall the event loop. */
+const PDF_RENDER_CONCURRENCY = readPositiveInt(
+  process.env.BOOKING_PDF_RENDER_CONCURRENCY,
+  2,
+  { min: 1, max: 8 },
+);
+
 @Injectable()
-export class BookingDocumentPdfRenderer {
+export class BookingDocumentPdfRenderer implements OnModuleInit {
+  private readonly logger = new Logger(BookingDocumentPdfRenderer.name);
   private readonly assetCache = new Map<string, Promise<Buffer>>();
+  private readonly renderGate = new AsyncSemaphore(PDF_RENDER_CONCURRENCY);
+
+  async onModuleInit(): Promise<void> {
+    await Promise.all(
+      WARM_ASSET_SEGMENTS.map((segments) =>
+        this.readAsset(...segments).catch((error: unknown) => {
+          const detail =
+            error instanceof Error ? error.message : 'unknown error';
+          this.logger.warn(
+            `Failed to warm PDF asset ${segments.join('/')}: ${detail}`,
+          );
+        }),
+      ),
+    );
+  }
 
   async render(
+    type: BookingDocumentType,
+    payload: BookingDocumentPayload,
+  ): Promise<BookingDocumentPreview> {
+    return this.renderGate.run(() => this.renderUnsafe(type, payload));
+  }
+
+  private async renderUnsafe(
     type: BookingDocumentType,
     payload: BookingDocumentPayload,
   ): Promise<BookingDocumentPreview> {
@@ -50,8 +98,8 @@ export class BookingDocumentPdfRenderer {
     pdf.registerFontkit(fontkit);
 
     const fonts = await this.embedDocFonts(pdf);
-    const header = await pdf.embedPng(
-      await this.readAsset('author-header.png'),
+    const header = await pdf.embedJpg(
+      await this.readAsset('author-header.jpg'),
     );
     const managerStamp = await pdf.embedJpg(
       await this.readAsset('authorSignature.jpg'),

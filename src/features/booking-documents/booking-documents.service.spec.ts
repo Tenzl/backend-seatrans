@@ -18,10 +18,20 @@ describe('BookingDocumentsService', () => {
   const userRepository = {
     findOne: jest.fn().mockResolvedValue(null),
   };
+  const dataSource = {
+    transaction: jest.fn(
+      async <T>(work: (manager: undefined) => Promise<T>): Promise<T> =>
+        work(undefined),
+    ),
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
     userRepository.findOne.mockResolvedValue(null);
+    dataSource.transaction.mockImplementation(
+      async <T>(work: (manager: undefined) => Promise<T>): Promise<T> =>
+        work(undefined),
+    );
     service = new BookingDocumentsService(
       new BookingDocumentPayloadValidator(),
       new BookingDocumentRecordService(
@@ -32,6 +42,7 @@ describe('BookingDocumentsService', () => {
       ),
       new BookingDocumentPdfRenderer(),
       userRepository as never,
+      dataSource as never,
     );
   });
 
@@ -77,7 +88,7 @@ describe('BookingDocumentsService', () => {
     });
   });
 
-  it('overwrites BL cargo from the linked Arrival Notice on save', async () => {
+  it('does not overwrite BL cargo from the linked Arrival Notice on save', async () => {
     const anPayload = {
       marks: 'AN MARKS',
       descriptionOfGoods: 'AN STONE',
@@ -191,16 +202,12 @@ describe('BookingDocumentsService', () => {
       fblNumber: 'BL-OLD',
       consignor: 'SHIPPER KEEP',
       shippingMark: 'KEEP MARK',
-      descriptionOfGoods: 'AN STONE',
-      serviceMode: 'FCL/FCL - CY/CY',
-      numberAndKindOfPackages: '2',
-      grossWeight: '900',
-      measurement: '12',
+      descriptionOfGoods: 'CLIENT DIVERGENT',
+      serviceMode: 'CLIENT MODE',
       containers: [
         expect.objectContaining({
-          containerNo: 'C1',
-          sealNo: 'S1',
-          type: "20'DC",
+          containerNo: 'WRONG',
+          type: "40'HC",
         }),
       ],
     });
@@ -532,5 +539,118 @@ describe('BookingDocumentsService', () => {
     expect(updated.payload).toMatchObject({
       pic: 'Selected User, Email: selected@seatrans.com.vn',
     });
+  });
+
+  it('runs Arrival Notice create and sibling DO patch inside one transaction', async () => {
+    const recordService = {
+      create: jest.fn().mockResolvedValue({
+        id: 60,
+        documentType: BookingDocumentType.ARRIVAL_NOTICE,
+        bookingId: 5,
+      }),
+      findActiveByBookingId: jest.fn().mockResolvedValueOnce({
+        id: 71,
+        lockedAt: null,
+        payload: { doNumber: 'DO-1', containers: [], cargoRows: [] },
+      }),
+      update: jest.fn().mockResolvedValue({}),
+    };
+    let committed = false;
+    const txDataSource = {
+      transaction: jest.fn(
+        async <T>(work: (manager: { tag: string }) => Promise<T>): Promise<T> => {
+          const result = await work({ tag: 'tx-manager' });
+          committed = true;
+          return result;
+        },
+      ),
+    };
+    const txService = new BookingDocumentsService(
+      new BookingDocumentPayloadValidator(),
+      recordService as never,
+      new BookingDocumentPdfRenderer(),
+      userRepository as never,
+      txDataSource as never,
+    );
+
+    await txService.createRecord(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      {
+        anNumber: 'AN-TX',
+        bookingId: 5,
+        descriptionOfGoods: 'STONE',
+        containers: [],
+      },
+      9,
+    );
+
+    expect(txDataSource.transaction).toHaveBeenCalledTimes(1);
+    expect(recordService.create).toHaveBeenCalledWith(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      expect.any(Object),
+      9,
+      'PROCESSING',
+      { bookingFlow: undefined, bookingId: 5 },
+      { tag: 'tx-manager' },
+    );
+    expect(recordService.update).toHaveBeenCalledTimes(1);
+    expect(recordService.update).toHaveBeenCalledWith(
+      BookingDocumentType.DELIVERY_ORDER,
+      71,
+      expect.any(Object),
+      9,
+      undefined,
+      { tag: 'tx-manager' },
+    );
+    expect(committed).toBe(true);
+  });
+
+  it('does not commit when a sibling DO patch fails after Arrival Notice write', async () => {
+    const recordService = {
+      create: jest.fn().mockResolvedValue({
+        id: 60,
+        documentType: BookingDocumentType.ARRIVAL_NOTICE,
+        bookingId: 5,
+      }),
+      findActiveByBookingId: jest.fn().mockResolvedValueOnce({
+        id: 71,
+        lockedAt: null,
+        payload: { doNumber: 'DO-1', containers: [], cargoRows: [] },
+      }),
+      update: jest.fn().mockRejectedValueOnce(new Error('sibling patch fault')),
+    };
+    let committed = false;
+    const txDataSource = {
+      transaction: jest.fn(
+        async <T>(work: (manager: { tag: string }) => Promise<T>): Promise<T> => {
+          const result = await work({ tag: 'tx-manager' });
+          committed = true;
+          return result;
+        },
+      ),
+    };
+    const txService = new BookingDocumentsService(
+      new BookingDocumentPayloadValidator(),
+      recordService as never,
+      new BookingDocumentPdfRenderer(),
+      userRepository as never,
+      txDataSource as never,
+    );
+
+    await expect(
+      txService.createRecord(
+        BookingDocumentType.ARRIVAL_NOTICE,
+        {
+          anNumber: 'AN-ROLLBACK',
+          bookingId: 5,
+          descriptionOfGoods: 'STONE',
+          containers: [],
+        },
+        9,
+      ),
+    ).rejects.toThrow('sibling patch fault');
+    expect(committed).toBe(false);
+    expect(recordService.create).toHaveBeenCalledTimes(1);
+    expect(recordService.update).toHaveBeenCalledTimes(1);
   });
 });

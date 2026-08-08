@@ -122,6 +122,11 @@ function setup(existingRole: Role | null = null): Harness {
     rootUserRepository as unknown as Repository<User>,
     rootAccessRepository as unknown as Repository<RoleSectionAccess>,
     dataSource as unknown as DataSource,
+    {
+      invalidateRole: jest.fn(),
+      invalidateUser: jest.fn(),
+      clearGrantsCache: jest.fn(),
+    } as unknown as SectionAccessService,
   );
   jest.spyOn(service, 'listRoles').mockResolvedValue([
     {
@@ -319,6 +324,44 @@ describe('SectionAccessService fail-closed behavior', () => {
         'data-ports',
       ),
     ).resolves.toBe(false);
+  });
+
+  it('caches grants by user+role+sessionVersion and invalidates on bump', async () => {
+    const find = jest
+      .fn()
+      .mockResolvedValue([{ sectionKey: 'data-ports' }]);
+    const service = new SectionAccessService({
+      find,
+    } as unknown as Repository<RoleSectionAccess>);
+
+    const user = {
+      id: 10,
+      sessionVersion: 2,
+      role: {
+        id: 3,
+        name: 'ROLE_OPERATOR',
+        roleGroup: RoleGroup.INTERNAL,
+      },
+    };
+
+    await expect(service.getSectionsForUser(user)).resolves.toEqual([
+      'data-ports',
+    ]);
+    await expect(service.getSectionsForUser(user)).resolves.toEqual([
+      'data-ports',
+    ]);
+    expect(find).toHaveBeenCalledTimes(1);
+
+    service.invalidateUser(10);
+    await expect(service.getSectionsForUser(user)).resolves.toEqual([
+      'data-ports',
+    ]);
+    expect(find).toHaveBeenCalledTimes(2);
+
+    await expect(
+      service.getSectionsForUser({ ...user, sessionVersion: 3 }),
+    ).resolves.toEqual(['data-ports']);
+    expect(find).toHaveBeenCalledTimes(3);
   });
 });
 

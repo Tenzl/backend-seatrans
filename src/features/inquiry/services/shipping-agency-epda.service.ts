@@ -24,6 +24,7 @@ import { NotificationService } from '../../notification/notification.service';
 import { InquiryFieldChangeAction } from '../entities/inquiry-field-change-log.entity';
 import { InquiryFieldChangeService } from './inquiry-field-change.service';
 import { Port } from '../../ports/entities/port.entity';
+import type { EpdaParameterValues } from '../../epda-parameters/entities/epda-parameter-set.entity';
 import { normalizeProvinceAreaCode } from '../../provinces/province-area';
 import {
   EPDA_QUOTE_FORM_BY_AREA,
@@ -34,6 +35,9 @@ import {
   epdaFieldSnapshot,
 } from './shipping-agency-epda-audit';
 import { ShippingAgencyEpdaSnapshotService } from './shipping-agency-epda-snapshot.service';
+import { normalizeEpdaWorkingParams } from './shipping-agency-epda-working-params';
+import { InquiryCodeAllocator } from './inquiry-code-allocator';
+import { InquiryRepositoryRegistry } from './inquiry-repository.registry';
 
 const SERVICE_SHIPPING_AGENCY = 'SHIPPING AGENCY';
 
@@ -53,6 +57,8 @@ export class ShippingAgencyEpdaService {
     private readonly notificationService: NotificationService,
     private readonly fieldChangeService: InquiryFieldChangeService,
     private readonly snapshotService: ShippingAgencyEpdaSnapshotService,
+    private readonly codeAllocator: InquiryCodeAllocator,
+    private readonly repositories: InquiryRepositoryRegistry,
   ) {}
 
   async createInternalInquiry(
@@ -84,10 +90,12 @@ export class ShippingAgencyEpdaService {
       if (!actor) {
         throw new BadRequestException('Authenticated staff user not found');
       }
-      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
-        'shipping-agency-inquiry-code',
-      ]);
-      const code = await this.generateCode(repository);
+      const prefix = this.repositories.codePrefix(SERVICE_SHIPPING_AGENCY);
+      const code = await this.codeAllocator.allocate(
+        manager,
+        repository,
+        prefix,
+      );
 
       const row = repository.create({
         serviceType,
@@ -152,6 +160,9 @@ export class ShippingAgencyEpdaService {
           dto.shorecraneHireUsdPerMt,
         ),
         epdaSnapshot: null,
+        epdaWorkingParams: dto.epdaWorkingParams
+          ? normalizeEpdaWorkingParams(dto.epdaWorkingParams)
+          : null,
       });
 
       const saved = await repository.save(row);
@@ -210,7 +221,11 @@ export class ShippingAgencyEpdaService {
     changedFields: string[];
   }> {
     this.assertEpdaUnlocked(row);
-    const canonicalPort = await this.validateCanonicalPortUpdate(row, dto);
+    const canonicalPort = await this.validateCanonicalPortUpdate(
+      row,
+      dto,
+      manager,
+    );
     const before = epdaFieldSnapshot(row);
     this.applyCustomerVisibleUpdates(row, dto);
     if (canonicalPort) row.portOfCall = canonicalPort.portOfCall;
@@ -272,7 +287,11 @@ export class ShippingAgencyEpdaService {
         dto.agencyOtherExpenses,
       );
     }
-    // Snapshot is written only by lockEpda — not by draft saves.
+    // Soft-snapshot tariff params on each unlocked draft save. Hard snapshot
+    // (epdaSnapshot) is written only by lockEpda.
+    if (dto.epdaWorkingParams !== undefined) {
+      row.epdaWorkingParams = normalizeEpdaWorkingParams(dto.epdaWorkingParams);
+    }
 
     // Draft completeness drives the status: COMPLETED when all required fields
     // are filled, PROCESSING otherwise.
@@ -304,20 +323,45 @@ export class ShippingAgencyEpdaService {
   }
 
   /**
-   * Freeze EPDA: persist live snapshot and lock further staff edits.
-   * Does not change inquiry status.
+   * Freeze EPDA: persist client-pinned tariff params into `epdaSnapshot`
+   * and lock further staff edits. Does not change inquiry status.
+   *
+   * Pre-resolves live params before the row lock (DB-01). Snapshot lock
+   * accepts Apply (params === live) or Skip (params === epdaWorkingParams);
+   * anything else is 409.
    */
   async lockEpda(
     inquiryId: number,
     dto: LockShippingAgencyEpdaDto,
     actorUserId: number,
   ): Promise<Record<string, unknown>> {
+    // Resolve read-only tariff params before the row lock so getEffective
+    // does not check out a second pool connection while FOR UPDATE is held.
+    const preview = await this.requireShippingAgencyInquiry(inquiryId);
+    const previewPortId = preview.portId;
+    const effectiveParams =
+      !preview.epdaLockedAt &&
+      Number.isInteger(previewPortId) &&
+      (previewPortId ?? 0) > 0
+        ? await this.snapshotService.resolveEffectiveParamsForPort(
+            previewPortId as number,
+          )
+        : undefined;
+
     return this.inquiryRepository.manager.transaction(async (manager) => {
       const { row, repository } = await this.requireLockedShippingAgencyInquiry(
         manager,
         inquiryId,
       );
-      return this.lockEpdaRow(row, repository, manager, dto, actorUserId);
+      return this.lockEpdaRow(
+        row,
+        repository,
+        manager,
+        dto,
+        actorUserId,
+        effectiveParams,
+        previewPortId,
+      );
     });
   }
 
@@ -327,14 +371,29 @@ export class ShippingAgencyEpdaService {
     manager: EntityManager,
     dto: LockShippingAgencyEpdaDto,
     actorUserId: number,
+    preResolvedEffectiveParams?: EpdaParameterValues | Record<string, unknown>,
+    previewPortId?: number | null,
   ): Promise<Record<string, unknown>> {
     if (row.epdaLockedAt) {
       throw new ConflictException('EPDA is already locked');
     }
     const previousLocked = row.epdaLockedAt;
+    const portUnchanged =
+      preResolvedEffectiveParams != null && row.portId === previewPortId;
+    // When portId changed after preview, re-resolve on this transaction
+    // connection so Apply can still match live for the locked row's port.
+    const effectiveParams = portUnchanged
+      ? preResolvedEffectiveParams
+      : Number.isInteger(row.portId) && (row.portId ?? 0) > 0
+        ? await this.snapshotService.resolveEffectiveParamsForPort(
+            row.portId as number,
+            manager,
+          )
+        : undefined;
     row.epdaSnapshot = await this.snapshotService.buildAuthoritativeSnapshot(
       row,
       dto.epdaSnapshot,
+      { effectiveParams },
     );
     row.epdaLockedAt = new Date();
 
@@ -502,7 +561,7 @@ export class ShippingAgencyEpdaService {
     row: ShippingAgencyInquiryEntity;
     repository: Repository<ShippingAgencyInquiryEntity>;
   }> {
-    const serviceType = await this.requireShippingAgencyServiceType();
+    const serviceType = await this.requireShippingAgencyServiceType(manager);
     const repository = manager.getRepository(ShippingAgencyInquiryEntity);
     // Lock only the inquiry row. Postgres rejects FOR UPDATE on the nullable
     // side of LEFT JOINs, so we must not lock joined tables.
@@ -523,8 +582,12 @@ export class ShippingAgencyEpdaService {
     return { row, repository };
   }
 
-  private async requireShippingAgencyServiceType(): Promise<ServiceType> {
-    const serviceType = await this.serviceTypeRepository
+  private async requireShippingAgencyServiceType(
+    manager?: EntityManager,
+  ): Promise<ServiceType> {
+    const repository =
+      manager?.getRepository(ServiceType) ?? this.serviceTypeRepository;
+    const serviceType = await repository
       .createQueryBuilder('serviceType')
       .where('LOWER(serviceType.name) = :name', {
         name: SERVICE_SHIPPING_AGENCY.toLowerCase(),
@@ -578,8 +641,13 @@ export class ShippingAgencyEpdaService {
     }
   }
 
-  private async requireCanonicalPort(portId: number): Promise<Port> {
-    const port = await this.portRepository.findOne({
+  private async requireCanonicalPort(
+    portId: number,
+    manager?: EntityManager,
+  ): Promise<Port> {
+    const repository =
+      manager?.getRepository(Port) ?? this.portRepository;
+    const port = await repository.findOne({
       where: { id: portId },
       relations: { province: true },
     });
@@ -590,6 +658,7 @@ export class ShippingAgencyEpdaService {
   private async validateCanonicalPortUpdate(
     row: ShippingAgencyInquiryEntity,
     dto: UpdateShippingAgencyEpdaDto,
+    manager?: EntityManager,
   ): Promise<Port | null> {
     if (dto.portId === null) return null;
     const portId = dto.portId ?? row.portId;
@@ -601,7 +670,7 @@ export class ShippingAgencyEpdaService {
     ) {
       return null;
     }
-    const port = await this.requireCanonicalPort(portId);
+    const port = await this.requireCanonicalPort(portId, manager);
     this.assertCanonicalPortContract(
       port,
       dto.portOfCall ?? row.portOfCall,
@@ -640,28 +709,6 @@ export class ShippingAgencyEpdaService {
 
   private normalizePortLabel(value: string): string {
     return value.trim().replace(/\s+/g, ' ').toUpperCase();
-  }
-
-  private async generateCode(
-    repository: Repository<ShippingAgencyInquiryEntity> = this
-      .inquiryRepository,
-  ): Promise<string> {
-    const year = new Date().getFullYear();
-    const prefix = `SA-${year}-`;
-
-    const last = await repository
-      .createQueryBuilder('inquiry')
-      .select('inquiry.code', 'code')
-      .where('inquiry.code LIKE :prefix', { prefix: `${prefix}%` })
-      .orderBy('inquiry.code', 'DESC')
-      .limit(1)
-      .getRawOne<{ code: string }>();
-
-    const nextNumber = last?.code
-      ? parseInt(last.code.slice(prefix.length), 10) + 1
-      : 1;
-
-    return `${prefix}${String(nextNumber).padStart(4, '0')}`;
   }
 
   private toAdminInquiryPayload(

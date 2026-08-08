@@ -1,4 +1,4 @@
-import { resolveCorsOrigins, validateEnvironment } from './environment';
+import { resolveCorsOrigins, resolveTrustProxy, validateEnvironment } from './environment';
 
 const validProductionEnvironment = {
   NODE_ENV: 'production',
@@ -21,6 +21,16 @@ describe('runtime environment validation', () => {
     expect(resolveCorsOrigins({ NODE_ENV: 'development' })).toEqual([
       'http://localhost:3000',
     ]);
+  });
+
+  it('defaults TRUST_PROXY to off and accepts hop counts', () => {
+    expect(resolveTrustProxy({})).toBe(false);
+    expect(resolveTrustProxy({ TRUST_PROXY: 'false' })).toBe(false);
+    expect(resolveTrustProxy({ TRUST_PROXY: 'true' })).toBe(1);
+    expect(resolveTrustProxy({ TRUST_PROXY: '2' })).toBe(2);
+    expect(() => resolveTrustProxy({ TRUST_PROXY: 'nope' })).toThrow(
+      /TRUST_PROXY/,
+    );
   });
 
   it.each([
@@ -78,5 +88,40 @@ describe('runtime environment validation', () => {
         APP_JWT_SECRET: 'a'.repeat(48),
       }),
     );
+  });
+
+  it('accepts optional REDIS_URL and QUEUE_ENABLED scaling flags', () => {
+    expect(
+      validateEnvironment({
+        ...validProductionEnvironment,
+        REDIS_URL: 'redis://localhost:6379/0',
+        QUEUE_ENABLED: 'true',
+        QUEUE_CONCURRENCY: '2',
+        PUBLIC_CATALOG_CACHE_TTL_MS: '30000',
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        REDIS_URL: 'redis://localhost:6379/0',
+        QUEUE_ENABLED: 'true',
+      }),
+    );
+  });
+
+  it('rejects an invalid REDIS_URL protocol', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validProductionEnvironment,
+        REDIS_URL: 'http://localhost:6379',
+      }),
+    ).toThrow('REDIS_URL');
+  });
+
+  it('rejects a non-boolean QUEUE_ENABLED value', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validProductionEnvironment,
+        QUEUE_ENABLED: 'sometimes',
+      }),
+    ).toThrow('QUEUE_ENABLED');
   });
 });

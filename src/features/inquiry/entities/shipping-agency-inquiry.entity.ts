@@ -248,8 +248,17 @@ export class ShippingAgencyInquiryEntity extends BaseInquiry {
   epdaSnapshot!: Record<string, unknown> | null;
 
   /**
+   * Soft-snapshot of tariff params while the EPDA is still unlocked.
+   * Updated on each draft save; used to detect live-parameter drift on reopen
+   * (Apply latest vs Skip / pin). Lock freezes the pinned set into `epdaSnapshot`.
+   */
+  @Column({ name: 'epda_working_params', type: 'jsonb', nullable: true })
+  epdaWorkingParams!: Record<string, unknown> | null;
+
+  /**
    * When set, EPDA field edits are forbidden and quote calc must use `epdaSnapshot`
-   * (frozen tariff params). Unlocked drafts always resolve live area/port params.
+   * (frozen tariff params). Unlocked drafts use `epdaWorkingParams` when pinned,
+   * otherwise live area/port params after Apply.
    */
   @Column({ name: 'epda_locked_at', type: 'timestamptz', nullable: true })
   epdaLockedAt!: Date | null;

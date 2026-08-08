@@ -13,6 +13,9 @@ async function bootstrap() {
     app.useLogger(new Logger());
     configureApplication(app, configService);
 
+    // Drain in-flight requests on SIGTERM/SIGINT (platform rolling deploys).
+    app.enableShutdownHooks();
+
     const port = configService.getOrThrow<number>('PORT');
     await app.listen(port, '0.0.0.0');
     Logger.log(`Application is running on port ${port}`, 'Bootstrap');

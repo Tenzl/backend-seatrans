@@ -6,31 +6,7 @@ import {
   ValidatorConstraintInterface,
 } from 'class-validator';
 
-type FieldCheck = (obj: Record<string, unknown>) => boolean;
 type ClassConstructor = new (...args: never[]) => unknown;
-
-export function RequireOneOf(
-  checks: FieldCheck[],
-  validationOptions?: ValidationOptions,
-) {
-  return function (constructor: ClassConstructor): void {
-    registerDecorator({
-      name: 'requireOneOf',
-      target: constructor,
-      propertyName: undefined as unknown as string,
-      options: validationOptions,
-      validator: {
-        validate(_value: unknown, args: ValidationArguments) {
-          const obj = args.object as Record<string, unknown>;
-          return checks.some((check) => check(obj));
-        },
-        defaultMessage() {
-          return validationOptions?.message as string;
-        },
-      },
-    });
-  };
-}
 
 @ValidatorConstraint({ name: 'requireServiceTypeReference', async: false })
 export class RequireServiceTypeReferenceConstraint implements ValidatorConstraintInterface {

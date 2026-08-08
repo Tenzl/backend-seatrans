@@ -3,7 +3,9 @@ import {
   ConflictException,
   Injectable,
 } from '@nestjs/common';
+import { EntityManager } from 'typeorm';
 import { EpdaParametersService } from '../../epda-parameters/epda-parameters.service';
+import type { EpdaParameterValues } from '../../epda-parameters/entities/epda-parameter-set.entity';
 import { ShippingAgencyInquiryEntity } from '../entities/shipping-agency-inquiry.entity';
 
 const MAX_SNAPSHOT_BYTES = 256 * 1024;
@@ -74,13 +76,33 @@ export class ShippingAgencyEpdaSnapshotService {
   constructor(private readonly epdaParametersService: EpdaParametersService) {}
 
   /**
-   * Tariff parameters are server-owned. The client must calculate its quote
-   * from the same effective values the server currently resolves; otherwise
-   * freezing the remaining quote fields would persist a stale calculation.
+   * Read-only tariff merge for a port. Prefer calling this *before* acquiring
+   * an inquiry row lock so getEffective does not check out a second pool
+   * connection while FOR UPDATE is held.
+   */
+  resolveEffectiveParamsForPort(
+    portId: number,
+    manager?: EntityManager,
+  ): Promise<EpdaParameterValues> {
+    return manager
+      ? this.epdaParametersService.getEffective(undefined, portId, manager)
+      : this.epdaParametersService.getEffective(undefined, portId);
+  }
+
+  /**
+   * Freeze tariff params for lock. Accept only:
+   * - Skip: `requested.params` equals inquiry `epdaWorkingParams`
+   * - Apply: `requested.params` equals pre-resolved live getEffective
+   *   (`options.effectiveParams` from DB-01, before the row lock)
+   *
+   * Arbitrary client params are rejected with 409.
    */
   async buildAuthoritativeSnapshot(
     row: ShippingAgencyInquiryEntity,
     requestedSnapshot: Record<string, unknown>,
+    options?: {
+      effectiveParams?: EpdaParameterValues | Record<string, unknown>;
+    },
   ): Promise<Record<string, unknown>> {
     const requested = this.validateSnapshot(requestedSnapshot);
     this.validateSnapshotShape(requested);
@@ -99,18 +121,27 @@ export class ShippingAgencyEpdaSnapshotService {
         'A canonical portId is required to freeze EPDA tariff parameters',
       );
     }
-    const effectiveParams = await this.epdaParametersService.getEffective(
-      undefined,
-      row.portId as number,
-    );
-    if (!this.jsonValuesEqual(requested.params, effectiveParams)) {
+
+    const working = row.epdaWorkingParams;
+    const live = options?.effectiveParams;
+    const isSkip =
+      this.isJsonObject(working) &&
+      this.jsonValuesEqual(requested.params, working);
+    const isApply =
+      live != null && this.jsonValuesEqual(requested.params, live);
+    if (!isSkip && !isApply) {
       throw new ConflictException(
-        'EPDA tariff parameters are stale; refresh effective parameters and recalculate the quote',
+        'EPDA tariff parameters must match the pinned working set or current effective parameters',
       );
     }
+
+    const pinnedParams = isSkip
+      ? (working as Record<string, unknown>)
+      : (live as Record<string, unknown>);
+
     return this.validateSnapshot({
       ...requested,
-      params: structuredClone(effectiveParams),
+      params: structuredClone(pinnedParams),
     });
   }
 

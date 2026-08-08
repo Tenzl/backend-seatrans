@@ -41,6 +41,7 @@ import {
 } from './booking-partner-audit';
 import { BookingPartnerFieldChangeService } from './booking-partner-field-change.service';
 import { buildPartnerContainsPattern } from './partner-search';
+import { saveWithOptimisticLock } from '../../../shared/utils/optimistic-lock';
 
 @Injectable()
 export class BookingPartnerService {
@@ -329,7 +330,10 @@ export class BookingPartnerService {
       this.assignUpsertFields(row, dto);
       row.updatedBy = actor;
 
-      const saved = await repository.save(row);
+      const saved = await saveWithOptimisticLock(
+        () => repository.save(row),
+        'Partner was modified concurrently; reload and retry',
+      );
       if (actorUserId != null) {
         await this.fieldChangeService.logFieldChanges(
           saved.id,
@@ -367,7 +371,10 @@ export class BookingPartnerService {
       row.customerStatus = dto.customerStatus;
       row.updatedBy = actor;
 
-      const saved = await repository.save(row);
+      const saved = await saveWithOptimisticLock(
+        () => repository.save(row),
+        'Partner was modified concurrently; reload and retry',
+      );
       if (actorUserId != null) {
         await this.fieldChangeService.logFieldChanges(
           saved.id,
@@ -383,6 +390,7 @@ export class BookingPartnerService {
 
   /**
    * Freeze partner edits (EPDA-style). Unlock is not supported.
+   * CONC-01: CAS update so only one concurrent lock wins (loser → 409).
    */
   async lockPartner(
     id: number,
@@ -391,26 +399,42 @@ export class BookingPartnerService {
   ): Promise<BookingPartnerDetailResponseDto> {
     return this.dataSource.transaction(async (manager) => {
       const repository = manager.getRepository(BookingPartner);
-      const row = await repository.findOne({
-        where: {
-          id,
-          deletedAt: IsNull(),
-        },
-      });
+      const lockedAt = new Date();
+      const result = await repository
+        .createQueryBuilder()
+        .update(BookingPartner)
+        .set({
+          lockedAt,
+          updatedBy: actor,
+          version: () => '"version" + 1',
+        })
+        .where('id = :id', { id })
+        .andWhere('deleted_at IS NULL')
+        .andWhere('locked_at IS NULL')
+        .execute();
 
-      if (!row) {
+      if (result.affected !== 1) {
+        const row = await repository.findOne({
+          where: { id, deletedAt: IsNull() },
+        });
+        if (!row) {
+          throw new NotFoundException('Partner not found');
+        }
+        if (row.lockedAt) {
+          throw new ConflictException('Partner is already locked');
+        }
+        throw new ConflictException(
+          'Partner was modified concurrently; reload and retry',
+        );
+      }
+
+      const saved = await repository.findOne({
+        where: { id, deletedAt: IsNull() },
+      });
+      if (!saved) {
         throw new NotFoundException('Partner not found');
       }
 
-      if (row.lockedAt) {
-        throw new ConflictException('Partner is already locked');
-      }
-
-      const previousLocked = row.lockedAt;
-      row.lockedAt = new Date();
-      row.updatedBy = actor;
-
-      const saved = await repository.save(row);
       await this.fieldChangeService.logFieldChanges(
         saved.id,
         actorUserId,
@@ -418,7 +442,7 @@ export class BookingPartnerService {
         [
           {
             field: 'Partner locked',
-            previousValue: previousLocked ? String(previousLocked) : null,
+            previousValue: null,
             newValue: saved.lockedAt ? String(saved.lockedAt) : null,
           },
         ],
@@ -661,6 +685,7 @@ export class BookingPartnerService {
       updatedAt: partner.updatedAt,
       deletedAt: partner.deletedAt,
       lockedAt: partner.lockedAt,
+      version: Number(partner.version ?? 1),
     };
   }
 

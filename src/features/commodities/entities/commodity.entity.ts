@@ -5,18 +5,30 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
+import { CommodityGroup } from './commodity-group.entity';
 
 @Entity('commodities')
-@Index('uq_commodities_service_cargo_name', ['serviceTypeId', 'cargoType', 'name'], {
-  unique: true,
-})
+/** DB enforces partial unique (group_id, name) WHERE group_id IS NOT NULL. */
+@Index('uq_commodities_group_name', ['groupId', 'name'], { unique: true })
 export class Commodity {
   @PrimaryGeneratedColumn()
   id: number;
 
   @Column({ name: 'service_type_id' })
   serviceTypeId: number;
+
+  @Column({ name: 'group_id', type: 'int', nullable: true })
+  groupId: number | null;
+
+  @ManyToOne(() => CommodityGroup, (group) => group.commodities, {
+    nullable: true,
+    onDelete: 'RESTRICT',
+  })
+  @JoinColumn({ name: 'group_id' })
+  group?: CommodityGroup | null;
 
   @Column({ length: 100 })
   name: string;

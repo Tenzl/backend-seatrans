@@ -3,7 +3,16 @@ import { ShippingAgencyEpdaService } from './shipping-agency-epda.service';
 import { InquiryStatus } from '../enums/inquiry-status.enum';
 import { ShippingAgencyInquiryEntity } from '../entities/shipping-agency-inquiry.entity';
 import { User } from '../../auth/entities/user.entity';
+import { ServiceType } from '../../logistics/entities/service-type.entity';
+import { Port } from '../../ports/entities/port.entity';
 import { ShippingAgencyEpdaSnapshotService } from './shipping-agency-epda-snapshot.service';
+import { InquiryCodeAllocator } from './inquiry-code-allocator';
+import { InquiryRepositoryRegistry } from './inquiry-repository.registry';
+import { CharteringBrokerageInquiryEntity } from '../entities/chartering-brokerage-inquiry.entity';
+import { FreightForwardingInquiryEntity } from '../entities/freight-forwarding-inquiry.entity';
+import { TotalLogisticsInquiryEntity } from '../entities/total-logistics-inquiry.entity';
+import { SpecialRequestInquiryEntity } from '../entities/special-request-inquiry.entity';
+import type { Repository } from 'typeorm';
 
 function queryBuilder(result: unknown) {
   return {
@@ -63,6 +72,12 @@ describe('ShippingAgencyEpdaService increment 1', () => {
         }
         if (entity === User) {
           return transactionalUserRepository;
+        }
+        if (entity === ServiceType) {
+          return serviceTypeRepository;
+        }
+        if (entity === Port) {
+          return portRepository;
         }
         throw new Error('Unexpected transaction repository');
       }),
@@ -129,6 +144,13 @@ describe('ShippingAgencyEpdaService increment 1', () => {
     const epdaParametersService = {
       getEffective: jest.fn().mockResolvedValue(effectiveParameters),
     };
+    const repositories = new InquiryRepositoryRegistry(
+      inquiryRepository as unknown as Repository<ShippingAgencyInquiryEntity>,
+      {} as Repository<CharteringBrokerageInquiryEntity>,
+      {} as Repository<FreightForwardingInquiryEntity>,
+      {} as Repository<TotalLogisticsInquiryEntity>,
+      {} as Repository<SpecialRequestInquiryEntity>,
+    );
     const service = new ShippingAgencyEpdaService(
       inquiryRepository as never,
       serviceTypeRepository as never,
@@ -137,6 +159,8 @@ describe('ShippingAgencyEpdaService increment 1', () => {
       notificationService as never,
       fieldChangeService as never,
       new ShippingAgencyEpdaSnapshotService(epdaParametersService as never),
+      new InquiryCodeAllocator(),
+      repositories,
     );
     return {
       service,
@@ -301,7 +325,7 @@ describe('ShippingAgencyEpdaService increment 1', () => {
 
     expect(transactionManager.query).toHaveBeenCalledWith(
       'SELECT pg_advisory_xact_lock(hashtext($1))',
-      ['shipping-agency-inquiry-code'],
+      [expect.stringMatching(/^inquiry-code:SA-\d{4}-$/)],
     );
     expect(transactionManager.query.mock.invocationCallOrder[0]).toBeLessThan(
       transactionalRepository.createQueryBuilder.mock.invocationCallOrder[0],
@@ -456,7 +480,7 @@ describe('ShippingAgencyEpdaService increment 1', () => {
     );
   });
 
-  it('rejects stale params when locking and leaves the EPDA unlocked', async () => {
+  it('resolves effective tariff params before acquiring the inquiry row lock', async () => {
     const existing = {
       id: 1,
       serviceType,
@@ -468,18 +492,195 @@ describe('ShippingAgencyEpdaService increment 1', () => {
       epdaLockedAt: null,
       status: InquiryStatus.COMPLETED,
     };
+    const {
+      service,
+      lockedQueryBuilder,
+      epdaParametersService,
+      effectiveParameters,
+      transactionManager,
+    } = setup(existing);
+
+    let sequence = 0;
+    let getEffectiveOrder = 0;
+    let lockOrder = 0;
+    epdaParametersService.getEffective.mockImplementation(() => {
+      getEffectiveOrder = ++sequence;
+      return Promise.resolve(effectiveParameters);
+    });
+    lockedQueryBuilder.setLock.mockImplementation(() => {
+      lockOrder = ++sequence;
+      return lockedQueryBuilder;
+    });
+
+    await service.lockEpda(
+      1,
+      { epdaSnapshot: { params: effectiveParameters } },
+      actor.id,
+    );
+
+    expect(epdaParametersService.getEffective).toHaveBeenCalledTimes(1);
+    expect(epdaParametersService.getEffective).toHaveBeenCalledWith(
+      undefined,
+      21,
+    );
+    expect(getEffectiveOrder).toBeGreaterThan(0);
+    expect(lockOrder).toBeGreaterThan(0);
+    expect(getEffectiveOrder).toBeLessThan(lockOrder);
+    expect(transactionManager.getRepository).toHaveBeenCalledWith(ServiceType);
+  });
+
+  it('loads ports through the transaction manager during a locked draft update', async () => {
+    const existing = {
+      id: 1,
+      serviceType,
+      user: customer,
+      userId: customer.id,
+      processedById: actor.id,
+      epdaLockedAt: null,
+      portId: 21,
+      portOfCall: 'HAI PHONG',
+      quoteForm: 'HN',
+      status: InquiryStatus.PROCESSING,
+    };
+    const { service, transactionManager, portRepository } = setup(existing);
+
+    await service.updateEpda(
+      1,
+      {
+        portId: 21,
+        portOfCall: 'HAI PHONG',
+        quoteForm: 'HN',
+      },
+      actor.id,
+    );
+
+    expect(transactionManager.getRepository).toHaveBeenCalledWith(Port);
+    expect(transactionManager.getRepository).toHaveBeenCalledWith(ServiceType);
+    expect(portRepository.findOne).toHaveBeenCalledWith({
+      where: { id: 21 },
+      relations: { province: true },
+    });
+  });
+
+  it('locks with Skip when params match pinned working set (even if live differs)', async () => {
+    const pinnedParams = {
+      hours: { berthHours: 48 },
+      coeff: { clearanceFee: 49, pilotageSingleRate: 0.003 },
+    };
+    const existing = {
+      id: 1,
+      serviceType,
+      user: customer,
+      userId: customer.id,
+      processedById: actor.id,
+      portId: 21,
+      epdaSnapshot: null,
+      epdaWorkingParams: pinnedParams,
+      epdaLockedAt: null,
+      status: InquiryStatus.COMPLETED,
+    };
+    const { service, transactionalRepository, effectiveParameters } =
+      setup(existing);
+
+    await service.lockEpda(
+      1,
+      {
+        epdaSnapshot: {
+          params: pinnedParams,
+          grand_total: 900,
+        },
+      },
+      actor.id,
+    );
+
+    expect(transactionalRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        epdaSnapshot: {
+          params: pinnedParams,
+          grand_total: 900,
+        },
+        epdaLockedAt: expect.any(Date),
+      }),
+    );
+    // Skip freezes working params; live effective must not overwrite them.
+    expect(effectiveParameters).not.toEqual(pinnedParams);
+  });
+
+  it('locks with Apply when params match current effective parameters', async () => {
+    const existing = {
+      id: 1,
+      serviceType,
+      user: customer,
+      userId: customer.id,
+      processedById: actor.id,
+      portId: 21,
+      epdaSnapshot: null,
+      epdaWorkingParams: {
+        hours: { berthHours: 48 },
+        coeff: { clearanceFee: 49, pilotageSingleRate: 0.003 },
+      },
+      epdaLockedAt: null,
+      status: InquiryStatus.COMPLETED,
+    };
+    const { service, transactionalRepository, effectiveParameters } =
+      setup(existing);
+
+    await service.lockEpda(
+      1,
+      {
+        epdaSnapshot: {
+          params: effectiveParameters,
+          grand_total: 1500,
+        },
+      },
+      actor.id,
+    );
+
+    expect(transactionalRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        epdaSnapshot: {
+          params: effectiveParameters,
+          grand_total: 1500,
+        },
+        epdaLockedAt: expect.any(Date),
+      }),
+    );
+  });
+
+  it('rejects lock with arbitrary params that match neither working nor live (409)', async () => {
+    const existing = {
+      id: 1,
+      serviceType,
+      user: customer,
+      userId: customer.id,
+      processedById: actor.id,
+      portId: 21,
+      epdaSnapshot: null,
+      epdaWorkingParams: {
+        hours: { berthHours: 48 },
+        coeff: { clearanceFee: 49, pilotageSingleRate: 0.003 },
+      },
+      epdaLockedAt: null,
+      status: InquiryStatus.COMPLETED,
+    };
     const { service, transactionalRepository } = setup(existing);
 
     await expect(
       service.lockEpda(
         1,
-        { epdaSnapshot: { params: { clearanceFee: 49 } } },
+        {
+          epdaSnapshot: {
+            params: {
+              hours: { berthHours: 999 },
+              coeff: { clearanceFee: 1, pilotageSingleRate: 0.1 },
+            },
+            grand_total: 1,
+          },
+        },
         actor.id,
       ),
     ).rejects.toBeInstanceOf(ConflictException);
-
     expect(transactionalRepository.save).not.toHaveBeenCalled();
-    expect(existing.epdaLockedAt).toBeNull();
   });
 
   it('rejects negative totals when locking a snapshot', async () => {

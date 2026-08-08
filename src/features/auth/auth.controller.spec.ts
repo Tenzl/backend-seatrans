@@ -2,20 +2,35 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { SectionAccessService } from '../roles/section-access.service';
+import { LoginThrottleService } from './login-throttle.service';
 import type { Response } from 'express';
+import type { Request } from 'express';
 
 describe('AuthController', () => {
   let controller: AuthController;
   let authService: { login: jest.Mock; register: jest.Mock };
+  let loginThrottle: {
+    assertAllowed: jest.Mock;
+    delayMsFor: jest.Mock;
+    recordSuccess: jest.Mock;
+    recordFailure: jest.Mock;
+  };
   const originalNodeEnv = process.env.NODE_ENV;
 
   beforeEach(async () => {
     authService = { login: jest.fn(), register: jest.fn() };
+    loginThrottle = {
+      assertAllowed: jest.fn(),
+      delayMsFor: jest.fn().mockReturnValue(0),
+      recordSuccess: jest.fn(),
+      recordFailure: jest.fn(),
+    };
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AuthController],
       providers: [
         { provide: AuthService, useValue: authService },
         { provide: SectionAccessService, useValue: {} },
+        { provide: LoginThrottleService, useValue: loginThrottle },
       ],
     }).compile();
 
@@ -43,12 +58,16 @@ describe('AuthController', () => {
     authService.login.mockResolvedValue(auth);
     const cookie = jest.fn();
     const response = { cookie } as unknown as Response;
+    const request = { ip: '127.0.0.1', headers: {} } as unknown as Request;
 
     const result = await controller.login(
       { identifier: 'user@example.test', password: 'secret' },
+      request,
       response,
     );
 
+    expect(loginThrottle.assertAllowed).toHaveBeenCalled();
+    expect(loginThrottle.recordSuccess).toHaveBeenCalled();
     expect(cookie).toHaveBeenCalledWith('auth_token', 'signed-jwt', {
       httpOnly: true,
       secure,

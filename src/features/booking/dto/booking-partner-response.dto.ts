@@ -37,6 +37,7 @@ export type BookingPartnerListItemResponseDto = {
   updatedAt: Date;
   deletedAt: Date | null;
   lockedAt: Date | null;
+  version: number;
 };
 
 export type BookingPartnerDetailResponseDto = BookingPartnerListItemResponseDto;

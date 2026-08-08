@@ -14,11 +14,35 @@ import { CategoryResponseDto } from './dto/category-response.dto';
 import { CloudinaryService } from '../../shared/services/cloudinary.service';
 import { buildPaginatedResponse } from '../../shared/dto/pagination.dto';
 import { PublishedPostsQueryDto } from './dto/published-posts-query.dto';
+import { AdminPostsQueryDto } from './dto/admin-posts-query.dto';
 import { sanitizePostContent } from './sanitize-post-content';
+import { buildContainsLikePattern } from '../../shared/utils/like-pattern';
 
 @Injectable()
 export class PostsService {
   private static readonly DEFAULT_LIMIT = 100;
+  private static readonly DEFAULT_ADMIN_PAGE_SIZE = 20;
+  /** Columns loaded for list/search endpoints — never include post.content. */
+  private static readonly LIST_SELECT = [
+    'post.id',
+    'post.title',
+    'post.summary',
+    'post.thumbnailUrl',
+    'post.thumbnailPublicId',
+    'post.publishedAt',
+    'post.isPublished',
+    'post.viewCount',
+    'post.createdAt',
+    'post.updatedAt',
+    'author.id',
+    'author.fullName',
+    'author.email',
+    'category.id',
+    'category.name',
+    'category.slug',
+    'category.description',
+    'category.createdAt',
+  ] as const;
 
   constructor(
     @InjectRepository(PostEntity)
@@ -35,34 +59,13 @@ export class PostsService {
     search?: string,
     limit = PostsService.DEFAULT_LIMIT,
   ): Promise<PostResponseDto[]> {
-    const qb = this.postRepository
-      .createQueryBuilder('post')
-      .leftJoinAndSelect('post.categories', 'category')
-      .leftJoinAndSelect('post.author', 'author')
-      .where('post.is_published = :published', { published: true })
-      .orderBy('post.published_at', 'DESC');
-
-    if (categorySlug?.trim()) {
-      qb.andWhere('LOWER(category.slug) = :slug', {
-        slug: categorySlug.trim().toLowerCase(),
-      });
-    }
-
-    const normalizedSearch = search?.trim();
-    if (normalizedSearch) {
-      qb.andWhere(
-        '(LOWER(post.title) LIKE :q OR LOWER(post.content) LIKE :q)',
-        {
-          q: `%${normalizedSearch.toLowerCase()}%`,
-        },
-      );
-      // Search requests can return full matching records.
-      const rows = await qb.getMany();
-      return rows.map((item) => this.toDto(item));
-    }
-
-    const rows = await qb.take(this.sanitizeLimit(limit)).getMany();
-    return rows.map((item) => this.toDto(item));
+    const page = await this.listPublished({
+      category: categorySlug,
+      q: search,
+      page: 0,
+      size: this.sanitizeLimit(limit),
+    });
+    return page.content;
   }
 
   async listPublished(query: PublishedPostsQueryDto) {
@@ -70,32 +73,47 @@ export class PostsService {
     const page = Math.max(0, Number(query.page ?? 0));
     const size = this.sanitizeLimit(Number(query.size ?? 20));
 
-    if (search) {
-      const rows = await this.getPublishedList(query.category, search);
-      return buildPaginatedResponse(rows, rows.length, 0, rows.length || 1);
+    const qb = this.postRepository
+      .createQueryBuilder('post')
+      .leftJoin('post.categories', 'category')
+      .leftJoin('post.author', 'author')
+      .select([...PostsService.LIST_SELECT])
+      .where('post.is_published = :published', { published: true })
+      .orderBy('post.published_at', 'DESC')
+      .addOrderBy('post.id', 'DESC')
+      .skip(page * size)
+      .take(size);
+
+    if (query.category?.trim()) {
+      qb.andWhere('LOWER(category.slug) = :slug', {
+        slug: query.category.trim().toLowerCase(),
+      });
     }
 
-    const [rows, total] = await this.postRepository.findAndCount({
-      where: { isPublished: true },
-      order: { publishedAt: 'DESC' },
-      skip: page * size,
-      take: size,
-      relations: { categories: true, author: true },
-    });
+    if (search) {
+      qb.andWhere(
+        "(LOWER(post.title) LIKE :q ESCAPE E'\\\\' OR LOWER(post.summary) LIKE :q ESCAPE E'\\\\')",
+        { q: buildContainsLikePattern(search) },
+      );
+    }
 
-    const content = rows.map((item) => this.toDto(item));
+    const [rows, total] = await qb.getManyAndCount();
+    const content = rows.map((item) => this.toListDto(item));
     return buildPaginatedResponse(content, total, page, size);
   }
 
   async getLatest(limit = 5): Promise<PostResponseDto[]> {
-    const rows = await this.postRepository.find({
-      where: { isPublished: true },
-      order: { publishedAt: 'DESC' },
-      take: this.sanitizeLimit(limit),
-      relations: { categories: true, author: true },
-    });
+    const rows = await this.postRepository
+      .createQueryBuilder('post')
+      .leftJoin('post.categories', 'category')
+      .leftJoin('post.author', 'author')
+      .select([...PostsService.LIST_SELECT])
+      .where('post.is_published = :published', { published: true })
+      .orderBy('post.published_at', 'DESC')
+      .take(this.sanitizeLimit(limit))
+      .getMany();
 
-    return rows.map((item) => this.toDto(item));
+    return rows.map((item) => this.toListDto(item));
   }
 
   async getPublicById(id: number): Promise<PostResponseDto> {
@@ -104,10 +122,18 @@ export class PostsService {
   }
 
   async recordView(id: number): Promise<{ viewCount: number }> {
-    const row = await this.findPublishedPost(id);
-    row.viewCount = (row.viewCount ?? 0) + 1;
-    const saved = await this.postRepository.save(row);
-    return { viewCount: saved.viewCount ?? 0 };
+    const rows: Array<{ view_count: number | string }> =
+      await this.postRepository.query(
+        `UPDATE posts
+         SET view_count = view_count + 1
+         WHERE id = $1 AND is_published = true
+         RETURNING view_count`,
+        [id],
+      );
+    if (!rows.length) {
+      throw new NotFoundException('Post not found');
+    }
+    return { viewCount: Number(rows[0].view_count) };
   }
 
   private async findPublishedPost(id: number): Promise<PostEntity> {
@@ -126,13 +152,40 @@ export class PostsService {
   async getAdminList(
     limit = PostsService.DEFAULT_LIMIT,
   ): Promise<PostResponseDto[]> {
-    const rows = await this.postRepository.find({
-      order: { updatedAt: 'DESC' },
-      take: this.sanitizeLimit(limit),
-      relations: { categories: true, author: true },
+    const page = await this.listAdmin({
+      page: 0,
+      size: this.sanitizeLimit(limit),
     });
+    return page.content;
+  }
 
-    return rows.map((item) => this.toDto(item));
+  async listAdmin(query: AdminPostsQueryDto) {
+    const search = query.q?.trim();
+    const page = Math.max(0, Number(query.page ?? 0));
+    const size = this.sanitizePageSize(
+      Number(query.size ?? PostsService.DEFAULT_ADMIN_PAGE_SIZE),
+    );
+
+    const qb = this.postRepository
+      .createQueryBuilder('post')
+      .leftJoin('post.categories', 'category')
+      .leftJoin('post.author', 'author')
+      .select([...PostsService.LIST_SELECT])
+      .orderBy('post.updated_at', 'DESC')
+      .addOrderBy('post.id', 'DESC')
+      .skip(page * size)
+      .take(size);
+
+    if (search) {
+      qb.andWhere(
+        "LOWER(post.title) LIKE :q ESCAPE E'\\\\'",
+        { q: buildContainsLikePattern(search) },
+      );
+    }
+
+    const [rows, total] = await qb.getManyAndCount();
+    const content = rows.map((item) => this.toListDto(item));
+    return buildPaginatedResponse(content, total, page, size);
   }
 
   async getAdminById(id: number): Promise<PostResponseDto> {
@@ -245,11 +298,19 @@ export class PostsService {
     return rows;
   }
 
+  /** List/search projection: omit body HTML (content always empty string). */
+  private toListDto(row: PostEntity): PostResponseDto {
+    return {
+      ...this.toDto(row),
+      content: '',
+    };
+  }
+
   private toDto(row: PostEntity): PostResponseDto {
     return {
       id: row.id,
       title: row.title,
-      content: row.content,
+      content: row.content ?? '',
       summary: row.summary,
       authorId: row.author?.id,
       authorName: row.author?.fullName ?? row.author?.email ?? 'Unknown',
@@ -280,6 +341,13 @@ export class PostsService {
       return PostsService.DEFAULT_LIMIT;
     }
     return Math.min(limit, PostsService.DEFAULT_LIMIT);
+  }
+
+  private sanitizePageSize(size: number): number {
+    if (!Number.isFinite(size) || size <= 0) {
+      return PostsService.DEFAULT_ADMIN_PAGE_SIZE;
+    }
+    return Math.min(size, PostsService.DEFAULT_LIMIT);
   }
 
   /** Seeded display views when a post is first published (8000–12000). */

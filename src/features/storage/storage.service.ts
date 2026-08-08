@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { R2StorageService } from '../../shared/services/r2-storage.service';
 import { assertSafeKey } from '../../shared/services/storage-key.util';
+import { hasUploadedContent } from '../../shared/uploads/uploaded-file.util';
 
 @Injectable()
 export class StorageService {
@@ -23,11 +24,16 @@ export class StorageService {
     filename: string,
     file: Express.Multer.File,
   ) {
-    if (!file?.buffer?.length) {
+    if (!hasUploadedContent(file)) {
       throw new BadRequestException('File is required');
     }
     try {
-      return this.r2.upload(prefix ?? '', filename, file.buffer, file.mimetype);
+      return this.r2.uploadFile(
+        prefix ?? '',
+        filename,
+        file,
+        file.mimetype,
+      );
     } catch (error) {
       throw new BadRequestException((error as Error).message);
     }

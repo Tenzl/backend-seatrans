@@ -32,9 +32,6 @@ export interface CargoAgencyRate {
   rate: number;
 }
 
-/** @deprecated use GrtTier. */
-export type AgencyFeeTier = GrtTier;
-
 export interface EpdaParameterValues {
   hours: {
     berthHours: number;

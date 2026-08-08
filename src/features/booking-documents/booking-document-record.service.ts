@@ -4,7 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DeepPartial, IsNull, Repository } from 'typeorm';
+import { DeepPartial, EntityManager, IsNull, Repository } from 'typeorm';
+import { saveWithOptimisticLock } from '../../shared/utils/optimistic-lock';
 import { BookingDocumentPayload } from './booking-document.types';
 import { ArrivalNoticePreviewDto } from './dto/arrival-notice-preview.dto';
 import { BillOfLadingPreviewDto } from './dto/bill-of-lading-preview.dto';
@@ -22,7 +23,6 @@ import { BookingFlow } from './enums/booking-flow.enum';
 const WORKFLOW_TYPES: Record<BookingFlow, BookingDocumentType[]> = {
   [BookingFlow.EXPORT]: [
     BookingDocumentType.BOOKING_CONFIRMATION,
-    BookingDocumentType.ARRIVAL_NOTICE,
     BookingDocumentType.BILL_OF_LADING,
   ],
   [BookingFlow.IMPORT]: [
@@ -33,7 +33,9 @@ const WORKFLOW_TYPES: Record<BookingFlow, BookingDocumentType[]> = {
 };
 
 type ChildRecord =
-  ArrivalNoticeRecord | DeliveryOrderRecord | BillOfLadingRecord;
+  | ArrivalNoticeRecord
+  | DeliveryOrderRecord
+  | BillOfLadingRecord;
 type DocumentRecord = BookingRecord | ChildRecord;
 type WorkflowFields = {
   bookingFlow?: BookingFlow;
@@ -59,10 +61,15 @@ export class BookingDocumentRecordService {
     createdByUserId: number,
     status: BookingDocumentStatus = BookingDocumentStatus.PROCESSING,
     workflow: WorkflowFields = {},
+    manager?: EntityManager,
   ) {
-    const workflowFields = await this.resolveWorkflowFields(type, workflow);
+    const workflowFields = await this.resolveWorkflowFields(
+      type,
+      workflow,
+      manager,
+    );
     const snapshot = this.clonePayload(type, payload);
-    const repository = this.repository(type);
+    const repository = this.repository(type, manager);
     const record = repository.create({
       payload: snapshot,
       status,
@@ -72,7 +79,13 @@ export class BookingDocumentRecordService {
     } as DeepPartial<BookingDocumentRecordBase>);
 
     try {
-      return this.toResponse(type, await repository.save(record));
+      return this.toResponse(
+        type,
+        await saveWithOptimisticLock(
+          () => repository.save(record),
+          'Document record was modified concurrently; reload and retry',
+        ),
+      );
     } catch (error) {
       const databaseCode = (error as { driverError?: { code?: string } } | null)
         ?.driverError?.code;
@@ -85,17 +98,25 @@ export class BookingDocumentRecordService {
     }
   }
 
-  async getById(type: BookingDocumentType, id: number) {
-    const record = await this.findActiveOrFail(type, id, true);
+  async getById(
+    type: BookingDocumentType,
+    id: number,
+    manager?: EntityManager,
+  ) {
+    const record = await this.findActiveOrFail(type, id, true, manager);
     return this.toResponse(type, record);
   }
 
   /** Active child document for a booking, or null when none exists. */
-  async findActiveByBookingId(type: BookingDocumentType, bookingId: number) {
+  async findActiveByBookingId(
+    type: BookingDocumentType,
+    bookingId: number,
+    manager?: EntityManager,
+  ) {
     if (type === BookingDocumentType.BOOKING_CONFIRMATION) {
-      return this.getById(type, bookingId);
+      return this.getById(type, bookingId, manager);
     }
-    const record = await this.repository(type).findOne({
+    const record = await this.repository(type, manager).findOne({
       where: { bookingId, deletedAt: IsNull() } as never,
     });
     return record ? this.toResponse(type, record) : null;
@@ -151,55 +172,120 @@ export class BookingDocumentRecordService {
     payload: BookingDocumentPayload,
     actorUserId: number,
     status?: BookingDocumentStatus,
+    manager?: EntityManager,
   ) {
-    const record = await this.findActiveOrFail(type, id);
-    await this.assertMutable(type, record);
+    const record = await this.findActiveOrFail(type, id, false, manager);
+    await this.assertMutable(type, record, manager);
 
     record.payload = this.clonePayload(type, payload);
     record.updatedByUserId = actorUserId;
     if (status) record.status = status;
 
-    return this.toResponse(type, await this.repository(type).save(record));
+    return this.toResponse(
+      type,
+      await saveWithOptimisticLock(
+        () => this.repository(type, manager).save(record),
+        'Document record was modified concurrently; reload and retry',
+      ),
+    );
   }
 
-  async complete(type: BookingDocumentType, id: number, actorUserId: number) {
-    const record = await this.findActiveOrFail(type, id);
-    await this.assertMutable(type, record);
+  async complete(
+    type: BookingDocumentType,
+    id: number,
+    actorUserId: number,
+    manager?: EntityManager,
+  ) {
+    const record = await this.findActiveOrFail(type, id, false, manager);
+    await this.assertMutable(type, record, manager);
     record.status = BookingDocumentStatus.COMPLETED;
     record.updatedByUserId = actorUserId;
-    return this.toResponse(type, await this.repository(type).save(record));
+    return this.toResponse(
+      type,
+      await saveWithOptimisticLock(
+        () => this.repository(type, manager).save(record),
+        'Document record was modified concurrently; reload and retry',
+      ),
+    );
   }
 
-  async lock(type: BookingDocumentType, id: number, actorUserId: number) {
-    const record = await this.findActiveOrFail(type, id);
+  async lock(
+    type: BookingDocumentType,
+    id: number,
+    actorUserId: number,
+    manager?: EntityManager,
+  ) {
+    const record = await this.findActiveOrFail(type, id, false, manager);
     if (record.lockedAt) {
       throw new ConflictException('Document record is already locked');
     }
     record.lockedAt = new Date();
     record.updatedByUserId = actorUserId;
-    return this.toResponse(type, await this.repository(type).save(record));
+    try {
+      return this.toResponse(
+        type,
+        await saveWithOptimisticLock(
+          () => this.repository(type, manager).save(record),
+          'Document record was modified concurrently; reload and retry',
+        ),
+      );
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        const fresh = await this.findActiveOrFail(type, id, false, manager);
+        if (fresh.lockedAt) {
+          throw new ConflictException('Document record is already locked');
+        }
+      }
+      throw error;
+    }
   }
 
-  async unlock(type: BookingDocumentType, id: number, actorUserId: number) {
-    const record = await this.findActiveOrFail(type, id);
+  async unlock(
+    type: BookingDocumentType,
+    id: number,
+    actorUserId: number,
+    manager?: EntityManager,
+  ) {
+    const record = await this.findActiveOrFail(type, id, false, manager);
     if (!record.lockedAt) {
       throw new ConflictException('Document record is not locked');
     }
     record.lockedAt = null;
     record.updatedByUserId = actorUserId;
-    return this.toResponse(type, await this.repository(type).save(record));
+    return this.toResponse(
+      type,
+      await saveWithOptimisticLock(
+        () => this.repository(type, manager).save(record),
+        'Document record was modified concurrently; reload and retry',
+      ),
+    );
   }
 
-  async archive(type: BookingDocumentType, id: number, actorUserId: number) {
-    const record = await this.findActiveOrFail(type, id);
+  async archive(
+    type: BookingDocumentType,
+    id: number,
+    actorUserId: number,
+    manager?: EntityManager,
+  ) {
+    const record = await this.findActiveOrFail(type, id, false, manager);
     record.deletedAt = new Date();
     record.deletedByUserId = actorUserId;
     record.updatedByUserId = actorUserId;
-    return this.toResponse(type, await this.repository(type).save(record));
+    return this.toResponse(
+      type,
+      await saveWithOptimisticLock(
+        () => this.repository(type, manager).save(record),
+        'Document record was modified concurrently; reload and retry',
+      ),
+    );
   }
 
-  async hardDelete(type: BookingDocumentType, id: number): Promise<void> {
-    const repository = this.repository(type);
+  async hardDelete(
+    type: BookingDocumentType,
+    id: number,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const repository = this.repository(type, manager);
     const record = await repository.findOne({ where: { id } });
     if (!record) throw new NotFoundException('Document record not found');
     await repository.remove(record);
@@ -227,7 +313,20 @@ export class BookingDocumentRecordService {
 
   private repository(
     type: BookingDocumentType,
+    manager?: EntityManager,
   ): Repository<BookingDocumentRecordBase> {
+    if (manager) {
+      switch (type) {
+        case BookingDocumentType.BOOKING_CONFIRMATION:
+          return manager.getRepository(BookingRecord);
+        case BookingDocumentType.ARRIVAL_NOTICE:
+          return manager.getRepository(ArrivalNoticeRecord);
+        case BookingDocumentType.DELIVERY_ORDER:
+          return manager.getRepository(DeliveryOrderRecord);
+        case BookingDocumentType.BILL_OF_LADING:
+          return manager.getRepository(BillOfLadingRecord);
+      }
+    }
     switch (type) {
       case BookingDocumentType.BOOKING_CONFIRMATION:
         return this.bookingRepository;
@@ -244,8 +343,9 @@ export class BookingDocumentRecordService {
     type: BookingDocumentType,
     id: number,
     withCreator = false,
+    manager?: EntityManager,
   ): Promise<DocumentRecord> {
-    const record = await this.repository(type).findOne({
+    const record = await this.repository(type, manager).findOne({
       where: { id, deletedAt: IsNull() },
       relations: withCreator ? { createdBy: true } : undefined,
     });
@@ -256,6 +356,7 @@ export class BookingDocumentRecordService {
   private async assertMutable(
     type: BookingDocumentType,
     record: DocumentRecord,
+    manager?: EntityManager,
   ) {
     if (record.lockedAt) {
       throw new ConflictException(
@@ -273,6 +374,8 @@ export class BookingDocumentRecordService {
         const booking = await this.findActiveOrFail(
           BookingDocumentType.BOOKING_CONFIRMATION,
           bookingId,
+          false,
+          manager,
         );
         if (booking.lockedAt) {
           throw new ConflictException(
@@ -286,6 +389,7 @@ export class BookingDocumentRecordService {
   private async resolveWorkflowFields(
     type: BookingDocumentType,
     workflow: WorkflowFields,
+    manager?: EntityManager,
   ): Promise<{ bookingFlow?: BookingFlow; bookingId?: number | null }> {
     if (type === BookingDocumentType.BOOKING_CONFIRMATION) {
       if (workflow.bookingId) {
@@ -301,15 +405,21 @@ export class BookingDocumentRecordService {
     const booking = (await this.findActiveOrFail(
       BookingDocumentType.BOOKING_CONFIRMATION,
       workflow.bookingId,
+      false,
+      manager,
     )) as BookingRecord;
-    await this.assertMutable(BookingDocumentType.BOOKING_CONFIRMATION, booking);
+    await this.assertMutable(
+      BookingDocumentType.BOOKING_CONFIRMATION,
+      booking,
+      manager,
+    );
     if (!WORKFLOW_TYPES[booking.bookingFlow].includes(type)) {
       throw new ConflictException(
         `${type.toUpperCase()} is not part of the ${booking.bookingFlow.toLowerCase()} workflow`,
       );
     }
 
-    const repository = this.repository(type);
+    const repository = this.repository(type, manager);
     const existing = await repository.findOne({
       where: { bookingId: workflow.bookingId, deletedAt: IsNull() } as never,
     });
@@ -319,12 +429,12 @@ export class BookingDocumentRecordService {
       );
     }
 
-    if (
-      type === BookingDocumentType.BILL_OF_LADING ||
-      type === BookingDocumentType.DELIVERY_ORDER
-    ) {
-      const arrivalNotice = await this.arrivalNoticeRepository.findOne({
-        where: { bookingId: workflow.bookingId, deletedAt: IsNull() },
+    if (type === BookingDocumentType.DELIVERY_ORDER) {
+      const arrivalNotice = await this.repository(
+        BookingDocumentType.ARRIVAL_NOTICE,
+        manager,
+      ).findOne({
+        where: { bookingId: workflow.bookingId, deletedAt: IsNull() } as never,
       });
       if (!arrivalNotice) {
         throw new ConflictException(
@@ -393,6 +503,7 @@ export class BookingDocumentRecordService {
       referenceNumber: this.referenceNumber(type, record.payload),
       payload: record.payload,
       status: record.status,
+      version: Number(record.version ?? 1),
       createdByUserId: record.createdByUserId,
       createdAt: record.createdAt.toISOString(),
       updatedAt:

@@ -16,6 +16,7 @@ import type { Request } from 'express';
 import { InquiryDocumentService } from '../services/inquiry-document.service';
 import { DocumentByTypeQueryDto } from '../dto/document-by-type-query.dto';
 import { CloudinaryService } from '../../../shared/services/cloudinary.service';
+import { sanitizeAttachmentFilename } from '../../../shared/uploads/inquiry-file-validation';
 
 type AuthenticatedUser = {
   id?: number | string;
@@ -123,11 +124,34 @@ export class InquiryDocumentController {
       throw new NotFoundException('Document file not found');
     }
 
+    const downloadName = sanitizeAttachmentFilename(
+      doc.originalFileName || doc.fileName || 'document',
+    );
+
+    // SEC-03 download guidance: force attachment + nosniff on this hop.
+    // Cloudinary fl_attachment reinforces disposition on the final object.
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${downloadName}"`,
+    );
+    res.setHeader('Content-Type', doc.mimeType || 'application/octet-stream');
+
     // Prefer short-lived signed authenticated URL (prevents link sharing).
     const signed = doc.cloudinaryPublicId?.trim()
-      ? this.cloudinaryService.buildSignedRawUrl(doc.cloudinaryPublicId, 60)
+      ? this.cloudinaryService.buildSignedRawUrl(
+          doc.cloudinaryPublicId,
+          60,
+          downloadName,
+        )
       : null;
-    res.redirect(302, this.buildCloudinaryPdfUrl(signed ?? doc.cloudinaryUrl));
+    res.redirect(
+      302,
+      this.buildCloudinaryPdfUrl(
+        signed ?? doc.cloudinaryUrl,
+        downloadName,
+      ),
+    );
   }
 
   private normalizeServiceSlug(value: string): string {
@@ -147,13 +171,25 @@ export class InquiryDocumentController {
     return normalized;
   }
 
-  private buildCloudinaryPdfUrl(storedUrl: string): string {
+  private buildCloudinaryPdfUrl(
+    storedUrl: string,
+    attachmentFilename?: string,
+  ): string {
     if (!storedUrl?.trim()) {
       return storedUrl;
     }
-    if (storedUrl.includes('/raw/upload/')) {
-      return storedUrl;
+    let url = storedUrl.includes('/raw/upload/')
+      ? storedUrl
+      : storedUrl.replace('/image/upload/', '/raw/upload/');
+
+    if (
+      attachmentFilename &&
+      url.includes('/upload/') &&
+      !url.includes('fl_attachment')
+    ) {
+      const safe = sanitizeAttachmentFilename(attachmentFilename);
+      url = url.replace('/upload/', `/upload/fl_attachment:${safe}/`);
     }
-    return storedUrl.replace('/image/upload/', '/raw/upload/');
+    return url;
   }
 }

@@ -1,5 +1,7 @@
 -- Seed one complete EXPORT workflow and one complete IMPORT workflow
--- for transport-document UI testing (Booking Confirmation → AN → BL/DO).
+-- for transport-document UI testing:
+--   EXPORT: Booking Confirmation → BL (no AN)
+--   IMPORT: Booking Confirmation → AN → DO
 --
 -- Idempotent: skips when SAMPLE-EXP-BK / SAMPLE-IMP-BK already exist
 -- (active rows, deleted_at IS NULL).
@@ -64,49 +66,6 @@ BEGIN
       'COMPLETED', actor_id, actor_id, NOW(), NOW()
     )
     RETURNING id INTO export_booking_id;
-
-    INSERT INTO booking_document_records (
-      document_type, booking_flow, booking_id, reference_number, payload,
-      status, created_by_user_id, updated_by_user_id, created_at, updated_at
-    ) VALUES (
-      'an', NULL, export_booking_id, 'SAMPLE-EXP-AN',
-      jsonb_build_object(
-        'agent', 'SEATRANS DA NANG',
-        'date', '04/08/2026',
-        'anNumber', 'SAMPLE-EXP-AN',
-        'shipper', E'AN THINH STONE CO., LTD\n92 HAI BA TRUNG STREET, QUY NHON WARD, GIA LAI PROVINCE, VIETNAM',
-        'consignee', E'SEKIGAHARA STONE CO., LTD.\n2682 SEKIGAHARA, FUWA-GUN, GIFU-KEN, 503-1595 JAPAN',
-        'notifyParty', E'SEKIGAHARA STONE CO., LTD.\n2682 SEKIGAHARA, FUWA-GUN, GIFU-KEN, 503-1595 JAPAN',
-        'mblNumber', 'SITC-MBL-EXP-001',
-        'hblNumber', 'STVN-260607',
-        'vesselVoyage', 'SITC MINHE / 2615N',
-        'etdEta', '14/06/2026 / 22/06/2026',
-        'cfsTerminal', 'HAKATA CFS',
-        'shipmentNumber', 'SAMPLE-EXP-BK',
-        'referenceNumber', 'SAMPLE-EXP-BK',
-        'billOfLadingType', 'Surrendered',
-        'placeOfReceipt', 'QUI NHON, VN (VNUIH)',
-        'portOfLoading', 'DA NANG, VN (VNDAD)',
-        'portOfDischarge', 'HAKATA, FUKUOKA, JP (JPHKT)',
-        'placeOfDelivery', 'HAKATA, FUKUOKA, JP (JPHKT)',
-        'finalDestination', 'HAKATA, FUKUOKA, JP (JPHKT)',
-        'serviceMode', 'FCL/FCL - CY/CY',
-        'note', 'SAMPLE EXPORT Arrival Notice',
-        'marks', E'FCL/FCL - CY/CY\nSITU2631620 / SITR892044 / 20''DC\nN/M',
-        'volume', '1x20''DC',
-        'customerAttention', 'Please arrange customs clearance upon arrival.',
-        'cargoRows', jsonb_build_array(
-          jsonb_build_object(
-            'containerSealNumber', 'SITU2631620 / SITR892044',
-            'quantity', '20 PALLET(S)',
-            'descriptionOfGoods', E'AT SHIPPER''S LOAD, COUNT, STOW & SEAL\nGRANITE STONES, BASALT STONES\nHS CODE: 68010000',
-            'grossWeight', '20,700 KGS',
-            'measurement', '7.26 CBM'
-          )
-        )
-      ),
-      'COMPLETED', actor_id, actor_id, NOW(), NOW()
-    );
 
     INSERT INTO booking_document_records (
       document_type, booking_flow, booking_id, reference_number, payload,

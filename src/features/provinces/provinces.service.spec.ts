@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ProvincesService } from './provinces.service';
 import { Province } from './entities/province.entity';
+import { ShortTtlCacheService } from '../../shared/redis/short-ttl-cache.service';
 
 describe('ProvincesService', () => {
   let service: ProvincesService;
@@ -11,6 +12,15 @@ describe('ProvincesService', () => {
       providers: [
         ProvincesService,
         { provide: getRepositoryToken(Province), useValue: {} },
+        {
+          provide: ShortTtlCacheService,
+          useValue: {
+            isEnabled: () => false,
+            getJson: async () => null,
+            setJson: async () => undefined,
+            deleteByPrefix: async () => undefined,
+          },
+        },
       ],
     }).compile();
 

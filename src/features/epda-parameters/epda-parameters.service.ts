@@ -118,10 +118,16 @@ export class EpdaParametersService {
     return repository.findOne({ where: { scope: 'PORT', portId } });
   }
 
-  async getPortOverride(portId: number): Promise<EpdaParameterSet | null> {
-    const row = await this.findPortOverride(portId);
+  async getPortOverride(
+    portId: number,
+    manager?: EntityManager,
+  ): Promise<EpdaParameterSet | null> {
+    const repository = manager
+      ? manager.getRepository(EpdaParameterSet)
+      : this.repo;
+    const row = await this.findPortOverride(portId, repository);
     if (!row) return null;
-    const area = await this.resolvePortArea(portId);
+    const area = await this.resolvePortArea(portId, manager);
     return Object.assign(row, { area });
   }
 
@@ -181,8 +187,14 @@ export class EpdaParametersService {
     });
   }
 
-  private async resolvePortArea(portId: number): Promise<EpdaAreaKey | null> {
-    const port = await this.portRepo.findOne({
+  private async resolvePortArea(
+    portId: number,
+    manager?: EntityManager,
+  ): Promise<EpdaAreaKey | null> {
+    const portRepository = manager
+      ? manager.getRepository(Port)
+      : this.portRepo;
+    const port = await portRepository.findOne({
       where: { id: portId },
       relations: { province: true },
     });
@@ -295,18 +307,24 @@ export class EpdaParametersService {
 
   // ---------- port groups (named set of ports inside an area) ----------
 
-  async listGroups(area: string): Promise<EpdaParameterSet[]> {
+  async listGroups(
+    area: string,
+    manager?: EntityManager,
+  ): Promise<EpdaParameterSet[]> {
     const canonicalArea = normalizeEpdaAreaKey(area);
     if (!canonicalArea) {
       throw new BadRequestException(`Invalid EPDA area: ${area}`);
     }
-    const rows = await this.repo
+    const repository = manager
+      ? manager.getRepository(EpdaParameterSet)
+      : this.repo;
+    const rows = await repository
       .createQueryBuilder('epda')
       .where(`epda.scope = 'GROUP'`)
       .andWhere('epda.area = :canonicalArea', { canonicalArea })
       .orderBy('epda.name', 'ASC')
       .getMany();
-    return this.hydrateRows(rows);
+    return this.hydrateRows(rows, manager ?? this.repo.manager);
   }
 
   getGroup(id: number): Promise<EpdaParameterSet | null> {
@@ -317,13 +335,15 @@ export class EpdaParametersService {
   async findGroupForPort(
     area: string,
     portId: number,
+    manager?: EntityManager,
   ): Promise<EpdaParameterSet | null> {
-    const membership = await this.repo.manager
-      .getRepository(EpdaParameterGroupMember)
-      .findOne({
-        where: { portId },
-        relations: { group: true },
-      });
+    const membershipRepository = manager
+      ? manager.getRepository(EpdaParameterGroupMember)
+      : this.repo.manager.getRepository(EpdaParameterGroupMember);
+    const membership = await membershipRepository.findOne({
+      where: { portId },
+      relations: { group: true },
+    });
     if (
       membership?.group &&
       normalizeEpdaAreaKey(membership.group.area) === normalizeEpdaAreaKey(area)
@@ -332,7 +352,7 @@ export class EpdaParametersService {
         memberPortIds: [portId],
       });
     }
-    const groups = await this.listGroups(area);
+    const groups = await this.listGroups(area, manager);
     return groups.find((g) => (g.memberPortIds ?? []).includes(portId)) ?? null;
   }
 
@@ -649,10 +669,14 @@ export class EpdaParametersService {
   /**
    * Resolved values used by the EPDA form. Layers (later wins):
    * area set → group override (if the port belongs to a group) → port override.
+   *
+   * Pass `manager` when calling from an open transaction so reads stay on the
+   * same connection (avoids pool dual-checkout while a row lock is held).
    */
   async getEffective(
     area?: string,
     portId?: number,
+    manager?: EntityManager,
   ): Promise<EpdaParameterValues> {
     const requestedArea = normalizeEpdaAreaKey(area);
     if (area?.trim() && !requestedArea) {
@@ -664,7 +688,7 @@ export class EpdaParametersService {
     let normalizedArea = requestedArea;
 
     if (portId != null) {
-      const derivedArea = await this.resolvePortArea(portId);
+      const derivedArea = await this.resolvePortArea(portId, manager);
       if (!derivedArea) {
         throw new BadRequestException(
           `Port ${portId} is not assigned to an EPDA area`,
@@ -681,11 +705,22 @@ export class EpdaParametersService {
     if (!normalizedArea)
       throw new BadRequestException('A valid EPDA area or portId is required');
     const [areaSet, groupSet, portSet] = await Promise.all([
-      this.getAreaSet(normalizedArea),
+      manager
+        ? this.getAreaSet(
+            normalizedArea,
+            manager.getRepository(EpdaParameterSet),
+          )
+        : this.getAreaSet(normalizedArea),
       portId
-        ? this.findGroupForPort(normalizedArea, portId)
+        ? manager
+          ? this.findGroupForPort(normalizedArea, portId, manager)
+          : this.findGroupForPort(normalizedArea, portId)
         : Promise.resolve(null),
-      portId ? this.getPortOverride(portId) : Promise.resolve(null),
+      portId
+        ? manager
+          ? this.getPortOverride(portId, manager)
+          : this.getPortOverride(portId)
+        : Promise.resolve(null),
     ]);
     return resolveEpdaParameterValues(
       normalizedArea,

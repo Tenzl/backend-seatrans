@@ -5,6 +5,7 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  Headers,
   Param,
   ParseIntPipe,
   Post,
@@ -23,6 +24,12 @@ import { PublicInquiryRequestDto } from '../dto/public-inquiry-request.dto';
 import { DeleteInquiriesDto } from '../dto/delete-inquiries.dto';
 import { PublicDeleteInquiriesQueryDto } from '../dto/delete-inquiries-query.dto';
 import { validateDto } from '../../../shared/utils/validate-dto.util';
+import { INQUIRY_UPLOAD_LIMITS } from '../../../shared/uploads/upload-limits';
+import { buildMultipartUploadOptions } from '../../../shared/uploads/multipart-upload.options';
+import { UploadConcurrencyInterceptor } from '../../../shared/uploads/upload-concurrency.interceptor';
+import { CleanupUploadedFilesInterceptor } from '../../../shared/uploads/cleanup-uploaded-files.interceptor';
+import { readUploadedFileBuffer } from '../../../shared/uploads/uploaded-file.util';
+import { inquiryAttachmentFileFilter } from '../../../shared/uploads/inquiry-file-validation';
 
 type AuthenticatedRequest = Request & {
   user?: {
@@ -51,14 +58,19 @@ export class PublicInquiryController {
 
   @UseGuards(AuthGuard('jwt'))
   @UseInterceptors(
+    UploadConcurrencyInterceptor,
+    CleanupUploadedFilesInterceptor,
     FileFieldsInterceptor(
       [
         { name: 'inquiry', maxCount: 1 },
-        { name: 'files', maxCount: 10 },
+        { name: 'files', maxCount: INQUIRY_UPLOAD_LIMITS.maxAttachmentFiles },
       ],
-      {
-        limits: { fileSize: 12 * 1024 * 1024, files: 11 },
-      },
+      buildMultipartUploadOptions({
+        maxFileSize: INQUIRY_UPLOAD_LIMITS.maxFileSize,
+        maxFiles: INQUIRY_UPLOAD_LIMITS.maxFiles,
+        maxTotalBytes: INQUIRY_UPLOAD_LIMITS.maxTotalBytes,
+        fileFilter: inquiryAttachmentFileFilter,
+      }),
     ),
   )
   @Post()
@@ -72,6 +84,7 @@ export class PublicInquiryController {
       | undefined,
     @Body() body: Record<string, unknown>,
     @Req() req: AuthenticatedRequest,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     const currentUserId = req.user?.id;
     if (!currentUserId) {
@@ -79,13 +92,17 @@ export class PublicInquiryController {
     }
 
     const uploads = filesByField ?? {};
-    const parsedInquiry = this.parseInquiryPayload(body, uploads.inquiry?.[0]);
+    const parsedInquiry = await this.parseInquiryPayload(
+      body,
+      uploads.inquiry?.[0],
+    );
     const payload = await validateDto(PublicInquiryRequestDto, parsedInquiry);
 
     return this.inquiryService.submitInquiry(
       payload,
       uploads.files ?? [],
       currentUserId,
+      idempotencyKey,
     );
   }
 
@@ -108,17 +125,16 @@ export class PublicInquiryController {
     );
   }
 
-  private parseInquiryPayload(
+  private async parseInquiryPayload(
     body: Record<string, unknown>,
     inquiryFile?: Express.Multer.File,
-  ): Record<string, unknown> {
-    if (inquiryFile?.buffer?.length) {
+  ): Promise<Record<string, unknown>> {
+    if (inquiryFile) {
       try {
-        return JSON.parse(inquiryFile.buffer.toString('utf-8')) as Record<
-          string,
-          unknown
-        >;
-      } catch {
+        const buffer = await readUploadedFileBuffer(inquiryFile);
+        return JSON.parse(buffer.toString('utf-8')) as Record<string, unknown>;
+      } catch (error) {
+        if (error instanceof BadRequestException) throw error;
         throw new BadRequestException('Invalid inquiry payload format');
       }
     }

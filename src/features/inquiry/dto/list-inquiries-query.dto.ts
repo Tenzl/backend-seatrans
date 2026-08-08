@@ -1,12 +1,15 @@
 import { Transform, Type, type TransformFnParams } from 'class-transformer';
 import {
+  IsDateString,
   IsEnum,
   IsIn,
   IsInt,
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { InquiryStatus } from '../enums/inquiry-status.enum';
 
@@ -25,6 +28,20 @@ export class ListInquiriesQueryDto {
   @Min(1)
   @Max(100)
   size?: number = 20;
+
+  /**
+   * Keyset cursor (pair with cursorId). When both are set, list uses
+   * (submitted_at, id) keyset instead of OFFSET — preferred for deep pages.
+   */
+  @IsOptional()
+  @IsDateString()
+  cursorSubmittedAt?: string;
+
+  @ValidateIf((o: ListInquiriesQueryDto) => o.cursorSubmittedAt != null)
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  cursorId?: number;
 
   /** Display name, e.g. `SHIPPING AGENCY` */
   @IsOptional()
@@ -49,6 +66,28 @@ export class ListInquiriesQueryDto {
   @IsOptional()
   @IsEnum(InquiryStatus)
   status?: InquiryStatus;
+
+  /**
+   * Free-text search over code, full name, company, email, status, and
+   * shipping-agency MV (server-side; drives totalElements).
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Transform(({ value }: TransformFnParams) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  q?: string;
+
+  /** Inclusive lower bound on submitted_at (ISO-8601). */
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  /** Inclusive upper bound on submitted_at (ISO-8601). */
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
 
   /**
    * Admin-only list filter:

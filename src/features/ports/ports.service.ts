@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -14,8 +15,6 @@ import { CreatePortDto } from './dto/create-port.dto';
 import type { ListPortsFilters } from './dto/list-ports-filters';
 import { ListPortsQueryDto } from './dto/list-ports-query.dto';
 import { normalizeProvinceAreaCode } from '../provinces/province-area';
-import { EpdaParameterGroupMember } from '../epda-parameters/entities/epda-parameter-group-member.entity';
-import { EpdaParameterSet } from '../epda-parameters/entities/epda-parameter-set.entity';
 import {
   normalizePortName,
   normalizePortOfCall,
@@ -23,6 +22,12 @@ import {
   toPortDto,
 } from './port-normalization';
 import { DEFAULT_PORT_LIST_LIMIT, PortsQuery } from './ports-query';
+import {
+  EPDA_PORT_MEMBERSHIP_READER,
+  type EpdaPortMembershipReader,
+} from './epda-port-membership.reader';
+import { PUBLIC_PROVINCES_CACHE_PREFIX } from '../provinces/provinces.service';
+import { ShortTtlCacheService } from '../../shared/redis/short-ttl-cache.service';
 
 @Injectable()
 export class PortsService {
@@ -33,10 +38,9 @@ export class PortsService {
     private readonly portRepository: Repository<Port>,
     @InjectRepository(Province)
     private readonly provinceRepository: Repository<Province>,
-    @InjectRepository(EpdaParameterGroupMember)
-    private readonly epdaGroupMemberRepository: Repository<EpdaParameterGroupMember>,
-    @InjectRepository(EpdaParameterSet)
-    private readonly epdaParameterSetRepository: Repository<EpdaParameterSet>,
+    @Inject(EPDA_PORT_MEMBERSHIP_READER)
+    private readonly epdaMembershipReader: EpdaPortMembershipReader,
+    private readonly cache: ShortTtlCacheService,
   ) {
     this.query = new PortsQuery(portRepository);
   }
@@ -117,6 +121,7 @@ export class PortsService {
     });
 
     const savedPort = await this.portRepository.save(port);
+    await this.invalidateProvincesPublicCache();
     return toPortDto(savedPort);
   }
 
@@ -176,6 +181,7 @@ export class PortsService {
     }
 
     const updatedPort = await this.portRepository.save(port);
+    await this.invalidateProvincesPublicCache();
     return toPortDto(updatedPort);
   }
 
@@ -200,6 +206,12 @@ export class PortsService {
       throw new NotFoundException('Port not found');
     }
     await this.portRepository.delete(id);
+    await this.invalidateProvincesPublicCache();
+  }
+
+  private async invalidateProvincesPublicCache(): Promise<void> {
+    // Active provinces list excludes empty provinces; port CRUD can change that.
+    await this.cache.deleteByPrefix(PUBLIC_PROVINCES_CACHE_PREFIX);
   }
 
   private async resolveProvince(provinceId?: number): Promise<Province | null> {
@@ -226,29 +238,11 @@ export class PortsService {
     const nextArea = normalizeProvinceAreaCode(nextProvince?.area ?? null);
     if (currentArea === nextArea) return;
 
-    const membership = await this.epdaGroupMemberRepository.findOne({
-      where: { portId: port.id },
-      relations: { group: true },
-    });
-    // Keep checking JSONB during the membership-table compatibility window.
-    const legacyGroup = membership
-      ? null
-      : await this.epdaParameterSetRepository
-          .createQueryBuilder('parameterSet')
-          .where(`parameterSet.scope = 'GROUP'`)
-          .andWhere('parameterSet.memberPortIds @> :portIds::jsonb', {
-            portIds: JSON.stringify([port.id]),
-          })
-          .getOne();
-    if (!membership && !legacyGroup) return;
+    const groupLabel = await this.epdaMembershipReader.findGroupLabel(port.id);
+    if (!groupLabel) return;
 
     throw new ConflictException(
-      `Port belongs to EPDA group ${
-        membership?.group?.name ??
-        membership?.groupId ??
-        legacyGroup?.name ??
-        legacyGroup?.id
-      }; remove it from the group before changing area`,
+      `Port belongs to EPDA group ${groupLabel}; remove it from the group before changing area`,
     );
   }
 

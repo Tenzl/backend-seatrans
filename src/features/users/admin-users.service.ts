@@ -13,10 +13,15 @@ import { Role } from '../auth/entities/role.entity';
 import { RoleGroup } from '../auth/enums/role-group.enum';
 import { AdminUserRowDto } from './dto/admin-user-row.dto';
 import { AdminRoleOptionDto } from './dto/admin-role-option.dto';
+import { AdminPicOptionDto } from './dto/admin-pic-option.dto';
 import { CreateInternalUserDto } from './dto/create-internal-user.dto';
+import { buildPaginatedResponse } from '../../shared/dto/pagination.dto';
+import { API_MAX_PAGE_SIZE } from '../../shared/dto/list-query.dto';
+import { buildContainsLikePattern } from '../../shared/utils/like-pattern';
 
 @Injectable()
 export class AdminUsersService {
+  private static readonly DEFAULT_PAGE_SIZE = 20;
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
@@ -40,25 +45,83 @@ export class AdminUsersService {
     );
   }
 
-  async listUsers(params: {
+  /**
+   * Lightweight INTERNAL + active users for booking Person In Charge pickers.
+   * Selects only display fields (never password) and filters isActive in SQL.
+   */
+  async listPicOptions(params: {
     q?: string;
-    roleGroup?: RoleGroup;
-    roleName?: string;
     limit?: number;
-  }): Promise<AdminUserRowDto[]> {
-    const limit = Math.min(Math.max(params.limit ?? 100, 1), 200);
+  }): Promise<AdminPicOptionDto[]> {
+    const limit = Math.min(Math.max(params.limit ?? 50, 1), 100);
 
     const qb = this.userRepository
       .createQueryBuilder('user')
-      .leftJoinAndSelect('user.role', 'role')
-      .orderBy('user.createdAt', 'DESC')
+      .innerJoin('user.role', 'role')
+      .select([
+        'user.id',
+        'user.email',
+        'user.fullName',
+        'role.id',
+        'role.name',
+      ])
+      .where('user.isActive = true')
+      .andWhere('role.roleGroup = :roleGroup', {
+        roleGroup: RoleGroup.INTERNAL,
+      })
+      .orderBy('user.fullName', 'ASC')
+      .addOrderBy('user.email', 'ASC')
       .take(limit);
 
     const term = params.q?.trim();
     if (term) {
       qb.andWhere(
-        "(LOWER(user.email) LIKE :term OR LOWER(COALESCE(user.fullName, '')) LIKE :term OR LOWER(COALESCE(user.company, '')) LIKE :term)",
+        "(LOWER(user.email) LIKE :term OR LOWER(COALESCE(user.fullName, '')) LIKE :term)",
         { term: `%${term.toLowerCase()}%` },
+      );
+    }
+
+    const rows = await qb.getMany();
+    return rows.map((row) =>
+      AdminPicOptionDto.from({
+        id: row.id,
+        email: row.email,
+        fullName: row.fullName ?? null,
+        roleName: row.role?.name ?? null,
+      }),
+    );
+  }
+
+  async listUsers(params: {
+    q?: string;
+    roleGroup?: RoleGroup;
+    roleName?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const page = Math.max(0, Number(params.page ?? 0));
+    const limit = Math.min(
+      Math.max(
+        Number(params.limit ?? AdminUsersService.DEFAULT_PAGE_SIZE),
+        1,
+      ),
+      API_MAX_PAGE_SIZE,
+    );
+
+    const qb = this.userRepository
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.role', 'role')
+      .orderBy('user.createdAt', 'DESC')
+      .skip(page * limit)
+      .take(limit);
+
+    const term = params.q?.trim();
+    if (term) {
+      qb.andWhere(
+        `(LOWER(user.email) LIKE :term ESCAPE E'\\\\'
+          OR LOWER(COALESCE(user.fullName, '')) LIKE :term ESCAPE E'\\\\'
+          OR LOWER(COALESCE(user.company, '')) LIKE :term ESCAPE E'\\\\')`,
+        { term: buildContainsLikePattern(term) },
       );
     }
 
@@ -74,8 +137,8 @@ export class AdminUsersService {
       });
     }
 
-    const rows = await qb.getMany();
-    return rows.map((row) =>
+    const [rows, total] = await qb.getManyAndCount();
+    const content = rows.map((row) =>
       AdminUserRowDto.from({
         id: row.id,
         email: row.email,
@@ -94,6 +157,7 @@ export class AdminUsersService {
           : null,
       }),
     );
+    return buildPaginatedResponse(content, total, page, limit);
   }
 
   async createInternalUser(
@@ -144,6 +208,7 @@ export class AdminUsersService {
       fullName: dto.fullName?.trim() ? dto.fullName.trim() : '',
       role,
       isActive: true,
+      sessionVersion: 1,
       emailVerified: false,
       createdByUserId: staffUserId,
     });
@@ -223,6 +288,7 @@ export class AdminUsersService {
     }
 
     user.role = role;
+    user.sessionVersion = (user.sessionVersion ?? 1) + 1;
     const saved = await this.userRepository.save(user);
     return AdminUserRowDto.from({
       id: saved.id,
@@ -253,6 +319,7 @@ export class AdminUsersService {
       newPassword,
       Number.isFinite(saltRounds) && saltRounds >= 10 ? saltRounds : 12,
     );
+    user.sessionVersion = (user.sessionVersion ?? 1) + 1;
     await this.userRepository.save(user);
     return { id: user.id };
   }
@@ -262,8 +329,8 @@ export class AdminUsersService {
    *
    * We never hard-delete: users own linked records (inquiries, quotes, uploaded
    * documents, audit logs) that must be preserved for history and referential
-   * integrity. Deactivating sets `isActive = false`, which blocks login and
-   * invalidates existing sessions (enforced in AuthService.validate / login).
+   * integrity. Deactivating sets `isActive = false` and bumps `sessionVersion`,
+   * which blocks login and invalidates existing JWTs (AuthService / JwtStrategy).
    */
   async deleteUser(
     userId: number,
@@ -278,6 +345,7 @@ export class AdminUsersService {
     }
     if (user.isActive) {
       user.isActive = false;
+      user.sessionVersion = (user.sessionVersion ?? 1) + 1;
       await this.userRepository.save(user);
     }
     return { id: userId };

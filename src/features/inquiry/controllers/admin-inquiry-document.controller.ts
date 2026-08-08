@@ -16,13 +16,17 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request } from 'express';
-import { ApiAdmin } from '../../../shared/decorators/api-admin.decorator';
+import { AdminSection } from '../../../shared/decorators/admin-section.decorator';
 import { PermanentDelete } from '../../../shared/decorators/permanent-delete.decorator';
 import { validateDto } from '../../../shared/utils/validate-dto.util';
 import { InquiryDocumentService } from '../services/inquiry-document.service';
 import { UploadInquiryDocumentDto } from '../dto/upload-inquiry-document.dto';
+import { INQUIRY_UPLOAD_LIMITS } from '../../../shared/uploads/upload-limits';
+import { buildMultipartUploadOptions } from '../../../shared/uploads/multipart-upload.options';
+import { inquiryAttachmentFileFilter } from '../../../shared/uploads/inquiry-file-validation';
+import { CleanupUploadedFilesInterceptor } from '../../../shared/uploads/cleanup-uploaded-files.interceptor';
 
-@ApiAdmin()
+@AdminSection('epda-inquiry')
 @Controller('v1/admin/inquiries/:serviceSlug/:targetId/documents')
 export class AdminInquiryDocumentController {
   constructor(
@@ -31,14 +35,29 @@ export class AdminInquiryDocumentController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    CleanupUploadedFilesInterceptor,
+    FileInterceptor(
+      'file',
+      buildMultipartUploadOptions({
+        maxFileSize: INQUIRY_UPLOAD_LIMITS.maxFileSize,
+        maxFiles: 1,
+        maxTotalBytes: INQUIRY_UPLOAD_LIMITS.maxFileSize,
+        fileFilter: inquiryAttachmentFileFilter,
+      }),
+    ),
+  )
   async uploadDocument(
     @Param('serviceSlug') serviceSlug: string,
     @Param('targetId', ParseIntPipe) targetId: number,
     @Body() body: UploadInquiryDocumentDto,
     @UploadedFile(
       new ParseFilePipe({
-        validators: [new MaxFileSizeValidator({ maxSize: 12 * 1024 * 1024 })],
+        validators: [
+          new MaxFileSizeValidator({
+            maxSize: INQUIRY_UPLOAD_LIMITS.maxFileSize,
+          }),
+        ],
       }),
     )
     file: Express.Multer.File,

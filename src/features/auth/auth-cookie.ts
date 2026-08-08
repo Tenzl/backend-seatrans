@@ -5,6 +5,13 @@ export const AUTH_COOKIE_NAME = 'auth_token';
 /** Default cookie lifetime when caller does not pass an explicit maxAge (idle TTL). */
 export const DEFAULT_AUTH_COOKIE_MAX_AGE_MS = 1000 * 60 * 60;
 
+/**
+ * Session cookie options.
+ * SameSite=Lax blocks most cross-site POST CSRF; SEC-05 Origin/Referer
+ * middleware in configure-app.ts adds defense for same-site sibling origins
+ * and cookie credential mutations. Keep path=/ so the Next.js BFF proxy
+ * (dashboard_admin / frontend) can attach the cookie on /api/* rewrites.
+ */
 export function authCookieOptions(maxAgeMs?: number): CookieOptions {
   return {
     httpOnly: true,

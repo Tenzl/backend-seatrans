@@ -1,11 +1,13 @@
 import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { plainToInstance } from 'class-transformer';
-import { validate, ValidationError } from 'class-validator';
+import { validate } from 'class-validator';
 import { In, IsNull, Repository } from 'typeorm';
 import { BookingPartner } from '../booking/entities/booking-partner.entity';
 import { CustomerType } from '../booking/enums/customer-type.enum';
 import { PartnerAdditionType } from '../booking/enums/partner-addition-type.enum';
+import { CommodityGroupsService } from '../commodities/commodity-groups.service';
+import { validationFailedException } from '../../shared/utils/validate-dto.util';
 import {
   anContainersToBlCargoTextFields,
   anContainersToCargoRows,
@@ -57,6 +59,8 @@ export class BookingDocumentPayloadValidator {
     @Optional()
     @InjectRepository(BookingPartner)
     private readonly partnerRepository?: Repository<BookingPartner>,
+    @Optional()
+    private readonly commodityGroupsService?: CommodityGroupsService,
   ) {}
 
   async validate(
@@ -81,15 +85,18 @@ export class BookingDocumentPayloadValidator {
       validationError: { target: false, value: false },
     });
     if (errors.length > 0) {
-      throw new BadRequestException({
-        message: 'Request validation failed',
-        details: this.flattenErrors(errors),
-      });
+      throw validationFailedException(errors);
     }
     if (type === BookingDocumentType.BOOKING_CONFIRMATION) {
+      await this.resolveBookingCommodityLabel(
+        dto as BookingConfirmationPreviewDto,
+      );
       this.normalizeBookingVolumes(dto as BookingConfirmationPreviewDto);
     }
     if (type === BookingDocumentType.ARRIVAL_NOTICE) {
+      await this.resolveArrivalNoticeDescriptionFromCommodity(
+        dto as ArrivalNoticePreviewDto,
+      );
       this.normalizeArrivalNoticeContainers(dto as ArrivalNoticePreviewDto);
     }
     if (type === BookingDocumentType.BILL_OF_LADING) {
@@ -109,6 +116,46 @@ export class BookingDocumentPayloadValidator {
     });
     dto.cargoVolumes = normalized.cargoVolumes;
     dto.volume = normalized.volume;
+  }
+
+  /**
+   * Map FF commodity picker → booking `commodity` display string
+   * (`{commodityName} IN {groupName}`).
+   */
+  private async resolveBookingCommodityLabel(
+    dto: BookingConfirmationPreviewDto,
+  ): Promise<void> {
+    if (dto.commodityId == null || !this.commodityGroupsService) return;
+    const label = await this.commodityGroupsService.resolveDisplayLabel(
+      dto.commodityId,
+    );
+    if (!label) {
+      throw new BadRequestException(
+        `Unknown commodityId ${dto.commodityId}`,
+      );
+    }
+    dto.commodity = label;
+  }
+
+  /**
+   * When AN omits descriptionOfGoods but sends commodityId, fill description
+   * with the same `{commodity} IN {group}` label used on booking.
+   */
+  private async resolveArrivalNoticeDescriptionFromCommodity(
+    dto: ArrivalNoticePreviewDto,
+  ): Promise<void> {
+    if (dto.commodityId == null || !this.commodityGroupsService) return;
+    const existing = (dto.descriptionOfGoods ?? '').trim();
+    if (existing) return;
+    const label = await this.commodityGroupsService.resolveDisplayLabel(
+      dto.commodityId,
+    );
+    if (!label) {
+      throw new BadRequestException(
+        `Unknown commodityId ${dto.commodityId}`,
+      );
+    }
+    dto.descriptionOfGoods = label;
   }
 
   /** Prefer containers; migrate legacy cargoRows; derive cargoRows + volume for PDF. */
@@ -376,18 +423,5 @@ export class BookingDocumentPayloadValidator {
     return [clean(partner.name), address, location, contact]
       .filter(Boolean)
       .join('\n');
-  }
-
-  private flattenErrors(
-    errors: ValidationError[],
-    parent = '',
-  ): Array<{ field: string; message: string }> {
-    return errors.flatMap((error) => {
-      const field = parent ? `${parent}.${error.property}` : error.property;
-      const own = error.constraints
-        ? [{ field, message: Object.values(error.constraints)[0] }]
-        : [];
-      return [...own, ...this.flattenErrors(error.children ?? [], field)];
-    });
   }
 }

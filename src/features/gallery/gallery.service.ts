@@ -13,12 +13,42 @@ import { GalleryImageDto } from './dto/gallery-image.dto';
 import { CreateGalleryImageDto } from './dto/create-gallery-image.dto';
 import { UpdateGalleryImageDto } from './dto/update-gallery-image.dto';
 import { GalleryListQueryDto } from './dto/gallery-list-query.dto';
+import { GalleryCountsQueryDto } from './dto/gallery-counts-query.dto';
+import { GalleryCommodityCountDto } from './dto/gallery-commodity-count.dto';
 import { CloudinaryService } from '../../shared/services/cloudinary.service';
 import { buildPaginatedResponse } from '../../shared/dto/pagination.dto';
+import { mapWithConcurrency } from '../../shared/utils/map-with-concurrency';
+import { buildContainsLikePattern } from '../../shared/utils/like-pattern';
+
+/** Parallel Cloudinary uploads per batch request (beyond PERF-01 request gate). */
+const GALLERY_UPLOAD_CONCURRENCY = 3;
 
 @Injectable()
 export class GalleryService {
   private static readonly DEFAULT_LIMIT = 100;
+
+  /** List projection — avoid selecting unrelated uploader columns. */
+  private static readonly LIST_SELECT = [
+    'gallery.id',
+    'gallery.imageUrl',
+    'gallery.cloudinaryPublicId',
+    'gallery.uploadedAt',
+    'gallery.uploadedById',
+    'gallery.serviceTypeId',
+    'gallery.commodityId',
+    'gallery.provinceCode',
+    'gallery.createdAt',
+    'gallery.updatedAt',
+    'commodity.id',
+    'commodity.displayName',
+    'commodity.name',
+    'province.id',
+    'province.displayName',
+    'province.name',
+    'province.code',
+    'port.id',
+    'port.name',
+  ] as const;
 
   constructor(
     @InjectRepository(GalleryImage)
@@ -40,10 +70,12 @@ export class GalleryService {
 
     const qb = this.galleryRepository
       .createQueryBuilder('gallery')
-      .leftJoinAndSelect('gallery.commodity', 'commodity')
-      .leftJoinAndSelect('gallery.province', 'province')
-      .leftJoinAndSelect('gallery.port', 'port')
-      .orderBy('gallery.uploadedAt', 'DESC');
+      .leftJoin('gallery.commodity', 'commodity')
+      .leftJoin('gallery.province', 'province')
+      .leftJoin('gallery.port', 'port')
+      .select([...GalleryService.LIST_SELECT])
+      .orderBy('gallery.uploadedAt', 'DESC')
+      .addOrderBy('gallery.id', 'DESC');
 
     if (query.serviceTypeId) {
       qb.andWhere('gallery.service_type_id = :serviceTypeId', {
@@ -67,16 +99,8 @@ export class GalleryService {
     const normalizedQuery = query.q?.trim();
     if (normalizedQuery) {
       qb.andWhere(
-        '(LOWER(commodity.display_name) LIKE :q OR LOWER(port.name) LIKE :q OR LOWER(province.name) LIKE :q)',
-        { q: `%${normalizedQuery.toLowerCase()}%` },
-      );
-      const rows = await qb.getMany();
-      const content = rows.map((item) => this.toDto(item));
-      return buildPaginatedResponse(
-        content,
-        content.length,
-        0,
-        content.length || 1,
+        "(LOWER(commodity.display_name) LIKE :q ESCAPE E'\\\\' OR LOWER(port.name) LIKE :q ESCAPE E'\\\\' OR LOWER(province.name) LIKE :q ESCAPE E'\\\\')",
+        { q: buildContainsLikePattern(normalizedQuery) },
       );
     }
 
@@ -89,17 +113,58 @@ export class GalleryService {
   async getPublicImages(
     limit = GalleryService.DEFAULT_LIMIT,
   ): Promise<GalleryImageDto[]> {
-    const rows = await this.galleryRepository.find({
-      relations: { commodity: true, province: true, port: true },
-      order: { uploadedAt: 'DESC' },
-      take: this.sanitizeLimit(limit),
-    });
+    const rows = await this.galleryRepository
+      .createQueryBuilder('gallery')
+      .leftJoin('gallery.commodity', 'commodity')
+      .leftJoin('gallery.province', 'province')
+      .leftJoin('gallery.port', 'port')
+      .select([...GalleryService.LIST_SELECT])
+      .orderBy('gallery.uploadedAt', 'DESC')
+      .take(this.sanitizeLimit(limit))
+      .getMany();
 
     return rows.map((item) => this.toDto(item));
   }
 
   async getAdminImages(query: GalleryListQueryDto) {
     return this.getPublicPaged(query);
+  }
+
+  /**
+   * One GROUP BY query for cargo-filter badges — replaces N×(list + size=1) fan-out.
+   */
+  async getCommodityCounts(
+    query: GalleryCountsQueryDto,
+  ): Promise<GalleryCommodityCountDto[]> {
+    const qb = this.galleryRepository
+      .createQueryBuilder('gallery')
+      .select('gallery.commodity_id', 'commodityId')
+      .addSelect('COUNT(*)', 'count')
+      .groupBy('gallery.commodity_id');
+
+    if (query.serviceTypeId) {
+      qb.andWhere('gallery.service_type_id = :serviceTypeId', {
+        serviceTypeId: query.serviceTypeId,
+      });
+    }
+    if (query.provinceId) {
+      qb.andWhere('gallery.province_id = :provinceId', {
+        provinceId: query.provinceId,
+      });
+    }
+    if (query.portId) {
+      qb.andWhere('gallery.port_id = :portId', { portId: query.portId });
+    }
+
+    const rows = await qb.getRawMany<{
+      commodityId: string | number;
+      count: string | number;
+    }>();
+
+    return rows.map((row) => ({
+      commodityId: Number(row.commodityId),
+      count: Number(row.count),
+    }));
   }
 
   async getAdminImagesAll(
@@ -141,7 +206,7 @@ export class GalleryService {
   }
 
   async uploadSingle(
-    file: { buffer: Buffer },
+    file: Express.Multer.File | { buffer?: Buffer; path?: string },
     payload: CreateGalleryImageDto,
     uploadedById: number,
   ): Promise<GalleryImageDto> {
@@ -149,25 +214,21 @@ export class GalleryService {
       throw new BadRequestException('file is required');
     }
 
-    const upload = await this.cloudinaryService.uploadBuffer(
-      file.buffer,
-      'gallery',
-    );
-    const image = await this.createRecord(
+    const refs = await this.resolveUploadRefs(payload);
+    const upload = await this.cloudinaryService.uploadImage(file, 'gallery');
+    const image = await this.createRecordWithRefs(
       upload.secureUrl,
       upload.publicId,
       uploadedById,
       payload.serviceTypeId,
-      payload.commodityId,
-      payload.provinceId,
-      payload.portId,
+      refs,
     );
 
     return this.toDto(image);
   }
 
   async uploadMultiple(
-    files: Array<{ buffer: Buffer }>,
+    files: Array<Express.Multer.File | { buffer?: Buffer; path?: string }>,
     payload: CreateGalleryImageDto,
     uploadedById: number,
   ): Promise<GalleryImageDto[]> {
@@ -175,25 +236,20 @@ export class GalleryService {
       throw new BadRequestException('files are required');
     }
 
-    const results: GalleryImageDto[] = [];
-    for (const file of files) {
-      const upload = await this.cloudinaryService.uploadBuffer(
-        file.buffer,
-        'gallery',
-      );
-      const image = await this.createRecord(
+    // Resolve FK metadata once for the whole batch (PERF-02).
+    const refs = await this.resolveUploadRefs(payload);
+
+    return mapWithConcurrency(files, GALLERY_UPLOAD_CONCURRENCY, async (file) => {
+      const upload = await this.cloudinaryService.uploadImage(file, 'gallery');
+      const image = await this.createRecordWithRefs(
         upload.secureUrl,
         upload.publicId,
         uploadedById,
         payload.serviceTypeId,
-        payload.commodityId,
-        payload.provinceId,
-        payload.portId,
+        refs,
       );
-      results.push(this.toDto(image));
-    }
-
-    return results;
+      return this.toDto(image);
+    });
   }
 
   async update(
@@ -247,20 +303,51 @@ export class GalleryService {
     provinceId: number,
     portId: number,
   ): Promise<GalleryImage> {
-    const commodity = await this.requireCommodity(commodityId);
-    const province = await this.requireProvince(provinceId);
-    const port = await this.requirePort(portId);
+    const refs = await this.resolveUploadRefs({
+      commodityId,
+      provinceId,
+      portId,
+    });
+    return this.createRecordWithRefs(
+      imageUrl,
+      cloudinaryPublicId,
+      uploadedById,
+      serviceTypeId,
+      refs,
+    );
+  }
 
+  private async resolveUploadRefs(payload: {
+    commodityId: number;
+    provinceId: number;
+    portId: number;
+  }): Promise<{ commodity: Commodity; province: Province; port: Port }> {
+    const [commodity, province, port] = await Promise.all([
+      this.requireCommodity(payload.commodityId),
+      this.requireProvince(payload.provinceId),
+      this.requirePort(payload.portId),
+    ]);
+    return { commodity, province, port };
+  }
+
+  private async createRecordWithRefs(
+    imageUrl: string,
+    cloudinaryPublicId: string | null,
+    uploadedById: number,
+    serviceTypeId: number,
+    refs: { commodity: Commodity; province: Province; port: Port },
+  ): Promise<GalleryImage> {
     const image = this.galleryRepository.create({
       imageUrl,
       cloudinaryPublicId,
       uploadedById,
       serviceTypeId,
-      commodity,
-      commodityId: commodity.id,
-      province,
-      port,
-      provinceCode: province.code != null ? String(province.code) : null,
+      commodity: refs.commodity,
+      commodityId: refs.commodity.id,
+      province: refs.province,
+      port: refs.port,
+      provinceCode:
+        refs.province.code != null ? String(refs.province.code) : null,
     });
 
     return this.galleryRepository.save(image);

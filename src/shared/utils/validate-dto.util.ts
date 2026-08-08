@@ -26,6 +26,16 @@ export function flattenValidationErrors(
   return result;
 }
 
+/** Shared 400 body for class-validator failures (DTO util, global pipe, booking docs). */
+export function validationFailedException(
+  errors: ValidationError[],
+): BadRequestException {
+  return new BadRequestException({
+    message: 'Request validation failed',
+    details: flattenValidationErrors(errors),
+  });
+}
+
 /** Run class-validator on a plain object (e.g. parsed multipart JSON). */
 export async function validateDto<T extends object>(
   dtoClass: new () => T,
@@ -41,11 +51,7 @@ export async function validateDto<T extends object>(
   });
 
   if (errors.length > 0) {
-    const details = flattenValidationErrors(errors);
-    throw new BadRequestException({
-      message: 'Request validation failed',
-      details,
-    });
+    throw validationFailedException(errors);
   }
 
   return instance;

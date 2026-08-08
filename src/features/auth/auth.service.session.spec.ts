@@ -31,11 +31,15 @@ describe('AuthService session sliding', () => {
     {} as never,
     jwtService as unknown as JwtService,
     configService as unknown as ConfigService,
+    {
+      invalidateUser: jest.fn(),
+    } as never,
   );
 
   const user = {
     id: 1,
     email: 'a@b.c',
+    sessionVersion: 1,
     role: { name: 'ROLE_CUSTOMER', roleGroup: RoleGroup.EXTERNAL },
   } as User;
 
@@ -49,6 +53,7 @@ describe('AuthService session sliding', () => {
       roles: ['ROLE_CUSTOMER'],
       auth_time: now - 60,
       remember: false,
+      sessionVersion: 1,
       exp: now + 10 * 60,
     };
 
@@ -62,6 +67,7 @@ describe('AuthService session sliding', () => {
       throw new Error('Expected the session to be signed');
     }
     expect(signedPayload.auth_time).toBe(claims.auth_time);
+    expect(signedPayload.sessionVersion).toBe(1);
   });
 
   it('does not slide when plenty of idle time remains', () => {
@@ -73,6 +79,7 @@ describe('AuthService session sliding', () => {
       roles: ['ROLE_CUSTOMER'],
       auth_time: now - 60,
       remember: false,
+      sessionVersion: 1,
       exp: now + 40 * 60,
     };
     expect(service.maybeSlideSession(user, claims)).toBeNull();
@@ -87,6 +94,7 @@ describe('AuthService session sliding', () => {
       roles: ['ROLE_CUSTOMER'],
       auth_time: now - 13 * 3600,
       remember: false,
+      sessionVersion: 1,
       exp: now + 5 * 60,
     };
     expect(service.isAbsoluteSessionExpired(claims, user)).toBe(true);

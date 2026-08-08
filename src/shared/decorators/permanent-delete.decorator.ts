@@ -4,6 +4,7 @@ import {
   PERMANENT_DELETE_AUDIT_KEY,
   PermanentDeleteAuditSpec,
 } from '../audit/destructive-action-audit.interceptor';
+import { AdminSection } from './admin-section.decorator';
 import { ApiAdminOnly } from './api-admin.decorator';
 
 /**
@@ -13,6 +14,22 @@ import { ApiAdminOnly } from './api-admin.decorator';
 export function PermanentDelete(specification: PermanentDeleteAuditSpec) {
   return applyDecorators(
     ApiAdminOnly(),
+    SetMetadata(PERMANENT_DELETE_AUDIT_KEY, specification),
+    UseInterceptors(DestructiveActionAuditInterceptor),
+  );
+}
+
+/**
+ * Irreversible delete for catalog data that the whole section may maintain:
+ * same durable audit as PermanentDelete, but authorized like the section's
+ * other endpoints (internal staff holding `section`) instead of ROLE_ADMIN.
+ */
+export function SectionPermanentDelete(
+  section: string,
+  specification: PermanentDeleteAuditSpec,
+) {
+  return applyDecorators(
+    AdminSection(section),
     SetMetadata(PERMANENT_DELETE_AUDIT_KEY, specification),
     UseInterceptors(DestructiveActionAuditInterceptor),
   );

@@ -14,7 +14,6 @@ import { CharteringBrokerageInquiryEntity } from '../entities/chartering-brokera
 import { FreightForwardingInquiryEntity } from '../entities/freight-forwarding-inquiry.entity';
 import { TotalLogisticsInquiryEntity } from '../entities/total-logistics-inquiry.entity';
 import { SpecialRequestInquiryEntity } from '../entities/special-request-inquiry.entity';
-import { InquiryFieldChangeLog } from '../entities/inquiry-field-change-log.entity';
 import { ServiceType } from '../../logistics/entities/service-type.entity';
 import { User } from '../../auth/entities/user.entity';
 import { PublicInquiryRequestDto } from '../dto/public-inquiry-request.dto';
@@ -32,6 +31,11 @@ import { NotificationService } from '../../notification/notification.service';
 import { buildCustomerSubmittedSnapshot } from '../utils/customer-submitted-snapshot.util';
 import { InquiryRepositoryRegistry } from './inquiry-repository.registry';
 import { InquiryQueryService } from './inquiry-query.service';
+import {
+  InquiryIdempotencyService,
+  type InquirySubmitResult,
+} from './inquiry-idempotency.service';
+import { InquirySubmissionLifecycle } from './inquiry-submission-lifecycle';
 
 @Injectable()
 export class ServiceInquiryService {
@@ -46,13 +50,65 @@ export class ServiceInquiryService {
     private readonly userRepository: Repository<User>,
     private readonly inquiryDocumentService: InquiryDocumentService,
     private readonly notificationService: NotificationService,
+    private readonly idempotencyService: InquiryIdempotencyService,
+    private readonly submissionLifecycle: InquirySubmissionLifecycle,
   ) {}
 
   async submitInquiry(
     dto: PublicInquiryRequestDto,
     files: Express.Multer.File[],
     currentUserId: number,
-  ): Promise<{ message: string; serviceSlug: string; targetId: number }> {
+    idempotencyKey?: string | null,
+  ): Promise<InquirySubmitResult> {
+    const normalizedKey = idempotencyKey?.trim() || null;
+    const requestHash = normalizedKey
+      ? this.idempotencyService.hashSubmitRequest(
+          dto as unknown as Record<string, unknown>,
+          files,
+        )
+      : null;
+
+    if (normalizedKey && requestHash) {
+      const prior = await this.idempotencyService.beginSubmit(
+        currentUserId,
+        normalizedKey,
+        requestHash,
+      );
+      if (prior) {
+        return prior;
+      }
+    }
+
+    try {
+      const result = await this.executeSubmitInquiry(
+        dto,
+        files,
+        currentUserId,
+      );
+      if (normalizedKey) {
+        await this.idempotencyService.completeSubmit(
+          currentUserId,
+          normalizedKey,
+          result,
+        );
+      }
+      return result;
+    } catch (error) {
+      if (normalizedKey) {
+        await this.idempotencyService.abandonSubmit(
+          currentUserId,
+          normalizedKey,
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async executeSubmitInquiry(
+    dto: PublicInquiryRequestDto,
+    files: Express.Multer.File[],
+    currentUserId: number,
+  ): Promise<InquirySubmitResult> {
     const currentUser = await this.userRepository.findOne({
       where: { id: currentUserId },
     });
@@ -85,11 +141,11 @@ export class ServiceInquiryService {
       details: dto.details ?? null,
     };
 
-    const saved = await this.createWithAllocatedCode(
+    const saved = await this.submissionLifecycle.createWithAllocatedCode(
       slug,
       serviceType.name,
-      common,
-      dto,
+      (manager, code) =>
+        this.createForSlug(slug, { ...common, code }, dto, manager),
     );
 
     if (files.length) {
@@ -100,7 +156,11 @@ export class ServiceInquiryService {
           currentUserId,
         );
       } catch (error) {
-        await this.compensateFailedSubmission(slug, saved.id, error);
+        await this.submissionLifecycle.compensateFailedSubmission(
+          slug,
+          saved.id,
+          error,
+        );
         throw new ServiceUnavailableException(
           'Could not save inquiry attachments. Please try again.',
         );
@@ -123,57 +183,6 @@ export class ServiceInquiryService {
       serviceSlug: slug,
       targetId: saved.id,
     };
-  }
-
-  /**
-   * Serializes code allocation per service/year and inserts the inquiry on the
-   * same database connection. The transaction-scoped advisory lock closes the
-   * read-last/insert race without holding a table lock.
-   */
-  private async createWithAllocatedCode(
-    slug: string,
-    serviceName: string,
-    common: Record<string, unknown>,
-    dto: PublicInquiryRequestDto,
-  ): Promise<BaseInquiry> {
-    const owningRepository = this.repositories.forSlug(slug);
-    const prefix = this.repositories.codePrefix(serviceName);
-
-    return owningRepository.manager.transaction(async (manager) => {
-      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
-        `inquiry-code:${prefix}`,
-      ]);
-
-      const code = await this.generateCodeForPrefix(
-        prefix,
-        this.repositories.forSlug(slug, manager),
-      );
-      return this.createForSlug(slug, { ...common, code }, dto, manager);
-    });
-  }
-
-  private async compensateFailedSubmission(
-    slug: string,
-    inquiryId: number,
-    attachmentError: unknown,
-  ): Promise<void> {
-    try {
-      await this.repositories.forSlug(slug).delete(inquiryId);
-    } catch (cleanupError) {
-      this.logger.error(
-        `Attachment persistence failed and inquiry ${inquiryId} could not be removed`,
-        cleanupError instanceof Error
-          ? cleanupError.stack
-          : String(cleanupError),
-      );
-    }
-
-    this.logger.error(
-      `Attachment persistence failed for inquiry ${inquiryId}; submission was not accepted`,
-      attachmentError instanceof Error
-        ? attachmentError.stack
-        : String(attachmentError),
-    );
   }
 
   private async createForSlug(
@@ -416,23 +425,70 @@ export class ServiceInquiryService {
     return this.queries.toResponse(saved, 'admin');
   }
 
+  private static readonly BATCH_CHUNK_SIZE = 100;
+
   /**
    * Remove every child row that references an inquiry so it can be deleted
    * cleanly. Field-change logs only exist for shipping agency; documents are
-   * keyed by the (globally-unique) inquiry id.
+   * keyed by (service_slug, target_id) because ids can collide across services.
+   * Notifications use bare inquiry_id + metadata.serviceSlug — clean both in
+   * this transaction so hard-delete does not orphan notification rows.
    */
   private async deleteInquiryChildren(
     slug: string,
-    inquiryId: number,
+    inquiryIds: number | number[],
     manager: EntityManager,
   ): Promise<string[]> {
+    const ids = Array.isArray(inquiryIds) ? inquiryIds : [inquiryIds];
+    if (!ids.length) return [];
     if (slug === 'shipping-agency') {
-      await manager.getRepository(InquiryFieldChangeLog).delete({ inquiryId });
+      await manager.query(
+        `DELETE FROM shipping_agency_field_change_logs
+         WHERE inquiry_id = ANY($1::bigint[])`,
+        [ids],
+      );
     }
-    return this.inquiryDocumentService.removeMetadataByInquiry(
-      inquiryId,
+    // Scope by serviceSlug: inquiry ids were not globally unique historically.
+    // Match exact slug always. Also remove legacy rows with null/empty slug
+    // only when those ids are absent from every other service table — avoids
+    // wiping another service's null-slug notification on id collision.
+    const otherTables = this.repositories.sources
+      .filter((source) => source.slug !== slug)
+      .map((source) => source.tableName);
+    const otherIdExistsSql = otherTables.length
+      ? otherTables
+          .map(
+            (tableName) =>
+              `SELECT 1 FROM ${tableName} o WHERE o.id = n.inquiry_id`,
+          )
+          .join(' UNION ALL ')
+      : 'SELECT 1 WHERE FALSE';
+    await manager.query(
+      `DELETE FROM notifications n
+       WHERE n.inquiry_id = ANY($1::bigint[])
+         AND (
+           n.metadata->>'serviceSlug' = $2
+           OR (
+             (n.metadata->>'serviceSlug' IS NULL
+               OR BTRIM(n.metadata->>'serviceSlug') = '')
+             AND NOT EXISTS (${otherIdExistsSql})
+           )
+         )`,
+      [ids, slug],
+    );
+    return this.inquiryDocumentService.removeMetadataByInquiryIds(
+      slug,
+      ids,
       manager,
     );
+  }
+
+  private chunkIds(ids: number[]): number[][] {
+    const chunks: number[][] = [];
+    for (let i = 0; i < ids.length; i += ServiceInquiryService.BATCH_CHUNK_SIZE) {
+      chunks.push(ids.slice(i, i + ServiceInquiryService.BATCH_CHUNK_SIZE));
+    }
+    return chunks;
   }
 
   async softDeleteBatch(
@@ -440,30 +496,40 @@ export class ServiceInquiryService {
     deletedByUserId: number,
     serviceSlug?: string,
   ): Promise<{ deletedCount: number }> {
-    return this.repositories.shippingAgency.manager.transaction(
-      async (manager) => {
-        const found = await this.queries.findRows(
-          ids,
-          {
-            includeDeleted: false,
-            serviceSlug,
-          },
-          manager,
-        );
-        if (found.length !== ids.length) {
-          throw new NotFoundException('One or more inquiries were not found');
-        }
+    if (!ids.length) return { deletedCount: 0 };
 
-        const now = new Date();
-        for (const { row, repo } of found) {
-          row.deletedAt = now;
-          row.deletedById = deletedByUserId;
-          await repo.save(row);
-        }
-
-        return { deletedCount: found.length };
-      },
+    const manager = this.repositories.shippingAgency.manager;
+    const grouped = await this.queries.groupIdsBySlug(
+      ids,
+      { includeDeleted: false, serviceSlug },
+      manager,
     );
+    if (!grouped.size) {
+      throw new NotFoundException('One or more inquiries were not found');
+    }
+
+    let deletedCount = 0;
+    const now = new Date();
+    for (const [slug, slugIds] of grouped) {
+      const tableName = this.repositories.tableNameForSlug(slug);
+      for (const chunk of this.chunkIds(slugIds)) {
+        deletedCount += await manager.transaction(async (tx) => {
+          const rows: Array<{ id: string | number }> = await tx.query(
+            `UPDATE ${tableName}
+             SET deleted_at = $2, deleted_by = $3
+             WHERE id = ANY($1::bigint[]) AND deleted_at IS NULL
+             RETURNING id`,
+            [chunk, now, deletedByUserId],
+          );
+          return rows.length;
+        });
+      }
+    }
+
+    if (deletedCount !== ids.length) {
+      throw new NotFoundException('One or more inquiries were not found');
+    }
+    return { deletedCount };
   }
 
   async softDeleteBatchByUser(
@@ -471,36 +537,41 @@ export class ServiceInquiryService {
     ids: number[],
     serviceSlug: string,
   ): Promise<{ deletedCount: number }> {
-    return this.repositories.shippingAgency.manager.transaction(
-      async (manager) => {
-        const found = await this.queries.findRows(
-          ids,
-          {
-            includeDeleted: false,
-            serviceSlug,
-          },
-          manager,
-        );
+    if (!ids.length) return { deletedCount: 0 };
 
-        if (
-          found.length !== ids.length ||
-          found.some((f) => f.row.userId !== userId)
-        ) {
-          throw new ForbiddenException(
-            'You can only delete your own inquiries',
-          );
-        }
-
-        const now = new Date();
-        for (const { row, repo } of found) {
-          row.deletedAt = now;
-          row.deletedById = userId;
-          await repo.save(row);
-        }
-
-        return { deletedCount: found.length };
-      },
+    const manager = this.repositories.shippingAgency.manager;
+    const owned = await this.queries.allOwnedByUser(
+      ids,
+      userId,
+      serviceSlug,
+      manager,
     );
+    if (!owned) {
+      throw new ForbiddenException('You can only delete your own inquiries');
+    }
+
+    const tableName = this.repositories.tableNameForSlug(serviceSlug);
+    let deletedCount = 0;
+    const now = new Date();
+    for (const chunk of this.chunkIds(ids)) {
+      deletedCount += await manager.transaction(async (tx) => {
+        const rows: Array<{ id: string | number }> = await tx.query(
+          `UPDATE ${tableName}
+           SET deleted_at = $2, deleted_by = $3
+           WHERE id = ANY($1::bigint[])
+             AND deleted_at IS NULL
+             AND user_id = $4
+           RETURNING id`,
+          [chunk, now, userId, userId],
+        );
+        return rows.length;
+      });
+    }
+
+    if (deletedCount !== ids.length) {
+      throw new ForbiddenException('You can only delete your own inquiries');
+    }
+    return { deletedCount };
   }
 
   async softDeleteBatchByAdmin(
@@ -518,7 +589,7 @@ export class ServiceInquiryService {
     const publicIds =
       await this.repositories.shippingAgency.manager.transaction(
         async (manager) => {
-          const { row, repo, slug } = await this.queries.requireWithRepository(
+          const { row, slug } = await this.queries.requireWithRepository(
             serviceTypeName,
             id,
             {
@@ -531,7 +602,11 @@ export class ServiceInquiryService {
             row.id,
             manager,
           );
-          await repo.remove(row);
+          const tableName = this.repositories.tableNameForSlug(slug);
+          await manager.query(
+            `DELETE FROM ${tableName} WHERE id = ANY($1::bigint[])`,
+            [[row.id]],
+          );
           return storedObjectIds;
         },
       );
@@ -542,85 +617,106 @@ export class ServiceInquiryService {
     ids: number[],
     serviceSlug?: string,
   ): Promise<{ deletedCount: number }> {
-    const result = await this.repositories.shippingAgency.manager.transaction(
-      async (manager) => {
-        const found = await this.queries.findRows(
-          ids,
-          {
-            includeDeleted: true,
-            serviceSlug,
-          },
-          manager,
-        );
+    if (!ids.length) return { deletedCount: 0 };
 
-        if (found.length !== ids.length) {
-          throw new NotFoundException('One or more inquiries were not found');
-        }
+    const manager = this.repositories.shippingAgency.manager;
+    const grouped = await this.queries.groupIdsBySlug(
+      ids,
+      { includeDeleted: true, serviceSlug },
+      manager,
+    );
+    if (!grouped.size) {
+      throw new NotFoundException('One or more inquiries were not found');
+    }
 
-        const publicIds: string[] = [];
-        for (const { row, repo, slug } of found) {
-          publicIds.push(
-            ...(await this.deleteInquiryChildren(slug, row.id, manager)),
+    const publicIds: string[] = [];
+    let deletedCount = 0;
+    for (const [slug, slugIds] of grouped) {
+      const tableName = this.repositories.tableNameForSlug(slug);
+      for (const chunk of this.chunkIds(slugIds)) {
+        const chunkPublicIds = await manager.transaction(async (tx) => {
+          const stored = await this.deleteInquiryChildren(slug, chunk, tx);
+          const rows: Array<{ id: string | number }> = await tx.query(
+            `DELETE FROM ${tableName}
+             WHERE id = ANY($1::bigint[])
+             RETURNING id`,
+            [chunk],
           );
-          await repo.remove(row);
-        }
+          if (rows.length !== chunk.length) {
+            throw new NotFoundException('One or more inquiries were not found');
+          }
+          deletedCount += rows.length;
+          return stored;
+        });
+        publicIds.push(...chunkPublicIds);
+      }
+    }
 
-        return { deletedCount: found.length, publicIds };
-      },
-    );
-    await this.inquiryDocumentService.deleteStoredObjectsBestEffort(
-      result.publicIds,
-    );
-    return { deletedCount: result.deletedCount };
+    if (deletedCount !== ids.length) {
+      throw new NotFoundException('One or more inquiries were not found');
+    }
+
+    await this.inquiryDocumentService.deleteStoredObjectsBestEffort(publicIds);
+    return { deletedCount };
   }
 
   async restoreBatchByAdmin(
     ids: number[],
     serviceSlug?: string,
   ): Promise<{ restoredCount: number }> {
-    return this.repositories.shippingAgency.manager.transaction(
-      async (manager) => {
-        const found = await this.queries.findRows(
-          ids,
-          {
-            includeDeleted: true,
-            serviceSlug,
-          },
-          manager,
-        );
+    if (!ids.length) return { restoredCount: 0 };
 
-        if (found.length !== ids.length) {
-          throw new NotFoundException('One or more inquiries were not found');
-        }
-
-        for (const { row, repo } of found) {
-          row.deletedAt = null;
-          row.deletedById = null;
-          await repo.save(row);
-        }
-
-        return { restoredCount: found.length };
-      },
+    const manager = this.repositories.shippingAgency.manager;
+    const grouped = await this.queries.groupIdsBySlug(
+      ids,
+      { includeDeleted: true, serviceSlug },
+      manager,
     );
+    if (!grouped.size) {
+      throw new NotFoundException('One or more inquiries were not found');
+    }
+
+    let restoredCount = 0;
+    for (const [slug, slugIds] of grouped) {
+      const tableName = this.repositories.tableNameForSlug(slug);
+      for (const chunk of this.chunkIds(slugIds)) {
+        restoredCount += await manager.transaction(async (tx) => {
+          const rows: Array<{ id: string | number }> = await tx.query(
+            `UPDATE ${tableName}
+             SET deleted_at = NULL, deleted_by = NULL
+             WHERE id = ANY($1::bigint[])
+             RETURNING id`,
+            [chunk],
+          );
+          return rows.length;
+        });
+      }
+    }
+
+    if (restoredCount !== ids.length) {
+      throw new NotFoundException('One or more inquiries were not found');
+    }
+    return { restoredCount };
   }
 
   async restoreByServiceAndId(
     serviceTypeName: string,
     id: number,
   ): Promise<void> {
+    const slug = this.repositories.toSlug(serviceTypeName);
+    const tableName = this.repositories.tableNameForSlug(slug);
     await this.repositories.shippingAgency.manager.transaction(
       async (manager) => {
-        const { row, repo } = await this.queries.requireWithRepository(
-          serviceTypeName,
-          id,
-          {
-            includeDeleted: true,
-          },
-          manager,
+        const rows: Array<{ id: string | number }> = await manager.query(
+          `UPDATE ${tableName}
+           SET deleted_at = NULL, deleted_by = NULL
+           WHERE id = ANY($1::bigint[])
+           RETURNING id`,
+          [[id]],
         );
-        row.deletedAt = null;
-        row.deletedById = null;
-        await repo.save(row);
+        if (!rows.length) {
+          throw new NotFoundException('Inquiry not found');
+        }
       },
     );
   }
@@ -706,31 +802,5 @@ export class ServiceInquiryService {
     }
 
     return String(value);
-  }
-
-  private async generateCodeForPrefix(
-    prefix: string,
-    repo: Repository<BaseInquiry>,
-  ): Promise<string> {
-    const last = await repo
-      .createQueryBuilder('inquiry')
-      .select(
-        'MAX(CAST(SUBSTRING(inquiry.code FROM CHAR_LENGTH(:codePrefix) + 1) AS BIGINT))',
-        'lastNumber',
-      )
-      .where(
-        "inquiry.code LIKE :prefixPattern AND SUBSTRING(inquiry.code FROM CHAR_LENGTH(:codePrefix) + 1) ~ '^[0-9]+$'",
-        {
-          codePrefix: prefix,
-          prefixPattern: `${prefix}%`,
-        },
-      )
-      .getRawOne<{ lastNumber: string | null }>();
-
-    // BigInt avoids rollover/precision bugs when the sequence grows beyond
-    // four digits; padStart preserves the existing display format.
-    const nextNumber = BigInt(last?.lastNumber ?? '0') + 1n;
-
-    return `${prefix}${String(nextNumber).padStart(4, '0')}`;
   }
 }

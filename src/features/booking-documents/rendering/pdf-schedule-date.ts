@@ -159,6 +159,3 @@ export function formatPdfDateTime(value?: string | null): string {
     raw
   );
 }
-
-/** @deprecated Prefer {@link formatPdfDateTime}. */
-export const formatBookingPdfDateTime = formatPdfDateTime;

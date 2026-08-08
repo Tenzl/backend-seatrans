@@ -15,7 +15,7 @@ import {
   Req,
 } from '@nestjs/common';
 import type { Request } from 'express';
-import { ApiAdmin } from '../../../shared/decorators/api-admin.decorator';
+import { AdminSection } from '../../../shared/decorators/admin-section.decorator';
 import { PermanentDelete } from '../../../shared/decorators/permanent-delete.decorator';
 import { isAdminRoleName } from '../../roles/section-access.service';
 import { ServiceInquiryService } from '../services/service-inquiry.service';
@@ -41,7 +41,7 @@ type StaffRequest = Request & {
   user?: { id?: number; role?: { name?: string | null } | null };
 };
 
-@ApiAdmin()
+@AdminSection('epda-inquiry')
 @Controller('v1/admin/inquiries')
 export class AdminInquiryController {
   constructor(

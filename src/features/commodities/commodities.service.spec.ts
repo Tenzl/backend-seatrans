@@ -1,13 +1,11 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { CommoditiesService } from './commodities.service';
+import type { CommodityUsageChecker } from './ports/commodity-usage.checker';
 
 function createService(overrides: {
   commodity?: Record<string, unknown> | null;
   duplicate?: Record<string, unknown> | null;
-  galleryCount?: number;
-  shippingCount?: number;
-  freightCount?: number;
-  logisticsCount?: number;
+  inUse?: boolean;
   deleteError?: unknown;
 }) {
   const findOneResults: Array<Record<string, unknown> | null> = [];
@@ -35,37 +33,19 @@ function createService(overrides: {
     }),
   };
 
-  const countRepo = (count: number) => ({
-    count: jest.fn().mockResolvedValue(count),
-    createQueryBuilder: jest.fn().mockReturnValue({
-      where: jest.fn().mockReturnThis(),
-      getCount: jest.fn().mockResolvedValue(count),
-    }),
-  });
-
-  const galleryImageRepository = countRepo(overrides.galleryCount ?? 0);
-  const shippingAgencyInquiryRepository = countRepo(
-    overrides.shippingCount ?? 0,
-  );
-  const freightForwardingInquiryRepository = countRepo(
-    overrides.freightCount ?? 0,
-  );
-  const totalLogisticsInquiryRepository = countRepo(
-    overrides.logisticsCount ?? 0,
-  );
+  const usageChecker: CommodityUsageChecker = {
+    isInUse: jest.fn().mockResolvedValue(overrides.inUse ?? false),
+  };
 
   const service = new CommoditiesService(
     commodityRepository as never,
-    galleryImageRepository as never,
-    shippingAgencyInquiryRepository as never,
-    freightForwardingInquiryRepository as never,
-    totalLogisticsInquiryRepository as never,
+    usageChecker,
   );
 
   return {
     service,
     commodityRepository,
-    galleryImageRepository,
+    usageChecker,
   };
 }
 
@@ -211,25 +191,15 @@ describe('CommoditiesService.delete', () => {
     await expect(service.delete(9)).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('blocks delete when gallery images reference the commodity', async () => {
+  it('blocks delete when usage checker reports in-use', async () => {
     const { service, commodityRepository } = createService({
       commodity,
-      galleryCount: 2,
+      inUse: true,
     });
 
     await expect(service.delete(9)).rejects.toThrow(
       CommoditiesService.IN_USE_MESSAGE,
     );
-    expect(commodityRepository.delete).not.toHaveBeenCalled();
-  });
-
-  it('blocks delete when a shipping-agency inquiry uses the cargo name', async () => {
-    const { service, commodityRepository } = createService({
-      commodity,
-      shippingCount: 1,
-    });
-
-    await expect(service.delete(9)).rejects.toBeInstanceOf(ConflictException);
     expect(commodityRepository.delete).not.toHaveBeenCalled();
   });
 

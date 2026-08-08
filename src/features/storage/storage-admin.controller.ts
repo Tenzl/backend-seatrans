@@ -15,14 +15,15 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AdminSection } from '../../shared/decorators/admin-section.decorator';
 import { PermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
-import { MB } from '../../shared/uploads/upload-validators';
 import { StorageService } from './storage.service';
 import { StorageListQueryDto } from './dto/storage-list-query.dto';
 import { CreateFolderDto } from './dto/create-folder.dto';
 import { RenameStorageDto } from './dto/rename-storage.dto';
 import { StorageKeyQueryDto } from './dto/storage-key-query.dto';
-
-const STORAGE_MAX_FILE_SIZE = 100 * MB;
+import { STORAGE_UPLOAD_LIMITS } from '../../shared/uploads/upload-limits';
+import { buildMultipartUploadOptions } from '../../shared/uploads/multipart-upload.options';
+import { UploadConcurrencyInterceptor } from '../../shared/uploads/upload-concurrency.interceptor';
+import { CleanupUploadedFilesInterceptor } from '../../shared/uploads/cleanup-uploaded-files.interceptor';
 
 @AdminSection('data-storage')
 @Controller('v1/admin/storage')
@@ -48,9 +49,16 @@ export class StorageAdminController {
   @Post('upload')
   @HttpCode(HttpStatus.CREATED)
   @UseInterceptors(
-    FileInterceptor('file', {
-      limits: { fileSize: STORAGE_MAX_FILE_SIZE, files: 1 },
-    }),
+    UploadConcurrencyInterceptor,
+    CleanupUploadedFilesInterceptor,
+    FileInterceptor(
+      'file',
+      buildMultipartUploadOptions({
+        maxFileSize: STORAGE_UPLOAD_LIMITS.maxFileSize,
+        maxFiles: STORAGE_UPLOAD_LIMITS.maxFiles,
+        maxTotalBytes: STORAGE_UPLOAD_LIMITS.maxTotalBytes,
+      }),
+    ),
   )
   upload(
     @UploadedFile() file: Express.Multer.File,

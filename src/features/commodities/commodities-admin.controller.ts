@@ -12,15 +12,31 @@ import {
 } from '@nestjs/common';
 import { ApiAdmin } from '../../shared/decorators/api-admin.decorator';
 import { AdminSection } from '../../shared/decorators/admin-section.decorator';
-import { PermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
+import { SectionPermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
 import { LimitQueryDto } from '../../shared/dto/list-query.dto';
+import { BOOKING_DOCUMENT_SECTION } from '../booking-documents/constants/booking-document.constants';
+import { CommodityGroupsService } from './commodity-groups.service';
 import { CommoditiesService } from './commodities.service';
+import { BookingCommodityOptionDto } from './dto/booking-commodity-option.dto';
 import { CommodityDto } from './dto/commodity.dto';
 import { CreateCommodityDto } from './dto/create-commodity.dto';
 
 @Controller('v1/admin/commodities')
 export class CommoditiesAdminController {
-  constructor(private readonly commoditiesService: CommoditiesService) {}
+  constructor(
+    private readonly commoditiesService: CommoditiesService,
+    private readonly commodityGroupsService: CommodityGroupsService,
+  ) {}
+
+  /**
+   * Freight-forwarding commodity picker for booking forms.
+   * Uses booking-documents section (same pattern as PIC options).
+   */
+  @AdminSection(BOOKING_DOCUMENT_SECTION)
+  @Get('booking-options')
+  listBookingOptions(): Promise<BookingCommodityOptionDto[]> {
+    return this.commodityGroupsService.listBookingOptions();
+  }
 
   @AdminSection('data-commodities')
   @Get()
@@ -52,7 +68,7 @@ export class CommoditiesAdminController {
   }
 
   @Delete(':id')
-  @PermanentDelete({
+  @SectionPermanentDelete('data-commodities', {
     resourceType: 'commodity',
     idSource: { kind: 'param', key: 'id' },
   })

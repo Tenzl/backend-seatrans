@@ -70,6 +70,9 @@ function createService(options?: {
     roleRepository as Repository<Role>,
     jwtService,
     configService,
+    {
+      invalidateUser: jest.fn(),
+    } as never,
   );
 
   return {

@@ -12,6 +12,9 @@ import { InquiryDocumentService } from './inquiry-document.service';
 import { NotificationService } from '../../notification/notification.service';
 import { InquiryRepositoryRegistry } from './inquiry-repository.registry';
 import { InquiryQueryService } from './inquiry-query.service';
+import { InquiryIdempotencyService } from './inquiry-idempotency.service';
+import { InquiryCodeAllocator } from './inquiry-code-allocator';
+import { InquirySubmissionLifecycle } from './inquiry-submission-lifecycle';
 
 type SubmissionHarness = {
   service: ServiceInquiryService;
@@ -34,6 +37,12 @@ type SubmissionHarness = {
   };
   notificationService: {
     notifyInternalNewInquiry: jest.Mock;
+  };
+  idempotencyService: {
+    hashSubmitRequest: jest.Mock;
+    beginSubmit: jest.Mock;
+    completeSubmit: jest.Mock;
+    abandonSubmit: jest.Mock;
   };
 };
 
@@ -113,6 +122,12 @@ function setupSubmission(): SubmissionHarness {
       return Promise.resolve();
     }),
   };
+  const idempotencyService = {
+    hashSubmitRequest: jest.fn().mockReturnValue('hash-abc'),
+    beginSubmit: jest.fn().mockResolvedValue(null),
+    completeSubmit: jest.fn().mockResolvedValue(undefined),
+    abandonSubmit: jest.fn().mockResolvedValue(undefined),
+  };
 
   const repositories = new InquiryRepositoryRegistry(
     inquiryRepository as unknown as Repository<ShippingAgencyInquiryEntity>,
@@ -121,6 +136,10 @@ function setupSubmission(): SubmissionHarness {
     unusedRepository<TotalLogisticsInquiryEntity>(),
     unusedRepository<SpecialRequestInquiryEntity>(),
   );
+  const submissionLifecycle = new InquirySubmissionLifecycle(
+    repositories,
+    new InquiryCodeAllocator(),
+  );
   const service = new ServiceInquiryService(
     repositories,
     new InquiryQueryService(repositories),
@@ -128,6 +147,8 @@ function setupSubmission(): SubmissionHarness {
     userRepository as unknown as Repository<User>,
     documentService as unknown as InquiryDocumentService,
     notificationService as unknown as NotificationService,
+    idempotencyService as unknown as InquiryIdempotencyService,
+    submissionLifecycle,
   );
 
   return {
@@ -138,6 +159,7 @@ function setupSubmission(): SubmissionHarness {
     transactionManager,
     documentService,
     notificationService,
+    idempotencyService,
   };
 }
 
@@ -206,5 +228,61 @@ describe('ServiceInquiryService submission consistency', () => {
     expect(
       harness.notificationService.notifyInternalNewInquiry,
     ).not.toHaveBeenCalled();
+  });
+
+  it('returns the stored result for a repeated Idempotency-Key without creating again', async () => {
+    const harness = setupSubmission();
+    const prior = {
+      message: 'Inquiry submitted successfully.',
+      serviceSlug: 'shipping-agency',
+      targetId: 99,
+    };
+    harness.idempotencyService.beginSubmit.mockResolvedValueOnce(prior);
+
+    await expect(
+      harness.service.submitInquiry(submission, [], 42, 'key-1'),
+    ).resolves.toEqual(prior);
+
+    expect(harness.idempotencyService.hashSubmitRequest).toHaveBeenCalled();
+    expect(harness.transactionalRepository.save).not.toHaveBeenCalled();
+    expect(harness.idempotencyService.completeSubmit).not.toHaveBeenCalled();
+  });
+
+  it('completes the idempotency record after a successful submit', async () => {
+    const harness = setupSubmission();
+
+    await harness.service.submitInquiry(submission, [], 42, 'key-2');
+
+    expect(harness.idempotencyService.beginSubmit).toHaveBeenCalledWith(
+      42,
+      'key-2',
+      'hash-abc',
+    );
+    expect(harness.idempotencyService.completeSubmit).toHaveBeenCalledWith(
+      42,
+      'key-2',
+      expect.objectContaining({ targetId: 8, serviceSlug: 'shipping-agency' }),
+    );
+  });
+
+  it('abandons the idempotency claim when submit fails', async () => {
+    const harness = setupSubmission();
+    harness.documentService.saveAttachmentsForInquiry.mockRejectedValueOnce(
+      new Error('object storage unavailable'),
+    );
+    const file = {
+      originalname: 'cargo.pdf',
+      size: 3,
+    } as Express.Multer.File;
+
+    await expect(
+      harness.service.submitInquiry(submission, [file], 42, 'key-3'),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    expect(harness.idempotencyService.abandonSubmit).toHaveBeenCalledWith(
+      42,
+      'key-3',
+    );
+    expect(harness.idempotencyService.completeSubmit).not.toHaveBeenCalled();
   });
 });

@@ -19,15 +19,26 @@ import {
   setOAuthStateCookie,
 } from './oauth-state';
 import { safeErrorForLog } from '../../shared/logging/safe-error-log';
+import { abortSignalAfter } from '../../shared/utils/with-timeout';
+import { readPositiveInt } from '../../shared/utils/env-int';
+
+const DEFAULT_GOOGLE_OAUTH_TIMEOUT_MS = 15_000;
 
 @Controller('v1/auth/oauth2')
 export class OAuth2Controller {
   private readonly logger = new Logger(OAuth2Controller.name);
+  private readonly googleTimeoutMs: number;
 
   constructor(
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
-  ) {}
+  ) {
+    this.googleTimeoutMs = readPositiveInt(
+      this.configService.get<string>('GOOGLE_OAUTH_TIMEOUT_MS'),
+      DEFAULT_GOOGLE_OAUTH_TIMEOUT_MS,
+      { min: 1_000, max: 60_000 },
+    );
+  }
 
   @Get('google')
   initiateGoogleLogin(@Res({ passthrough: true }) res: Response) {
@@ -97,6 +108,7 @@ export class OAuth2Controller {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: tokenBody.toString(),
+        signal: abortSignalAfter(this.googleTimeoutMs),
       });
 
       const tokenJson = (await tokenRes.json()) as {
@@ -112,6 +124,7 @@ export class OAuth2Controller {
         'https://www.googleapis.com/oauth2/v3/userinfo',
         {
           headers: { Authorization: `Bearer ${tokenJson.access_token}` },
+          signal: abortSignalAfter(this.googleTimeoutMs),
         },
       );
 

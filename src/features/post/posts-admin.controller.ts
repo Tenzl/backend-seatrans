@@ -13,8 +13,8 @@ import {
 } from '@nestjs/common';
 import { AdminSection } from '../../shared/decorators/admin-section.decorator';
 import { PermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
-import { LimitQueryDto } from '../../shared/dto/list-query.dto';
 import { PostsService } from './posts.service';
+import { AdminPostsQueryDto } from './dto/admin-posts-query.dto';
 import { PostRequestDto } from './dto/post-request.dto';
 
 @AdminSection('content-posts')
@@ -23,8 +23,8 @@ export class PostsAdminController {
   constructor(private readonly postsService: PostsService) {}
 
   @Get()
-  getAll(@Query() query: LimitQueryDto) {
-    return this.postsService.getAdminList(query.limit);
+  getAll(@Query() query: AdminPostsQueryDto) {
+    return this.postsService.listAdmin(query);
   }
 
   @Get(':id')

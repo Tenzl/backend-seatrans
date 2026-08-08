@@ -5,6 +5,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { AuthService } from './auth.service';
 import { Role } from './entities/role.entity';
 import { User } from './entities/user.entity';
+import { SectionAccessService } from '../roles/section-access.service';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -21,6 +22,10 @@ describe('AuthService', () => {
           useValue: {
             get: jest.fn((_key: string, defaultValue?: string) => defaultValue),
           },
+        },
+        {
+          provide: SectionAccessService,
+          useValue: { invalidateUser: jest.fn() },
         },
       ],
     }).compile();

@@ -23,9 +23,17 @@ import { GalleryService } from './gallery.service';
 import { CreateGalleryImageDto } from './dto/create-gallery-image.dto';
 import { UpdateGalleryImageDto } from './dto/update-gallery-image.dto';
 import { GalleryListQueryDto } from './dto/gallery-list-query.dto';
+import { GalleryCountsQueryDto } from './dto/gallery-counts-query.dto';
 import { GalleryMultipartFieldsDto } from './dto/gallery-multipart-fields.dto';
 import { validateDto } from '../../shared/utils/validate-dto.util';
-import { allowMimeTypes, MB } from '../../shared/uploads/upload-validators';
+import { allowMimeTypes } from '../../shared/uploads/upload-validators';
+import {
+  GALLERY_SINGLE_UPLOAD_LIMITS,
+  GALLERY_UPLOAD_LIMITS,
+} from '../../shared/uploads/upload-limits';
+import { buildMultipartUploadOptions } from '../../shared/uploads/multipart-upload.options';
+import { UploadConcurrencyInterceptor } from '../../shared/uploads/upload-concurrency.interceptor';
+import { CleanupUploadedFilesInterceptor } from '../../shared/uploads/cleanup-uploaded-files.interceptor';
 
 @AdminSection('data-images')
 @Controller('v1/admin/gallery-images')
@@ -35,13 +43,21 @@ export class GalleryAdminController {
   @Post('batch')
   @HttpCode(HttpStatus.CREATED)
   @UseInterceptors(
-    FilesInterceptor('files', 30, {
-      limits: { fileSize: 10 * MB, files: 30 },
-      fileFilter: allowMimeTypes(['image/jpeg', 'image/png', 'image/webp']),
-    }),
+    UploadConcurrencyInterceptor,
+    CleanupUploadedFilesInterceptor,
+    FilesInterceptor(
+      'files',
+      GALLERY_UPLOAD_LIMITS.maxFiles,
+      buildMultipartUploadOptions({
+        maxFileSize: GALLERY_UPLOAD_LIMITS.maxFileSize,
+        maxFiles: GALLERY_UPLOAD_LIMITS.maxFiles,
+        maxTotalBytes: GALLERY_UPLOAD_LIMITS.maxTotalBytes,
+        fileFilter: allowMimeTypes(['image/jpeg', 'image/png', 'image/webp']),
+      }),
+    ),
   )
   async uploadBatch(
-    @UploadedFiles() files: Array<{ buffer: Buffer }>,
+    @UploadedFiles() files: Express.Multer.File[],
     @Body() body: Record<string, unknown>,
     @Req() req: Request & { user?: { id?: number } },
   ) {
@@ -59,13 +75,20 @@ export class GalleryAdminController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @UseInterceptors(
-    FileInterceptor('file', {
-      limits: { fileSize: 10 * MB, files: 1 },
-      fileFilter: allowMimeTypes(['image/jpeg', 'image/png', 'image/webp']),
-    }),
+    UploadConcurrencyInterceptor,
+    CleanupUploadedFilesInterceptor,
+    FileInterceptor(
+      'file',
+      buildMultipartUploadOptions({
+        maxFileSize: GALLERY_SINGLE_UPLOAD_LIMITS.maxFileSize,
+        maxFiles: GALLERY_SINGLE_UPLOAD_LIMITS.maxFiles,
+        maxTotalBytes: GALLERY_SINGLE_UPLOAD_LIMITS.maxTotalBytes,
+        fileFilter: allowMimeTypes(['image/jpeg', 'image/png', 'image/webp']),
+      }),
+    ),
   )
   async uploadSingle(
-    @UploadedFile() file: { buffer: Buffer },
+    @UploadedFile() file: Express.Multer.File,
     @Body() body: Record<string, unknown>,
     @Query() query: Record<string, unknown>,
     @Req() req: Request & { user?: { id?: number } },
@@ -119,6 +142,12 @@ export class GalleryAdminController {
       return this.galleryService.getAdminImagesAll(query.size);
     }
     return this.galleryService.getAdminImages(query);
+  }
+
+  /** Aggregate image counts by commodity — must stay before `:id`. */
+  @Get('counts')
+  getCounts(@Query() query: GalleryCountsQueryDto) {
+    return this.galleryService.getCommodityCounts(query);
   }
 
   @Get(':id')

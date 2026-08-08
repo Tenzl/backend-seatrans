@@ -5,6 +5,7 @@ import {
   OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
+  VersionColumn,
 } from 'typeorm';
 import { ApproveStatus } from '../enums/approve-status.enum';
 import { CustomerStatus } from '../enums/customer-status.enum';
@@ -16,6 +17,10 @@ import { BookingPartnerAdditionTypeEntity } from './booking-partner-addition-typ
 export class BookingPartner {
   @PrimaryGeneratedColumn()
   id!: number;
+
+  /** Optimistic concurrency token; concurrent writers lose with HTTP 409. */
+  @VersionColumn({ type: 'int', default: 1 })
+  version!: number;
 
   @Column({ nullable: false })
   name!: string;

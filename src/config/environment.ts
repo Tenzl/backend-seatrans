@@ -69,6 +69,33 @@ function validateHttpUrl(
   }
 }
 
+/**
+ * Whether Express (and login throttle) may honor X-Forwarded-For /
+ * CF-Connecting-IP.
+ *
+ * - unset / false → do not trust client forwarding headers (safe for direct origin)
+ * - true / 1 → trust 1 proxy hop (typical nginx / Cloudflare / PaaS edge)
+ * - N (integer ≥ 1) → trust N hops
+ *
+ * Only enable when every public path to the API goes through a known proxy that
+ * overwrites these headers. If clients can hit the origin directly, leave this
+ * off so attackers cannot rotate XFF to bypass login lockout.
+ */
+export function resolveTrustProxy(input: EnvironmentInput): false | number {
+  const raw = optionalString(input.TRUST_PROXY);
+  if (!raw) return false;
+  const normalized = raw.toLowerCase();
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return 1;
+  if (/^\d+$/.test(raw)) {
+    const hops = Number(raw);
+    if (Number.isInteger(hops) && hops >= 1 && hops <= 32) return hops;
+  }
+  throw new Error(
+    'TRUST_PROXY must be false, true, or a positive hop count (1–32)',
+  );
+}
+
 export function resolveCorsOrigins(input: EnvironmentInput): string[] {
   const production = environmentName(input) === 'production';
   const rawOrigins = optionalString(input.CORS_ORIGINS);
@@ -157,6 +184,30 @@ function validateDatabaseConfiguration(
   parsePort(input.DB_PORT, 'DB_PORT', 5432);
 }
 
+function parseOptionalBoolean(
+  value: unknown,
+  key: string,
+): boolean | undefined {
+  const raw = optionalString(value);
+  if (!raw) return undefined;
+  const normalized = raw.toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  throw new Error(`${key} must be a boolean (true/false)`);
+}
+
+function validateRedisUrl(value: string): void {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('REDIS_URL must be a valid redis:// or rediss:// URL');
+  }
+  if (!['redis:', 'rediss:'].includes(url.protocol)) {
+    throw new Error('REDIS_URL must use the redis or rediss protocol');
+  }
+}
+
 export function validateEnvironment(input: EnvironmentInput): EnvironmentInput {
   const environment = { ...input };
   const nodeEnv = environmentName(environment);
@@ -169,6 +220,8 @@ export function validateEnvironment(input: EnvironmentInput): EnvironmentInput {
   }
 
   const corsOrigins = resolveCorsOrigins(environment);
+  // Validate early so bad TRUST_PROXY fails at boot, not on first login.
+  resolveTrustProxy(environment);
   const portSource = optionalString(environment.PORT)
     ? environment.PORT
     : environment.SERVER_PORT;
@@ -201,11 +254,40 @@ export function validateEnvironment(input: EnvironmentInput): EnvironmentInput {
     validateHttpUrl(googleRedirectUri, 'GOOGLE_REDIRECT_URI', production);
   }
 
+  const redisUrl = optionalString(environment.REDIS_URL);
+  if (redisUrl) {
+    validateRedisUrl(redisUrl);
+  }
+  const queueEnabled = parseOptionalBoolean(
+    environment.QUEUE_ENABLED,
+    'QUEUE_ENABLED',
+  );
+  if (optionalString(environment.QUEUE_ENABLED) && queueEnabled === undefined) {
+    throw new Error('QUEUE_ENABLED must be a boolean (true/false)');
+  }
+  // Positive ints validated loosely here (runtime also clamps).
+  for (const [key, fallback] of [
+    ['QUEUE_CONCURRENCY', '1'],
+    ['QUEUE_MAX_PENDING', '20'],
+    ['PUBLIC_CATALOG_CACHE_TTL_MS', '60000'],
+  ] as const) {
+    const raw = optionalString(environment[key]);
+    if (!raw) continue;
+    if (!/^\d+$/.test(raw) || Number(raw) < 1) {
+      throw new Error(`${key} must be a positive integer`);
+    }
+    void fallback;
+  }
+
   return {
     ...environment,
     NODE_ENV: nodeEnv,
     PORT: port,
     CORS_ORIGINS: corsOrigins.join(','),
     APP_JWT_SECRET: jwtSecret,
+    ...(redisUrl ? { REDIS_URL: redisUrl } : {}),
+    ...(queueEnabled !== undefined
+      ? { QUEUE_ENABLED: queueEnabled ? 'true' : 'false' }
+      : {}),
   };
 }

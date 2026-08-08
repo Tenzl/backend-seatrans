@@ -10,6 +10,10 @@ import { Province } from './entities/province.entity';
 import { ProvinceDto } from './dto/province.dto';
 import { CreateProvinceDto } from './dto/create-province.dto';
 import { normalizeProvinceAreaCode } from './province-area';
+import { ShortTtlCacheService } from '../../shared/redis/short-ttl-cache.service';
+
+/** Shared with PortsService — active list filters out provinces with zero ports. */
+export const PUBLIC_PROVINCES_CACHE_PREFIX = 'public:provinces:';
 
 @Injectable()
 export class ProvincesService {
@@ -18,6 +22,7 @@ export class ProvincesService {
   constructor(
     @InjectRepository(Province)
     private readonly provinceRepository: Repository<Province>,
+    private readonly cache: ShortTtlCacheService,
   ) {}
 
   async getAllProvinces(
@@ -36,16 +41,26 @@ export class ProvincesService {
   async getActiveProvinces(
     limit = ProvincesService.DEFAULT_LIST_LIMIT,
   ): Promise<ProvinceDto[]> {
+    const safeLimit = this.sanitizeLimit(limit);
+    const cacheKey = `${PUBLIC_PROVINCES_CACHE_PREFIX}active:${safeLimit}`;
+    if (this.cache.isEnabled()) {
+      const cached = await this.cache.getJson<ProvinceDto[]>(cacheKey);
+      if (cached) return cached;
+    }
+
     const provinces = await this.provinceRepository.find({
       where: { isActive: true },
       relations: { ports: true },
       order: { name: 'ASC' },
     });
 
-    return provinces
+    const result = provinces
       .filter((province) => (province.ports ?? []).length > 0)
-      .slice(0, this.sanitizeLimit(limit))
+      .slice(0, safeLimit)
       .map((province) => this.toDto(province));
+
+    await this.cache.setJson(cacheKey, result);
+    return result;
   }
 
   async searchProvinces(query?: string): Promise<ProvinceDto[]> {
@@ -100,6 +115,7 @@ export class ProvincesService {
     });
 
     const savedProvince = await this.provinceRepository.save(province);
+    await this.invalidatePublicCache();
     return this.toDto(savedProvince);
   }
 
@@ -134,6 +150,7 @@ export class ProvincesService {
     province.area = this.normalizeAreaCode(dto.area);
 
     const updatedProvince = await this.provinceRepository.save(province);
+    await this.invalidatePublicCache();
     return this.toDto(updatedProvince);
   }
 
@@ -143,6 +160,11 @@ export class ProvincesService {
       throw new NotFoundException('Province not found');
     }
     await this.provinceRepository.delete(id);
+    await this.invalidatePublicCache();
+  }
+
+  private async invalidatePublicCache(): Promise<void> {
+    await this.cache.deleteByPrefix(PUBLIC_PROVINCES_CACHE_PREFIX);
   }
 
   private toDto(province: Province): ProvinceDto {

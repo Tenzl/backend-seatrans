@@ -38,6 +38,13 @@ export class User {
   @Column({ name: 'is_active', default: true })
   isActive!: boolean;
 
+  /**
+   * Monotonic session generation. Embedded in JWTs; bumped on disable, password
+   * reset, role change, and logout so previously issued tokens fail closed.
+   */
+  @Column({ name: 'session_version', type: 'int', default: 1 })
+  sessionVersion!: number;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

@@ -58,6 +58,33 @@ describe('database connection configuration', () => {
         username: 'postgres',
         password: 'postgres',
         database: 'seatrans',
+        extra: expect.objectContaining({
+          max: 10,
+          connectionTimeoutMillis: 5000,
+          options: expect.stringContaining('statement_timeout=30000'),
+        }),
+      }),
+    );
+  });
+
+  it('applies explicit pool and timeout env overrides', () => {
+    jest.spyOn(Logger.prototype, 'log').mockImplementation();
+
+    const options = buildDatabaseOptions(
+      config({
+        NODE_ENV: 'development',
+        DB_POOL_MAX: '7',
+        DB_POOL_CONNECTION_TIMEOUT_MS: '2500',
+        DB_STATEMENT_TIMEOUT_MS: '12000',
+        DB_LOCK_TIMEOUT_MS: '4000',
+      }),
+    );
+
+    expect(options.extra).toEqual(
+      expect.objectContaining({
+        max: 7,
+        connectionTimeoutMillis: 2500,
+        options: '-c statement_timeout=12000 -c lock_timeout=4000',
       }),
     );
   });

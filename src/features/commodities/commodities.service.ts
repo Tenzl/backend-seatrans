@@ -3,17 +3,18 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Inject,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { GalleryImage } from '../gallery/entities/gallery-image.entity';
-import { FreightForwardingInquiryEntity } from '../inquiry/entities/freight-forwarding-inquiry.entity';
-import { ShippingAgencyInquiryEntity } from '../inquiry/entities/shipping-agency-inquiry.entity';
-import { TotalLogisticsInquiryEntity } from '../inquiry/entities/total-logistics-inquiry.entity';
 import { Commodity } from './entities/commodity.entity';
 import { CommodityDto } from './dto/commodity.dto';
 import { CreateCommodityDto } from './dto/create-commodity.dto';
 import { ListCommoditiesQueryDto } from './dto/list-commodities-query.dto';
+import {
+  COMMODITY_USAGE_CHECKER,
+  type CommodityUsageChecker,
+} from './ports/commodity-usage.checker';
 
 @Injectable()
 export class CommoditiesService {
@@ -24,14 +25,8 @@ export class CommoditiesService {
   constructor(
     @InjectRepository(Commodity)
     private readonly commodityRepository: Repository<Commodity>,
-    @InjectRepository(GalleryImage)
-    private readonly galleryImageRepository: Repository<GalleryImage>,
-    @InjectRepository(ShippingAgencyInquiryEntity)
-    private readonly shippingAgencyInquiryRepository: Repository<ShippingAgencyInquiryEntity>,
-    @InjectRepository(FreightForwardingInquiryEntity)
-    private readonly freightForwardingInquiryRepository: Repository<FreightForwardingInquiryEntity>,
-    @InjectRepository(TotalLogisticsInquiryEntity)
-    private readonly totalLogisticsInquiryRepository: Repository<TotalLogisticsInquiryEntity>,
+    @Inject(COMMODITY_USAGE_CHECKER)
+    private readonly usageChecker: CommodityUsageChecker,
   ) {}
 
   /**
@@ -45,6 +40,7 @@ export class CommoditiesService {
     if (search) {
       const qb = this.commodityRepository
         .createQueryBuilder('commodity')
+        .leftJoinAndSelect('commodity.group', 'grp')
         .where(
           '(LOWER(commodity.name) LIKE :query OR LOWER(commodity.display_name) LIKE :query)',
           { query: `%${search.toLowerCase()}%` },
@@ -62,6 +58,7 @@ export class CommoditiesService {
 
     const commodities = await this.commodityRepository.find({
       where: serviceTypeId != null ? { serviceTypeId } : {},
+      relations: { group: true },
       order: { name: 'ASC' },
     });
 
@@ -71,7 +68,10 @@ export class CommoditiesService {
   }
 
   async getById(id: number): Promise<CommodityDto> {
-    const commodity = await this.commodityRepository.findOne({ where: { id } });
+    const commodity = await this.commodityRepository.findOne({
+      where: { id },
+      relations: { group: true },
+    });
     if (!commodity) {
       throw new NotFoundException('Commodity not found');
     }
@@ -109,6 +109,7 @@ export class CommoditiesService {
       description: dto.description?.trim() || null,
       requiredImageCount: dto.requiredImageCount ?? 18,
       cargoType,
+      groupId: null,
     });
 
     const saved = await this.commodityRepository.save(commodity);
@@ -116,7 +117,10 @@ export class CommoditiesService {
   }
 
   async update(id: number, dto: CreateCommodityDto): Promise<CommodityDto> {
-    const commodity = await this.commodityRepository.findOne({ where: { id } });
+    const commodity = await this.commodityRepository.findOne({
+      where: { id },
+      relations: { group: true },
+    });
     if (!commodity) {
       throw new NotFoundException('Commodity not found');
     }
@@ -137,18 +141,32 @@ export class CommoditiesService {
         ? this.normalizeCargoType(dto.cargoType)
         : commodity.cargoType;
 
-    const duplicate = await this.commodityRepository.findOne({
-      where: {
-        serviceTypeId: dto.serviceTypeId,
-        cargoType,
-        name: normalizedName,
-      },
-    });
+    if (commodity.groupId != null) {
+      const duplicateInGroup = await this.commodityRepository.findOne({
+        where: {
+          groupId: commodity.groupId,
+          name: normalizedName,
+        },
+      });
+      if (duplicateInGroup && duplicateInGroup.id !== id) {
+        throw new ConflictException(
+          'Commodity already exists in this group',
+        );
+      }
+    } else {
+      const duplicate = await this.commodityRepository.findOne({
+        where: {
+          serviceTypeId: dto.serviceTypeId,
+          cargoType,
+          name: normalizedName,
+        },
+      });
 
-    if (duplicate && duplicate.id !== id) {
-      throw new ConflictException(
-        'Commodity already exists in this service type and cargo type',
-      );
+      if (duplicate && duplicate.id !== id) {
+        throw new ConflictException(
+          'Commodity already exists in this service type and cargo type',
+        );
+      }
     }
 
     commodity.serviceTypeId = dto.serviceTypeId;
@@ -166,12 +184,24 @@ export class CommoditiesService {
   }
 
   async delete(id: number): Promise<void> {
-    const commodity = await this.commodityRepository.findOne({ where: { id } });
+    const commodity = await this.commodityRepository.findOne({
+      where: { id },
+      relations: { group: true },
+    });
     if (!commodity) {
       throw new NotFoundException('Commodity not found');
     }
 
-    await this.assertNotInUse(commodity);
+    if (
+      await this.usageChecker.isInUse({
+        id: commodity.id,
+        name: commodity.name,
+        displayName: commodity.displayName,
+        groupName: commodity.group?.name ?? null,
+      })
+    ) {
+      throw new ConflictException(CommoditiesService.IN_USE_MESSAGE);
+    }
 
     try {
       await this.commodityRepository.delete(id);
@@ -185,54 +215,17 @@ export class CommoditiesService {
     }
   }
 
-  private async assertNotInUse(commodity: Commodity): Promise<void> {
-    const galleryCount = await this.galleryImageRepository.count({
-      where: { commodityId: commodity.id },
-    });
-    if (galleryCount > 0) {
-      throw new ConflictException(CommoditiesService.IN_USE_MESSAGE);
-    }
-
-    const nameKeys = this.usageNameKeys(commodity);
-    if (nameKeys.length === 0) {
-      return;
-    }
-
-    const shippingCount = await this.shippingAgencyInquiryRepository
-      .createQueryBuilder('inquiry')
-      .where('LOWER(inquiry.cargo_name) IN (:...names)', { names: nameKeys })
-      .getCount();
-    if (shippingCount > 0) {
-      throw new ConflictException(CommoditiesService.IN_USE_MESSAGE);
-    }
-
-    const freightCount = await this.freightForwardingInquiryRepository
-      .createQueryBuilder('inquiry')
-      .where('LOWER(inquiry.cargo_name) IN (:...names)', { names: nameKeys })
-      .getCount();
-    if (freightCount > 0) {
-      throw new ConflictException(CommoditiesService.IN_USE_MESSAGE);
-    }
-
-    const logisticsCount = await this.totalLogisticsInquiryRepository
-      .createQueryBuilder('inquiry')
-      .where('LOWER(inquiry.cargo_name) IN (:...names)', { names: nameKeys })
-      .getCount();
-    if (logisticsCount > 0) {
-      throw new ConflictException(CommoditiesService.IN_USE_MESSAGE);
-    }
+  /** Shared with CommodityGroupsService for consistent cargo-type validation. */
+  normalizeCargoTypePublic(value?: string): string {
+    return this.normalizeCargoType(value);
   }
 
-  private usageNameKeys(commodity: Commodity): string[] {
-    return [...new Set([commodity.name, commodity.displayName])]
-      .map((value) => value?.trim().toLowerCase())
-      .filter((value): value is string => Boolean(value));
-  }
-
-  private toDto(item: Commodity): CommodityDto {
+  toDto(item: Commodity): CommodityDto {
     return {
       id: item.id,
       serviceTypeId: item.serviceTypeId,
+      groupId: item.groupId ?? item.group?.id ?? null,
+      groupName: item.group?.name ?? null,
       name: item.name,
       displayName: item.displayName,
       description: item.description,

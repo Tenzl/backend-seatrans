@@ -52,6 +52,7 @@ function shippingAgencyInternalEpdaFields(
     anchorageHours: row.anchorageHours,
     pilotage3rdMiles: row.pilotage3rdMiles,
     epdaSnapshot: row.epdaSnapshot,
+    epdaWorkingParams: row.epdaWorkingParams,
     epdaLockedAt: row.epdaLockedAt,
     quotedAt: row.quotedAt,
     quotedByUserId: row.quotedByUserId,

@@ -20,6 +20,7 @@ function createRepositoryMock() {
       const saved = {
         ...record,
         id,
+        version: Number(record.version ?? 1),
         createdAt:
           record.createdAt instanceof Date
             ? record.createdAt
@@ -79,11 +80,21 @@ describe('BookingDocumentRecordService lifecycle', () => {
   const userRepository = {
     findOne: jest.fn().mockResolvedValue(null),
   };
+  const dataSource = {
+    transaction: jest.fn(
+      async <T>(work: (manager: undefined) => Promise<T>): Promise<T> =>
+        work(undefined),
+    ),
+  };
   let service: BookingDocumentsService;
 
   beforeEach(() => {
     jest.clearAllMocks();
     userRepository.findOne.mockResolvedValue(null);
+    dataSource.transaction.mockImplementation(
+      async <T>(work: (manager: undefined) => Promise<T>): Promise<T> =>
+        work(undefined),
+    );
     for (const repository of [
       bookingRepository,
       arrivalNoticeRepository,
@@ -103,6 +114,7 @@ describe('BookingDocumentRecordService lifecycle', () => {
       recordService,
       new BookingDocumentPdfRenderer(),
       userRepository as never,
+      dataSource as never,
     );
   });
 
@@ -222,16 +234,45 @@ describe('BookingDocumentRecordService lifecycle', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('requires AN before the final document and rejects duplicate active steps', async () => {
+  it('export workflow is booking then BL; rejects AN and duplicate BL', async () => {
     const booking = await service.createRecord(
       BookingDocumentType.BOOKING_CONFIRMATION,
       { bookingNumber: 'EXP-1', bookingFlow: BookingFlow.EXPORT },
       4,
     );
+    const billOfLading = await service.createRecord(
+      BookingDocumentType.BILL_OF_LADING,
+      { fblNumber: 'BL-1', bookingId: booking.id },
+      4,
+    );
+    expect(billOfLading.referenceNumber).toBe('BL-1');
+
+    await expect(
+      service.createRecord(
+        BookingDocumentType.ARRIVAL_NOTICE,
+        { anNumber: 'AN-1', bookingId: booking.id },
+        4,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
     await expect(
       service.createRecord(
         BookingDocumentType.BILL_OF_LADING,
-        { fblNumber: 'BL-EARLY', bookingId: booking.id },
+        { fblNumber: 'BL-2', bookingId: booking.id },
+        4,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('import workflow requires AN before DO and rejects duplicate active steps', async () => {
+    const booking = await service.createRecord(
+      BookingDocumentType.BOOKING_CONFIRMATION,
+      { bookingNumber: 'IMP-2', bookingFlow: BookingFlow.IMPORT },
+      4,
+    );
+    await expect(
+      service.createRecord(
+        BookingDocumentType.DELIVERY_ORDER,
+        { doNumber: 'DO-EARLY', bookingId: booking.id },
         4,
       ),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -253,7 +294,7 @@ describe('BookingDocumentRecordService lifecycle', () => {
   it('prevents child creation and updates while the root booking is locked', async () => {
     const booking = await service.createRecord(
       BookingDocumentType.BOOKING_CONFIRMATION,
-      { bookingNumber: 'EXP-LOCK', bookingFlow: BookingFlow.EXPORT },
+      { bookingNumber: 'IMP-LOCK', bookingFlow: BookingFlow.IMPORT },
       4,
     );
     const arrivalNotice = await service.createRecord(
@@ -277,8 +318,8 @@ describe('BookingDocumentRecordService lifecycle', () => {
     ).rejects.toBeInstanceOf(ConflictException);
     await expect(
       service.createRecord(
-        BookingDocumentType.BILL_OF_LADING,
-        { fblNumber: 'BL-LOCK', bookingId: booking.id },
+        BookingDocumentType.DELIVERY_ORDER,
+        { doNumber: 'DO-LOCK', bookingId: booking.id },
         4,
       ),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -287,7 +328,7 @@ describe('BookingDocumentRecordService lifecycle', () => {
   it('translates a concurrent unique constraint failure into conflict', async () => {
     const booking = await service.createRecord(
       BookingDocumentType.BOOKING_CONFIRMATION,
-      { bookingNumber: 'EXP-RACE', bookingFlow: BookingFlow.EXPORT },
+      { bookingNumber: 'IMP-RACE', bookingFlow: BookingFlow.IMPORT },
       4,
     );
     arrivalNoticeRepository.save.mockRejectedValueOnce({

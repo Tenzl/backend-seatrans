@@ -8,6 +8,7 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
@@ -223,6 +224,13 @@ export class CreateInternalShippingAgencyInquiryDto {
   @IsNumber()
   @Min(0)
   shorecraneHireUsdPerMt?: number;
+
+  /**
+   * Soft-snapshot of tariff params at create time (unlocked draft baseline).
+   */
+  @IsOptional()
+  @IsObject()
+  epdaWorkingParams?: Record<string, unknown>;
 
   /**
    * Whether all required EPDA fields are filled (computed by the admin UI).

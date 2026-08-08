@@ -15,8 +15,8 @@ const repository = <T>(value: object = {}): Repository<T> =>
 function file(name: string): Express.Multer.File {
   return {
     originalname: name,
-    buffer: Buffer.from(name),
-    size: name.length,
+    buffer: Buffer.from(`%PDF-1.7\n${name}`),
+    size: name.length + 8,
     mimetype: 'application/pdf',
   } as Express.Multer.File;
 }
@@ -37,7 +37,7 @@ describe('InquiryDocumentService attachment compensation', () => {
       findOne: jest.fn().mockResolvedValue({ id: 42 }),
     };
     const cloudinaryService = {
-      uploadRawBuffer: jest.fn().mockResolvedValue({
+      uploadRaw: jest.fn().mockResolvedValue({
         publicId: 'inquiries/shipping-agency/file-1',
         secureUrl: 'https://example.test/file-1',
       }),
@@ -72,11 +72,19 @@ describe('InquiryDocumentService attachment compensation', () => {
   });
 
   it('removes earlier attachments when a later attachment in the batch fails', async () => {
+    type CompensationDouble = InquiryDocumentService & {
+      userRepository: { findOne: jest.Mock };
+      uploadResolved: jest.Mock;
+    };
     const service = Object.create(
       InquiryDocumentService.prototype,
-    ) as InquiryDocumentService;
+    ) as CompensationDouble;
+    // PERF-02: saveAttachmentsForInquiry calls requireUploader, then uploadResolved.
+    service.userRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 42 }),
+    };
     const firstDocument = { id: 11 };
-    service.uploadDocument = jest
+    service.uploadResolved = jest
       .fn()
       .mockResolvedValueOnce(firstDocument)
       .mockRejectedValueOnce(new Error('second upload failed'));

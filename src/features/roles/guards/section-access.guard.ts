@@ -17,7 +17,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function toUserLike(value: unknown): UserLike | null {
   if (!isRecord(value)) return null;
-  if (value.role == null) return { role: null };
+  if (value.role == null) {
+    return {
+      id: typeof value.id === 'number' ? value.id : null,
+      sessionVersion:
+        typeof value.sessionVersion === 'number' ? value.sessionVersion : null,
+      role: null,
+    };
+  }
   if (!isRecord(value.role)) return null;
 
   const id = value.role.id;
@@ -27,6 +34,9 @@ function toUserLike(value: unknown): UserLike | null {
   if (name != null && typeof name !== 'string') return null;
   if (roleGroup != null && typeof roleGroup !== 'string') return null;
   return {
+    id: typeof value.id === 'number' ? value.id : null,
+    sessionVersion:
+      typeof value.sessionVersion === 'number' ? value.sessionVersion : null,
     role: {
       id: id ?? null,
       name: name ?? null,

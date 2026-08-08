@@ -9,6 +9,7 @@ import {
   Min,
 } from 'class-validator';
 import { RoleGroup } from '../../auth/enums/role-group.enum';
+import { API_MAX_PAGE_SIZE } from '../../../shared/dto/list-query.dto';
 
 export class AdminListUsersQueryDto {
   @IsOptional()
@@ -29,7 +30,13 @@ export class AdminListUsersQueryDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  @Min(0)
+  page?: number = 0;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
   @Min(1)
-  @Max(200)
-  limit?: number = 100;
+  @Max(API_MAX_PAGE_SIZE)
+  limit?: number = 20;
 }
