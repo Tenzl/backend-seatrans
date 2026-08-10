@@ -9,7 +9,9 @@ describe('booking pic formatting', () => {
 
   it('falls back to name or email when one is missing', () => {
     expect(formatBookingPic('Nhung Nguyen', null)).toBe('Nhung Nguyen');
-    expect(formatBookingPic('', 'ops@seatrans.com.vn')).toBe('ops@seatrans.com.vn');
+    expect(formatBookingPic('', 'ops@seatrans.com.vn')).toBe(
+      'ops@seatrans.com.vn',
+    );
   });
 
   it('prefers selected pic over creator, then falls back to creator', () => {
@@ -27,5 +29,18 @@ describe('booking pic formatting', () => {
     ).toBe('Nhung Nguyen, Email: total.logistics@seatrans.com.vn');
     expect(resolveBookingPic(null, 'Legacy PIC')).toBe('Legacy PIC');
     expect(resolveBookingPic(null, '')).toBe('');
+  });
+
+  it('prefers company email over login email for creator fallback', () => {
+    expect(
+      resolveBookingPic(
+        {
+          fullName: 'Nhung Nguyen',
+          email: 'login@seatrans.com.vn',
+          companyEmail: 'total.logistics@seatrans.com.vn',
+        },
+        '',
+      ),
+    ).toBe('Nhung Nguyen, Email: total.logistics@seatrans.com.vn');
   });
 });

@@ -40,11 +40,15 @@ export class BookingDocumentsAdminController {
     type: BookingDocumentType,
     @Query('page') page = '0',
     @Query('size') size = '10',
+    @Query('archived') archived = 'active',
   ) {
+    const filter =
+      archived === 'archived' || archived === 'all' ? archived : 'active';
     return this.bookingDocuments.listRecords(
       type,
       this.toInteger(page, 0),
       this.toInteger(size, 10),
+      filter,
     );
   }
 
@@ -151,6 +155,24 @@ export class BookingDocumentsAdminController {
     @Req() request: AuthenticatedRequest,
   ): Promise<void> {
     await this.bookingDocuments.archiveRecord(
+      type,
+      id,
+      this.requireActorUserId(request),
+      expectedVersion,
+    );
+  }
+
+  /** Admin-only: restore a soft-archived record into the active history list. */
+  @Post(':type/records/:id/restore')
+  @ApiAdminOnly()
+  restoreRecord(
+    @Param('type', new ParseEnumPipe(BookingDocumentType))
+    type: BookingDocumentType,
+    @Param('id', ParseIntPipe) id: number,
+    @Body('expectedVersion', ParseIntPipe) expectedVersion: number,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.bookingDocuments.restoreRecord(
       type,
       id,
       this.requireActorUserId(request),

@@ -25,6 +25,11 @@ export class CreateInternalUserDto {
   @MaxLength(100)
   fullName?: string;
 
+  @IsOptional()
+  @IsEmail()
+  @MaxLength(100)
+  companyEmail?: string;
+
   @IsNotEmpty()
   @IsString()
   @MinLength(8)

@@ -7,6 +7,7 @@ export class AdminUserRowDto {
   fullName!: string | null;
   phone!: string | null;
   company!: string | null;
+  companyEmail!: string | null;
   isActive!: boolean;
   roleId!: number | null;
   roleName!: string | null;
@@ -20,6 +21,7 @@ export class AdminUserRowDto {
     fullName: string | null;
     phone: string | null;
     company: string | null;
+    companyEmail?: string | null;
     isActive: boolean;
     createdAt: Date;
     role?: { id: number; name: string; roleGroup: RoleGroup } | null;
@@ -31,6 +33,7 @@ export class AdminUserRowDto {
     dto.fullName = row.fullName ?? null;
     dto.phone = row.phone ?? null;
     dto.company = row.company ?? null;
+    dto.companyEmail = row.companyEmail ?? null;
     dto.isActive = row.isActive;
     dto.createdAt = row.createdAt;
     dto.roleId = row.role?.id ?? null;

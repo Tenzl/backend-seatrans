@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DeepPartial, EntityManager, IsNull, Repository } from 'typeorm';
+import { DeepPartial, EntityManager, IsNull, Not, Repository } from 'typeorm';
 import { saveWithOptimisticLock } from '../../shared/utils/optimistic-lock';
 import { containerRowHasCargo } from './an-container';
 import { BookingDocumentPayload } from './booking-document.types';
@@ -308,6 +308,31 @@ export class BookingDocumentRecordService {
     );
   }
 
+  async restore(
+    type: BookingDocumentType,
+    id: number,
+    actorUserId: number,
+    expectedVersion: number,
+    manager?: EntityManager,
+  ) {
+    const record = await this.findAnyOrFail(type, id, false, manager);
+    if (!record.deletedAt) {
+      throw new ConflictException('Document record is not archived');
+    }
+    return this.casUpdate(
+      type,
+      record,
+      expectedVersion,
+      {
+        deletedAt: null,
+        deletedByUserId: null,
+        updatedByUserId: actorUserId,
+      },
+      manager,
+      'deleted_at IS NOT NULL',
+    );
+  }
+
   async hardDelete(
     type: BookingDocumentType,
     id: number,
@@ -319,11 +344,22 @@ export class BookingDocumentRecordService {
     await repository.remove(record);
   }
 
-  async list(type: BookingDocumentType, page = 0, size = 10) {
+  async list(
+    type: BookingDocumentType,
+    page = 0,
+    size = 10,
+    archived: 'active' | 'archived' | 'all' = 'active',
+  ) {
     const safePage = Math.max(0, page);
     const safeSize = Math.min(50, Math.max(1, size));
+    const where =
+      archived === 'archived'
+        ? ({ deletedAt: Not(IsNull()) } as never)
+        : archived === 'all'
+          ? ({} as never)
+          : ({ deletedAt: IsNull() } as never);
     const [records, totalElements] = await this.repository(type).findAndCount({
-      where: { deletedAt: IsNull() } as never,
+      where,
       relations: { createdBy: true },
       order: { createdAt: 'DESC', id: 'DESC' },
       skip: safePage * safeSize,
@@ -375,6 +411,20 @@ export class BookingDocumentRecordService {
   ): Promise<DocumentRecord> {
     const record = await this.repository(type, manager).findOne({
       where: { id, deletedAt: IsNull() },
+      relations: withCreator ? { createdBy: true } : undefined,
+    });
+    if (!record) throw new NotFoundException('Document record not found');
+    return record as DocumentRecord;
+  }
+
+  private async findAnyOrFail(
+    type: BookingDocumentType,
+    id: number,
+    withCreator = false,
+    manager?: EntityManager,
+  ): Promise<DocumentRecord> {
+    const record = await this.repository(type, manager).findOne({
+      where: { id },
       relations: withCreator ? { createdBy: true } : undefined,
     });
     if (!record) throw new NotFoundException('Document record not found');

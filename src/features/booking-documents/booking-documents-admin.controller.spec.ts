@@ -82,6 +82,7 @@ describe('BookingDocumentsAdminController', () => {
       BookingDocumentType.BOOKING_CONFIRMATION,
       2,
       15,
+      'active',
     );
   });
 
@@ -98,17 +99,19 @@ describe('BookingDocumentsAdminController', () => {
     );
   });
 
-  it('updates, locks, unlocks, archives, and permanently deletes records', async () => {
+  it('updates, locks, unlocks, archives, restores, and permanently deletes records', async () => {
     const updateRecord = jest.fn().mockResolvedValue({ id: 3 });
     const lockRecord = jest.fn().mockResolvedValue({ id: 3, lockedAt: 'x' });
     const unlockRecord = jest.fn().mockResolvedValue({ id: 3, lockedAt: null });
     const archiveRecord = jest.fn().mockResolvedValue(undefined);
+    const restoreRecord = jest.fn().mockResolvedValue({ id: 3 });
     const permanentDeleteRecord = jest.fn().mockResolvedValue(undefined);
     const controller = new BookingDocumentsAdminController({
       updateRecord,
       lockRecord,
       unlockRecord,
       archiveRecord,
+      restoreRecord,
       permanentDeleteRecord,
     } as unknown as BookingDocumentsService);
 
@@ -125,6 +128,9 @@ describe('BookingDocumentsAdminController', () => {
       user: { id: 2 },
     } as never);
     await controller.archiveRecord(BookingDocumentType.ARRIVAL_NOTICE, 3, 7, {
+      user: { id: 2 },
+    } as never);
+    await controller.restoreRecord(BookingDocumentType.ARRIVAL_NOTICE, 3, 8, {
       user: { id: 2 },
     } as never);
     await controller.permanentDeleteRecord(
@@ -156,6 +162,12 @@ describe('BookingDocumentsAdminController', () => {
       2,
       7,
     );
+    expect(restoreRecord).toHaveBeenCalledWith(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      3,
+      2,
+      8,
+    );
     expect(permanentDeleteRecord).toHaveBeenCalledWith(
       BookingDocumentType.ARRIVAL_NOTICE,
       3,
@@ -181,6 +193,7 @@ describe('BookingDocumentsAdminController', () => {
     expect(pathFor('lockRecord')).toBe(':type/records/:id/lock');
     expect(pathFor('unlockRecord')).toBe(':type/records/:id/unlock');
     expect(pathFor('archiveRecord')).toBe(':type/records/:id');
+    expect(pathFor('restoreRecord')).toBe(':type/records/:id/restore');
     expect(pathFor('permanentDeleteRecord')).toBe(
       ':type/records/:id/permanent',
     );

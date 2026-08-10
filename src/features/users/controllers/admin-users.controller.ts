@@ -23,6 +23,7 @@ import { AdminListUsersQueryDto } from '../dto/admin-list-users-query.dto';
 import { AdminPicOptionsQueryDto } from '../dto/admin-pic-options-query.dto';
 import { CreateInternalUserDto } from '../dto/create-internal-user.dto';
 import { ResetUserPasswordDto } from '../dto/reset-user-password.dto';
+import { UpdateUserProfileDto } from '../dto/update-user-profile.dto';
 import { UpdateUserRoleDto } from '../dto/update-user-role.dto';
 import { RoleGroup } from '../../auth/enums/role-group.enum';
 
@@ -89,6 +90,17 @@ export class AdminUsersController {
       throw new BadRequestException('User not authenticated');
     }
     return this.adminUsersService.updateUserRole(id, dto.roleId, staffUserId);
+  }
+
+  @Patch(':id/profile')
+  @ApiAdminOnly()
+  @HttpCode(HttpStatus.OK)
+  async updateProfile(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: UpdateUserProfileDto,
+  ) {
+    const dto = await validateDto(UpdateUserProfileDto, body);
+    return this.adminUsersService.updateProfile(id, dto);
   }
 
   @Post(':id/reset-password')

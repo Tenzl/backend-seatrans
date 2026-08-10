@@ -36,6 +36,7 @@ export type AuthUserPayload = {
   fullName: string | null;
   phone: string | null;
   company: string | null;
+  companyEmail: string | null;
   role: string | undefined;
   roleGroup: string | null | undefined;
   oauthProvider: string | null;
@@ -254,6 +255,7 @@ export class AuthService {
       fullName: user.fullName ?? null,
       phone: user.phone ?? null,
       company: user.company ?? null,
+      companyEmail: user.companyEmail ?? null,
       role: user.role?.name,
       roleGroup: user.role?.roleGroup,
       oauthProvider: user.oauthProvider ?? null,

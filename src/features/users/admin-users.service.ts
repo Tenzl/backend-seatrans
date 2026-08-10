@@ -61,6 +61,7 @@ export class AdminUsersService {
       .select([
         'user.id',
         'user.email',
+        'user.companyEmail',
         'user.fullName',
         'role.id',
         'role.name',
@@ -76,7 +77,7 @@ export class AdminUsersService {
     const term = params.q?.trim();
     if (term) {
       qb.andWhere(
-        "(LOWER(user.email) LIKE :term OR LOWER(COALESCE(user.fullName, '')) LIKE :term)",
+        "(LOWER(user.email) LIKE :term OR LOWER(COALESCE(user.companyEmail, '')) LIKE :term OR LOWER(COALESCE(user.fullName, '')) LIKE :term)",
         { term: `%${term.toLowerCase()}%` },
       );
     }
@@ -86,6 +87,7 @@ export class AdminUsersService {
       AdminPicOptionDto.from({
         id: row.id,
         email: row.email,
+        companyEmail: row.companyEmail ?? null,
         fullName: row.fullName ?? null,
         roleName: row.role?.name ?? null,
       }),
@@ -119,6 +121,7 @@ export class AdminUsersService {
     if (term) {
       qb.andWhere(
         `(LOWER(user.email) LIKE :term ESCAPE E'\\\\'
+          OR LOWER(COALESCE(user.companyEmail, '')) LIKE :term ESCAPE E'\\\\'
           OR LOWER(COALESCE(user.fullName, '')) LIKE :term ESCAPE E'\\\\'
           OR LOWER(COALESCE(user.company, '')) LIKE :term ESCAPE E'\\\\')`,
         { term: buildContainsLikePattern(term) },
@@ -146,6 +149,7 @@ export class AdminUsersService {
         fullName: row.fullName ?? null,
         phone: row.phone ?? null,
         company: row.company ?? null,
+        companyEmail: row.companyEmail ?? null,
         isActive: row.isActive,
         createdAt: row.createdAt,
         role: row.role
@@ -206,6 +210,9 @@ export class AdminUsersService {
       // User.fullName is nullable in DB but typed as string in entity
       // (legacy typing). Keep an empty string when not provided.
       fullName: dto.fullName?.trim() ? dto.fullName.trim() : '',
+      companyEmail: dto.companyEmail?.trim()
+        ? dto.companyEmail.trim().toLowerCase()
+        : null,
       role,
       isActive: true,
       sessionVersion: 1,
@@ -241,6 +248,7 @@ export class AdminUsersService {
       fullName: saved.fullName ?? null,
       phone: saved.phone ?? null,
       company: saved.company ?? null,
+      companyEmail: saved.companyEmail ?? null,
       isActive: saved.isActive,
       createdAt: saved.createdAt,
       role: saved.role
@@ -297,9 +305,117 @@ export class AdminUsersService {
       fullName: saved.fullName ?? null,
       phone: saved.phone ?? null,
       company: saved.company ?? null,
+      companyEmail: saved.companyEmail ?? null,
       isActive: saved.isActive,
       createdAt: saved.createdAt,
       role: { id: role.id, name: role.name, roleGroup: role.roleGroup },
+    });
+  }
+
+  /**
+   * Update display + login identity fields.
+   * Email/username uniqueness enforced; companyEmail may duplicate.
+   * Identity changes bump sessionVersion so existing JWTs fail closed.
+   */
+  async updateProfile(
+    userId: number,
+    dto: {
+      email: string;
+      username?: string | null;
+      fullName?: string | null;
+      companyEmail?: string | null;
+    },
+  ): Promise<AdminUserRowDto> {
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      relations: { role: true },
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const email = dto.email.trim().toLowerCase();
+    if (!email) {
+      throw new BadRequestException('Email is required');
+    }
+    if (email !== user.email) {
+      const existing = await this.userRepository.findOne({ where: { email } });
+      if (existing && existing.id !== userId) {
+        throw new ConflictException('Email already exists');
+      }
+    }
+
+    const usernameRaw =
+      typeof dto.username === 'string' ? dto.username.trim() : '';
+    const username = usernameRaw ? usernameRaw.toLowerCase() : null;
+    if (username && username !== (user.username ?? null)) {
+      const existingUsername = await this.userRepository
+        .createQueryBuilder('user')
+        .where("LOWER(COALESCE(user.username, '')) = :username", { username })
+        .andWhere('user.id != :userId', { userId })
+        .getOne();
+      if (existingUsername) {
+        throw new ConflictException('Username already exists');
+      }
+    }
+
+    const companyEmailRaw =
+      typeof dto.companyEmail === 'string' ? dto.companyEmail.trim() : '';
+    const companyEmail = companyEmailRaw
+      ? companyEmailRaw.toLowerCase()
+      : null;
+
+    const identityChanged =
+      email !== user.email || username !== (user.username ?? null);
+
+    user.email = email;
+    user.username = username;
+    user.fullName =
+      typeof dto.fullName === 'string' ? dto.fullName.trim() : user.fullName;
+    user.companyEmail = companyEmail;
+    if (identityChanged) {
+      user.sessionVersion = (user.sessionVersion ?? 1) + 1;
+    }
+
+    let saved: User;
+    try {
+      saved = await this.userRepository.save(user);
+    } catch (error) {
+      const pgError = error as {
+        code?: string;
+        constraint?: string;
+        detail?: string;
+      };
+      if (pgError.code === '23505') {
+        const identity =
+          `${pgError.constraint ?? ''} ${pgError.detail ?? ''}`.toLowerCase();
+        if (identity.includes('username')) {
+          throw new ConflictException('Username already exists');
+        }
+        if (identity.includes('email')) {
+          throw new ConflictException('Email already exists');
+        }
+      }
+      throw error;
+    }
+
+    return AdminUserRowDto.from({
+      id: saved.id,
+      email: saved.email,
+      username: saved.username ?? null,
+      fullName: saved.fullName ?? null,
+      phone: saved.phone ?? null,
+      company: saved.company ?? null,
+      companyEmail: saved.companyEmail ?? null,
+      isActive: saved.isActive,
+      createdAt: saved.createdAt,
+      role: saved.role
+        ? {
+            id: saved.role.id,
+            name: saved.role.name,
+            roleGroup: saved.role.roleGroup,
+          }
+        : null,
     });
   }
 

@@ -35,6 +35,13 @@ export class User {
   @Column({ length: 255, nullable: true })
   company!: string;
 
+  /**
+   * Shared workplace inbox — may duplicate across users.
+   * Never used for login (login stays on unique `email` / `username`).
+   */
+  @Column({ name: 'company_email', type: 'varchar', length: 100, nullable: true })
+  companyEmail!: string | null;
+
   @Column({ name: 'is_active', default: true })
   isActive!: boolean;
 
@@ -95,6 +102,10 @@ export class User {
     if (typeof this.username === 'string') {
       const username = this.username.trim().toLowerCase();
       this.username = username || null;
+    }
+    if (typeof this.companyEmail === 'string') {
+      const companyEmail = this.companyEmail.trim().toLowerCase();
+      this.companyEmail = companyEmail || null;
     }
     const oauthProvider =
       typeof this.oauthProvider === 'string'

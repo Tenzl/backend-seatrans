@@ -10,6 +10,15 @@ import { BookingDocumentPdfRenderer } from './rendering/booking-document-pdf.ren
 
 type StoredRecord = Record<string, unknown> & { id: number };
 
+function matchesDeletedAtFilter(row: StoredRecord, filter: unknown): boolean {
+  if (filter === undefined) return true;
+  if (!filter || typeof filter !== 'object' || !('_type' in filter))
+    return true;
+  if (filter._type === 'isNull') return row.deletedAt == null;
+  if (filter._type === 'not') return row.deletedAt != null;
+  return true;
+}
+
 function createRepositoryMock() {
   const records = new Map<number, StoredRecord>();
   let nextId = 1;
@@ -59,12 +68,14 @@ function createRepositoryMock() {
           ),
         ),
     ),
-    findAndCount: jest.fn(() => {
-      const active = [...records.values()].filter(
-        (row) => row.deletedAt == null,
-      );
-      return Promise.resolve([active, active.length]);
-    }),
+    findAndCount: jest.fn(
+      (options: { where?: { deletedAt?: unknown } } = {}) => {
+        const matched = [...records.values()].filter((row) =>
+          matchesDeletedAtFilter(row, options.where?.deletedAt),
+        );
+        return Promise.resolve([matched, matched.length]);
+      },
+    ),
     remove: jest.fn((record: StoredRecord) => {
       records.delete(record.id);
       return Promise.resolve(record);
@@ -249,17 +260,40 @@ describe('BookingDocumentRecordService lifecycle', () => {
       9,
       locked.version,
     );
-    await service.archiveRecord(
+    const archived = await service.archiveRecord(
       BookingDocumentType.ARRIVAL_NOTICE,
       created.id,
       9,
       unlocked.version,
     );
+    expect(archived.deletedAt).not.toBeNull();
 
     const listed = await service.listRecords(
       BookingDocumentType.ARRIVAL_NOTICE,
     );
     expect(listed.totalElements).toBe(0);
+
+    const archivedList = await service.listRecords(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      0,
+      10,
+      'archived',
+    );
+    expect(archivedList.totalElements).toBe(1);
+
+    const restored = await service.restoreRecord(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      created.id,
+      10,
+      archived.version,
+    );
+    expect(restored.deletedAt).toBeNull();
+    expect(restored.deletedByUserId).toBeNull();
+
+    const activeAfterRestore = await service.listRecords(
+      BookingDocumentType.ARRIVAL_NOTICE,
+    );
+    expect(activeAfterRestore.totalElements).toBe(1);
   });
 
   it('derives status on the server and rejects locking an incomplete document', async () => {

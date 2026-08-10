@@ -157,12 +157,26 @@ export class BookingDocumentsService {
     return this.recordService.archive(type, id, actorUserId, expectedVersion);
   }
 
+  async restoreRecord(
+    type: BookingDocumentType,
+    id: number,
+    actorUserId: number,
+    expectedVersion: number,
+  ) {
+    return this.recordService.restore(type, id, actorUserId, expectedVersion);
+  }
+
   async permanentDeleteRecord(type: BookingDocumentType, id: number) {
     return this.recordService.hardDelete(type, id);
   }
 
-  listRecords(type: BookingDocumentType, page = 0, size = 10) {
-    return this.recordService.list(type, page, size);
+  listRecords(
+    type: BookingDocumentType,
+    page = 0,
+    size = 10,
+    archived: 'active' | 'archived' | 'all' = 'active',
+  ) {
+    return this.recordService.list(type, page, size, archived);
   }
 
   async createPreview(
