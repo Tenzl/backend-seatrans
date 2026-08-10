@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -20,10 +19,11 @@ import {
   InquiryResponseAudience,
   mapShippingAgencyInquiryFields,
 } from '../mappers/shipping-agency-inquiry.mapper';
-import { NotificationService } from '../../notification/notification.service';
 import { InquiryFieldChangeAction } from '../entities/inquiry-field-change-log.entity';
 import { InquiryFieldChangeService } from './inquiry-field-change.service';
 import { Port } from '../../ports/entities/port.entity';
+import { Commodity } from '../../commodities/entities/commodity.entity';
+import { CommoditiesService } from '../../commodities/commodities.service';
 import type { EpdaParameterValues } from '../../epda-parameters/entities/epda-parameter-set.entity';
 import { normalizeProvinceAreaCode } from '../../provinces/province-area';
 import {
@@ -43,8 +43,6 @@ const SERVICE_SHIPPING_AGENCY = 'SHIPPING AGENCY';
 
 @Injectable()
 export class ShippingAgencyEpdaService {
-  private readonly logger = new Logger(ShippingAgencyEpdaService.name);
-
   constructor(
     @InjectRepository(ShippingAgencyInquiryEntity)
     private readonly inquiryRepository: Repository<ShippingAgencyInquiryEntity>,
@@ -54,7 +52,7 @@ export class ShippingAgencyEpdaService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(Port)
     private readonly portRepository: Repository<Port>,
-    private readonly notificationService: NotificationService,
+    private readonly commoditiesService: CommoditiesService,
     private readonly fieldChangeService: InquiryFieldChangeService,
     private readonly snapshotService: ShippingAgencyEpdaSnapshotService,
     private readonly codeAllocator: InquiryCodeAllocator,
@@ -65,15 +63,7 @@ export class ShippingAgencyEpdaService {
     dto: CreateInternalShippingAgencyInquiryDto,
     actorUserId: number,
   ): Promise<Record<string, unknown>> {
-    this.assertCompleteCreateFields(dto);
     const serviceType = await this.requireShippingAgencyServiceType();
-    const customer = await this.userRepository.findOne({
-      where: { id: dto.customerUserId },
-    });
-    if (!customer) {
-      throw new BadRequestException('Customer user not found');
-    }
-
     const canonicalPort = await this.requireCanonicalPort(dto.portId);
     const canonicalQuoteForm = this.quoteFormForPort(canonicalPort);
     this.assertCanonicalPortContract(
@@ -81,6 +71,8 @@ export class ShippingAgencyEpdaService {
       dto.portOfCall,
       dto.quoteForm,
     );
+    const effectiveParams =
+      await this.snapshotService.resolveEffectiveParamsForPort(dto.portId);
 
     return this.inquiryRepository.manager.transaction(async (manager) => {
       const repository = manager.getRepository(ShippingAgencyInquiryEntity);
@@ -99,16 +91,14 @@ export class ShippingAgencyEpdaService {
 
       const row = repository.create({
         serviceType,
-        user: customer,
-        fullName: customer.fullName,
-        email: customer.email,
-        phone: customer.phone,
-        company: customer.company,
-        // Staff-created EPDA: COMPLETED when all required fields are filled,
-        // otherwise PROCESSING (a partially-filled draft).
-        status: dto.isComplete
-          ? InquiryStatus.COMPLETED
-          : InquiryStatus.PROCESSING,
+        // BaseInquiry.user is the legacy non-null owner. For INTERNAL_EPDA it
+        // is the authenticated creator; the API exposes clientSubmittedBy=null.
+        user: actor,
+        fullName: actor.fullName,
+        email: actor.email,
+        phone: actor.phone,
+        company: actor.company,
+        status: InquiryStatus.PROCESSING,
         notes: this.trimToNull(dto.notes),
         createdSource: InquiryCreatedSource.INTERNAL_EPDA,
         processedBy: actor,
@@ -160,10 +150,12 @@ export class ShippingAgencyEpdaService {
           dto.shorecraneHireUsdPerMt,
         ),
         epdaSnapshot: null,
-        epdaWorkingParams: dto.epdaWorkingParams
-          ? normalizeEpdaWorkingParams(dto.epdaWorkingParams)
-          : null,
+        epdaWorkingParams: normalizeEpdaWorkingParams(
+          effectiveParams as unknown as Record<string, unknown>,
+        ),
       });
+
+      row.status = await this.epdaStatus(row, manager);
 
       const saved = await repository.save(row);
       // Audit: record the initial EPDA values (previous = empty) atomically.
@@ -200,12 +192,6 @@ export class ShippingAgencyEpdaService {
         );
       },
     );
-    await this.runPostCommitNotification('customer field changes', () =>
-      this.notificationService.notifyCustomerFieldChanges(
-        result.saved,
-        result.changedFields,
-      ),
-    );
     return result.payload;
   }
 
@@ -217,10 +203,10 @@ export class ShippingAgencyEpdaService {
     actorUserId: number,
   ): Promise<{
     payload: Record<string, unknown>;
-    saved: ShippingAgencyInquiryEntity;
-    changedFields: string[];
   }> {
     this.assertEpdaUnlocked(row);
+    const previousPortId = row.portId;
+    const previousWorkingParams = row.epdaWorkingParams;
     const canonicalPort = await this.validateCanonicalPortUpdate(
       row,
       dto,
@@ -270,7 +256,10 @@ export class ShippingAgencyEpdaService {
     }
     if (dto.agencyFeeMode !== undefined) {
       row.agencyFeeMode = this.trimToNull(dto.agencyFeeMode);
-      if (row.agencyFeeMode !== 'LUMPSUM' && dto.agencyOtherExpenses === undefined) {
+      if (
+        row.agencyFeeMode !== 'LUMPSUM' &&
+        dto.agencyOtherExpenses === undefined
+      ) {
         row.agencyOtherExpenses = null;
       }
     }
@@ -287,19 +276,14 @@ export class ShippingAgencyEpdaService {
         dto.agencyOtherExpenses,
       );
     }
-    // Soft-snapshot tariff params on each unlocked draft save. Hard snapshot
-    // (epdaSnapshot) is written only by lockEpda.
-    if (dto.epdaWorkingParams !== undefined) {
-      row.epdaWorkingParams = normalizeEpdaWorkingParams(dto.epdaWorkingParams);
-    }
-
-    // Draft completeness drives the status: COMPLETED when all required fields
-    // are filled, PROCESSING otherwise.
-    if (dto.isComplete !== undefined) {
-      row.status = dto.isComplete
-        ? InquiryStatus.COMPLETED
-        : InquiryStatus.PROCESSING;
-    }
+    await this.applyAuthoritativeWorkingParams(
+      row,
+      dto.epdaWorkingParams,
+      previousPortId,
+      previousWorkingParams,
+      manager,
+    );
+    row.status = await this.epdaStatus(row, manager);
 
     await this.touchProcessedBy(row, actorUserId, manager);
     const saved = await repository.save(row);
@@ -312,13 +296,8 @@ export class ShippingAgencyEpdaService {
       manager,
     );
 
-    const changedFields = (dto.confirmedCustomerFieldChanges ?? [])
-      .filter((c) => c.previousValue !== c.newValue)
-      .map((c) => c.field);
     return {
       payload: this.toAdminInquiryPayload(saved),
-      saved,
-      changedFields,
     };
   }
 
@@ -377,6 +356,13 @@ export class ShippingAgencyEpdaService {
     if (row.epdaLockedAt) {
       throw new ConflictException('EPDA is already locked');
     }
+    const missingFields = await this.missingCompleteFields(row, manager);
+    if (missingFields.length > 0) {
+      throw new BadRequestException(
+        `Cannot lock incomplete EPDA. Missing: ${missingFields.join(', ')}`,
+      );
+    }
+    row.status = InquiryStatus.COMPLETED;
     const previousLocked = row.epdaLockedAt;
     const portUnchanged =
       preResolvedEffectiveParams != null && row.portId === previewPortId;
@@ -416,13 +402,8 @@ export class ShippingAgencyEpdaService {
   }
 
   async listFieldChangeLogs(inquiryId: number, page = 0, size = 6) {
-    const row = await this.requireShippingAgencyInquiry(inquiryId);
-    return this.fieldChangeService.listForInquiry(
-      inquiryId,
-      page,
-      size,
-      row.customerSubmittedSnapshot,
-    );
+    await this.requireShippingAgencyInquiry(inquiryId);
+    return this.fieldChangeService.listForInquiry(inquiryId, page, size);
   }
 
   async listLatestCustomerFieldChanges(inquiryId: number) {
@@ -622,31 +603,11 @@ export class ShippingAgencyEpdaService {
     row.processedById = actor.id;
   }
 
-  /**
-   * Database state is already committed when this runs. Notification delivery
-   * is best-effort so an outage cannot turn a committed mutation into a ghost
-   * failure that callers retry.
-   */
-  private async runPostCommitNotification(
-    label: string,
-    task: () => Promise<unknown>,
-  ): Promise<void> {
-    try {
-      await task();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(
-        `Post-commit notification failed (${label}): ${message}`,
-      );
-    }
-  }
-
   private async requireCanonicalPort(
     portId: number,
     manager?: EntityManager,
   ): Promise<Port> {
-    const repository =
-      manager?.getRepository(Port) ?? this.portRepository;
+    const repository = manager?.getRepository(Port) ?? this.portRepository;
     const port = await repository.findOne({
       where: { id: portId },
       relations: { province: true },
@@ -738,27 +699,119 @@ export class ShippingAgencyEpdaService {
     };
   }
 
-  private assertCompleteCreateFields(
-    dto: CreateInternalShippingAgencyInquiryDto,
-  ): void {
-    if (!dto.isComplete) {
+  private async applyAuthoritativeWorkingParams(
+    row: ShippingAgencyInquiryEntity,
+    requested: Record<string, unknown> | undefined,
+    previousPortId: number | null,
+    previousWorkingParams: Record<string, unknown> | null,
+    manager: EntityManager,
+  ): Promise<void> {
+    if (!Number.isInteger(row.portId) || (row.portId ?? 0) <= 0) {
+      row.epdaWorkingParams = null;
       return;
     }
 
-    const requiredFields = [
-      ['shipownerTo', dto.shipownerTo],
-      ['vesselName', dto.vesselName],
-      ['dischargeLoadingLocation', dto.dischargeLoadingLocation],
-    ] as const;
-    const missingFields = requiredFields
-      .filter(([, value]) => this.trimToNull(value) === null)
-      .map(([field]) => field);
+    const portUnchanged = row.portId === previousPortId;
+    if (requested === undefined && portUnchanged && previousWorkingParams) {
+      return;
+    }
 
-    if (missingFields.length > 0) {
-      throw new BadRequestException(
-        `Complete EPDA requires: ${missingFields.join(', ')}`,
+    const effective = await this.snapshotService.resolveEffectiveParamsForPort(
+      row.portId as number,
+      manager,
+    );
+    const normalizedRequested = requested
+      ? normalizeEpdaWorkingParams(requested)
+      : undefined;
+    const keepsServerPinnedParams =
+      // ponytail: pre-hardening drafts have no provenance marker; reset their
+      // working params during rollout if untrusted clients could write them.
+      portUnchanged &&
+      normalizedRequested != null &&
+      previousWorkingParams != null &&
+      this.snapshotService.snapshotsEqual(
+        previousWorkingParams,
+        normalizedRequested,
+      );
+    const appliesCurrentParams =
+      normalizedRequested == null ||
+      this.snapshotService.snapshotsEqual(
+        effective as unknown as Record<string, unknown>,
+        normalizedRequested,
+      );
+
+    if (!keepsServerPinnedParams && !appliesCurrentParams) {
+      throw new ConflictException(
+        'EPDA working parameters must match the server-pinned set or current effective parameters',
       );
     }
+
+    row.epdaWorkingParams = keepsServerPinnedParams
+      ? normalizeEpdaWorkingParams(previousWorkingParams)
+      : normalizeEpdaWorkingParams(
+          effective as unknown as Record<string, unknown>,
+        );
+  }
+
+  private async epdaStatus(
+    row: ShippingAgencyInquiryEntity,
+    manager: EntityManager,
+  ): Promise<InquiryStatus> {
+    return (await this.missingCompleteFields(row, manager)).length === 0
+      ? InquiryStatus.COMPLETED
+      : InquiryStatus.PROCESSING;
+  }
+
+  private async missingCompleteFields(
+    row: ShippingAgencyInquiryEntity,
+    manager: EntityManager,
+  ): Promise<string[]> {
+    const requiredFields: Array<[string, unknown]> = [
+      ['shipownerTo', row.toName],
+      ['vesselName', row.mv],
+      ['dischargeLoadingLocation', row.dischargeLoadingLocation],
+      ['dwt', row.dwt],
+      ['grt', row.grt],
+      ['loa', row.loa],
+      ['quantityTons', row.cargoQuantity],
+      ['cargoType', row.cargoType],
+      ['purposeOfCalling', row.purposeOfCalling],
+      ['portId', row.portId],
+    ];
+    const cargoName = this.trimToNull(row.cargoName ?? row.cargoNameOther);
+    if (
+      !cargoName &&
+      row.cargoType &&
+      (await manager.getRepository(Commodity).exists({
+        where: {
+          serviceTypeId: row.serviceType.id,
+          cargoType: this.commoditiesService.normalizeCargoTypePublic(
+            row.cargoType,
+          ),
+        },
+      }))
+    ) {
+      requiredFields.push(['cargoName', null]);
+    }
+    const purpose = this.normalizeOptionCode(row.purposeOfCalling);
+    if (purpose === 'NHAP_XUAT' || purpose === 'CHUYEN_CANG_XUAT') {
+      requiredFields.push(['frtTaxType', row.frtTaxType]);
+    }
+    return requiredFields
+      .filter(([, value]) => {
+        if (value == null) return true;
+        if (typeof value === 'string') return value.trim() === '';
+        if (typeof value === 'number') return !Number.isFinite(value);
+        return false;
+      })
+      .map(([field]) => field);
+  }
+
+  private normalizeOptionCode(value: string | null | undefined): string {
+    return String(value ?? '')
+      .trim()
+      .toUpperCase()
+      .replace(/[\s-]+/g, '_');
   }
 
   private trimToNull(value?: string | null): string | null {

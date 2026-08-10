@@ -29,4 +29,31 @@ describe('InquiryFieldChangeService transaction repository', () => {
     expect(defaultRepository.create).not.toHaveBeenCalled();
     expect(defaultRepository.save).not.toHaveBeenCalled();
   });
+
+  it('keeps the recorded previous value in chronological history', async () => {
+    const createdAt = new Date('2026-08-10T00:00:00.000Z');
+    const repository = {
+      findAndCount: jest.fn().mockResolvedValue([
+        [
+          {
+            id: 1,
+            inquiryId: 2,
+            fieldName: 'loa',
+            previousValue: '100',
+            newValue: '101',
+            action: InquiryFieldChangeAction.EPDA_SAVE_DRAFT,
+            createdAt,
+            changedByUserId: 3,
+            changedBy: null,
+          },
+        ],
+        1,
+      ]),
+    };
+    const service = new InquiryFieldChangeService(repository as never);
+
+    const page = await service.listForInquiry(2, 0, 20);
+
+    expect(page.content[0]?.previousValue).toBe('100');
+  });
 });

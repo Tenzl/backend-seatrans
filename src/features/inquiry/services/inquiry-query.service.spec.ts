@@ -7,6 +7,7 @@ import { FreightForwardingInquiryEntity } from '../entities/freight-forwarding-i
 import { TotalLogisticsInquiryEntity } from '../entities/total-logistics-inquiry.entity';
 import { SpecialRequestInquiryEntity } from '../entities/special-request-inquiry.entity';
 import { InquiryStatus } from '../enums/inquiry-status.enum';
+import { InquiryCreatedSource } from '../enums/inquiry-created-source.enum';
 
 describe('InquiryQueryService list filters (FE-03)', () => {
   function setup() {
@@ -30,6 +31,17 @@ describe('InquiryQueryService list filters (FE-03)', () => {
           status: InquiryStatus.PROCESSING,
           serviceType: { id: 1, name: 'SHIPPING AGENCY', displayName: 'SA' },
           userId: 9,
+          user: {
+            id: 9,
+            fullName: 'Ada',
+            email: 'ada@example.com',
+          },
+          processedBy: {
+            id: 99,
+            fullName: 'Employee',
+            email: 'employee@example.com',
+          },
+          createdSource: InquiryCreatedSource.CUSTOMER_PORTAL,
           submittedAt: new Date('2026-08-01T10:00:00.000Z'),
           updatedAt: new Date('2026-08-01T10:00:00.000Z'),
           deletedAt: null,
@@ -85,9 +97,7 @@ describe('InquiryQueryService list filters (FE-03)', () => {
       },
     );
 
-    expect(qb.andWhere).toHaveBeenCalledWith(
-      'inquiry.deleted_at IS NULL',
-    );
+    expect(qb.andWhere).toHaveBeenCalledWith('inquiry.deleted_at IS NULL');
     expect(qb.andWhere).toHaveBeenCalledWith(
       'inquiry.submitted_at >= :dateFrom',
       { dateFrom: new Date('2026-08-01T00:00:00.000Z') },
@@ -100,25 +110,31 @@ describe('InquiryQueryService list filters (FE-03)', () => {
       expect.stringContaining("LIKE :q ESCAPE E'\\\\'"),
       { q: '%100\\%\\_ada%' },
     );
-    expect(qb.andWhere.mock.calls.some((call) => String(call[0]).includes('.mv'))).toBe(
-      true,
-    );
+    expect(qb.andWhere).toHaveBeenCalledWith(expect.stringContaining('.mv'), {
+      q: '%100\\%\\_ada%',
+    });
     expect(page.totalElements).toBe(2);
     expect(page.content).toHaveLength(1);
+    expect(qb.leftJoinAndSelect).toHaveBeenCalledWith(
+      'inquiry.processedBy',
+      'employeeInCharge',
+    );
+    expect(page.content[0]).toMatchObject({
+      employeeInCharge: { id: 99 },
+      clientSubmittedBy: { id: 9 },
+    });
   });
 
   it('pushes q/date filters into the cross-service UNION count/page SQL', async () => {
     const { service, shippingRepo } = setup();
-    const managerQuery = shippingRepo.manager.query as jest.Mock;
-    managerQuery
-      .mockResolvedValueOnce([{ total: 3 }])
-      .mockResolvedValueOnce([
-        {
-          id: 11,
-          slug: 'shipping-agency',
-          submitted_at: '2026-08-02T00:00:00.000Z',
-        },
-      ]);
+    const managerQuery = shippingRepo.manager.query;
+    managerQuery.mockResolvedValueOnce([{ total: 3 }]).mockResolvedValueOnce([
+      {
+        id: 11,
+        slug: 'shipping-agency',
+        submitted_at: '2026-08-02T00:00:00.000Z',
+      },
+    ]);
     shippingRepo.find = jest.fn().mockResolvedValue([
       {
         id: 11,
@@ -148,15 +164,10 @@ describe('InquiryQueryService list filters (FE-03)', () => {
       },
     );
 
-    expect(managerQuery).toHaveBeenCalled();
-    const countSql = String(managerQuery.mock.calls[0][0]);
-    expect(countSql).toMatch(/full_name/);
-    expect(countSql).toMatch(/submitted_at >=/);
-    expect(managerQuery.mock.calls[0][1]).toEqual(
-      expect.arrayContaining([
-        new Date('2026-08-01T00:00:00.000Z'),
-        '%bob%',
-      ]),
+    expect(managerQuery).toHaveBeenNthCalledWith(
+      1,
+      expect.stringMatching(/full_name[\s\S]*submitted_at >=/),
+      expect.arrayContaining([new Date('2026-08-01T00:00:00.000Z'), '%bob%']),
     );
     expect(page.totalElements).toBe(3);
     expect(page.content).toHaveLength(1);

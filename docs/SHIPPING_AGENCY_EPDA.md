@@ -10,6 +10,10 @@ All inquiries use `shipping_agency_inquiries`. Internal EPDA fields are **column
 | `epda_document_date`, `agency_fee_mode`, `agency_other_expenses`, `epda_snapshot`, … | Admin only |
 | `quoted_at`, `quoted_by_user_id` | Admin only; customers see `quoteAvailable: true` |
 
+Admin responses expose `employeeInCharge` from `processed_by`. They expose
+`clientSubmittedBy` from `user_id` only for `CUSTOMER_PORTAL` records; an
+`INTERNAL_EPDA` created by staff always returns `clientSubmittedBy: null`.
+
 Run migration: `docs/sql/2026-05-27_shipping_agency_inquiries_epda_internal_fields_postgres.sql`
 
 `agency_other_expenses` (JSONB, optional): array of `{ "name": string, "amount": number }` for custom fee lines under agency **in lumpsum** mode. Cleared when fee mode is not `LUMPSUM`. Migration: `docs/sql/2026-08-07_agency_other_expenses_postgres.sql`.
@@ -27,13 +31,12 @@ Run migration: `docs/sql/2026-05-27_shipping_agency_inquiries_epda_internal_fiel
 
 | Method | Path | Auth |
 |--------|------|------|
-| GET | `/api/v1/admin/users/external-customers?q=&limit=` | Admin / Employee / Internal |
-| POST | `/api/v1/admin/users/external-customers` `{ "fullName": "..." }` | Admin / Employee / Internal |
 | POST | `/api/v1/admin/inquiries/shipping-agency` | Admin / Employee / Internal |
 | PATCH | `/api/v1/admin/inquiries/shipping-agency/:id/epda` | Admin / Employee / Internal |
 | POST | `/api/v1/admin/inquiries/shipping-agency/:id/epda/lock` | Admin / Employee / Internal |
 
-**External customers (Create EPDA):** List returns users whose role has `role_group = EXTERNAL`. Creating a customer sets `role_id` from `EXTERNAL_CUSTOMER_ROLE_ID` (default `4`), `full_name` from the request, `created_by_user_id` to the authenticated staff user, and a unique placeholder `email` under `EXTERNAL_CUSTOMER_PLACEHOLDER_EMAIL_DOMAIN` (default `customers.seatrans.local`). Migration: `docs/sql/2026-05-28_users_created_by_user_id_postgres.sql`.
+**Create EPDA:** ownership is derived from the authenticated staff user. The
+request does not accept a client/owner user id.
 
 ## Security
 

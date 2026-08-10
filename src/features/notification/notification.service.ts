@@ -91,45 +91,6 @@ export class NotificationService {
     return { updated: result.affected ?? 0 };
   }
 
-  async notifyCustomerFieldChanges(
-    inquiry: BaseInquiry,
-    changedFields: string[],
-  ): Promise<Notification | null> {
-    if (!changedFields.length) return null;
-    if (!inquiry.userId) return null;
-
-    const fieldLabels: Record<string, string> = {
-      loa: 'LOA',
-      dwt: 'DWT',
-      grt: 'GRT',
-      cargoQty: 'Quantity (MT)',
-      cargoType: 'Cargo type',
-      cargoName: 'Cargo name',
-      port: 'Port of call',
-    };
-
-    const changedLabels = changedFields
-      .map((f) => fieldLabels[f] ?? f)
-      .join(', ');
-
-    const row = this.notificationRepository.create({
-      userId: inquiry.userId,
-      inquiryId: inquiry.id,
-      type: NotificationType.INQUIRY_FIELD_CHANGED,
-      title: 'Inquiry details updated',
-      body: `Your inquiry ${inquiry.code || `#${inquiry.id}`} has been updated. Changed fields: ${changedLabels}.`,
-      metadata: {
-        inquiryId: inquiry.id,
-        serviceType: inquiry.serviceType?.name ?? null,
-        serviceSlug: this.toServiceSlug(inquiry.serviceType?.name),
-        changedFields,
-      },
-      readAt: null,
-    });
-
-    return this.notificationRepository.save(row);
-  }
-
   async notifyInquiryQuotedIfNeeded(
     inquiry: BaseInquiry,
     previousStatus: string,

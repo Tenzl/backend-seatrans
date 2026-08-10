@@ -5,6 +5,7 @@ import { ShippingAgencyInquiryEntity } from '../entities/shipping-agency-inquiry
 import { User } from '../../auth/entities/user.entity';
 import { ServiceType } from '../../logistics/entities/service-type.entity';
 import { Port } from '../../ports/entities/port.entity';
+import { Commodity } from '../../commodities/entities/commodity.entity';
 import { ShippingAgencyEpdaSnapshotService } from './shipping-agency-epda-snapshot.service';
 import { InquiryCodeAllocator } from './inquiry-code-allocator';
 import { InquiryRepositoryRegistry } from './inquiry-repository.registry';
@@ -41,7 +42,25 @@ describe('ShippingAgencyEpdaService increment 1', () => {
     phone: '0900',
     company: 'Customer Co',
   };
-  const actor = { id: 99 };
+  const actor = {
+    id: 99,
+    fullName: 'Employee',
+    email: 'employee@example.com',
+    phone: '0911',
+    company: 'Seatrans',
+  };
+  const completeEpdaFields = {
+    toName: 'Owner',
+    mv: 'MV Test',
+    dischargeLoadingLocation: 'BERTH',
+    dwt: '10000',
+    grt: '8000',
+    loa: '150',
+    cargoQuantity: '1200',
+    cargoType: 'IN_BULK',
+    cargoName: 'RICE',
+    purposeOfCalling: 'MUC_DICH_KHAC',
+  };
 
   function setup(existingInquiry?: Record<string, unknown>) {
     const events: string[] = [];
@@ -79,6 +98,9 @@ describe('ShippingAgencyEpdaService increment 1', () => {
         if (entity === Port) {
           return portRepository;
         }
+        if (entity === Commodity) {
+          return commodityRepository;
+        }
         throw new Error('Unexpected transaction repository');
       }),
       query: jest.fn().mockResolvedValue(undefined),
@@ -113,17 +135,6 @@ describe('ShippingAgencyEpdaService increment 1', () => {
         Promise.resolve(where.id === customer.id ? customer : actor),
       ),
     };
-    const notificationService = {
-      notifyCustomerFieldChanges: jest.fn(() => {
-        events.push('notification:customer-fields');
-      }),
-      notifyStatusChanged: jest.fn(() => {
-        events.push('notification:status');
-      }),
-      notifyInquiryQuotedIfNeeded: jest.fn(() => {
-        events.push('notification:quoted');
-      }),
-    };
     const fieldChangeService = {
       logFieldChanges: jest.fn(() => {
         events.push('audit');
@@ -137,12 +148,18 @@ describe('ShippingAgencyEpdaService increment 1', () => {
         province: { area: 1 },
       }),
     };
+    const commodityRepository = {
+      exists: jest.fn().mockResolvedValue(true),
+    };
     const effectiveParameters = {
       hours: { berthHours: 64 },
       coeff: { clearanceFee: 50, pilotageSingleRate: 0.0045 },
     };
     const epdaParametersService = {
       getEffective: jest.fn().mockResolvedValue(effectiveParameters),
+    };
+    const commoditiesService = {
+      normalizeCargoTypePublic: jest.fn((value: string) => value),
     };
     const repositories = new InquiryRepositoryRegistry(
       inquiryRepository as unknown as Repository<ShippingAgencyInquiryEntity>,
@@ -156,7 +173,7 @@ describe('ShippingAgencyEpdaService increment 1', () => {
       serviceTypeRepository as never,
       userRepository as never,
       portRepository as never,
-      notificationService as never,
+      commoditiesService as never,
       fieldChangeService as never,
       new ShippingAgencyEpdaSnapshotService(epdaParametersService as never),
       new InquiryCodeAllocator(),
@@ -169,8 +186,8 @@ describe('ShippingAgencyEpdaService increment 1', () => {
       lockedQueryBuilder,
       transaction,
       portRepository,
+      commodityRepository,
       userRepository,
-      notificationService,
       fieldChangeService,
       transactionManager,
       transactionalUserRepository,
@@ -181,18 +198,27 @@ describe('ShippingAgencyEpdaService increment 1', () => {
   }
 
   it('persists the complete create payload including canonical portId', async () => {
-    const { service, inquiryRepository, transactionalRepository } = setup();
+    const {
+      service,
+      inquiryRepository,
+      transactionalRepository,
+      effectiveParameters,
+    } = setup();
 
     await service.createInternalInquiry(
       {
-        customerUserId: customer.id,
         shipownerTo: 'Owner',
         vesselName: 'MV Test',
         portId: 21,
         portOfCall: 'HAI PHONG',
         dischargeLoadingLocation: 'BERTH',
         quoteForm: 'HN',
+        dwt: 10000,
+        grt: 8000,
+        loa: 150,
+        cargoType: 'IN_BULK',
         cargoNameOther: 'Project cargo',
+        purposeOfCalling: 'MUC_DICH_KHAC',
         quantityTons: 1250,
         boatHireAmount: 100,
         tallyFeeAmount: 200,
@@ -205,6 +231,10 @@ describe('ShippingAgencyEpdaService increment 1', () => {
 
     expect(transactionalRepository.create).toHaveBeenCalledWith(
       expect.objectContaining({
+        user: actor,
+        processedBy: actor,
+        epdaWorkingParams: effectiveParameters,
+        status: InquiryStatus.COMPLETED,
         portId: 21,
         cargoNameOther: 'Project cargo',
         cargoQuantity: '1250',
@@ -223,9 +253,7 @@ describe('ShippingAgencyEpdaService increment 1', () => {
 
     await service.createInternalInquiry(
       {
-        customerUserId: customer.id,
         portId: 21,
-        isComplete: false,
       },
       actor.id,
     );
@@ -240,20 +268,39 @@ describe('ShippingAgencyEpdaService increment 1', () => {
     );
   });
 
-  it('rejects a complete create with missing required vessel fields', async () => {
+  it('derives incomplete create status on the server', async () => {
     const { service, transactionalRepository } = setup();
 
-    await expect(
-      service.createInternalInquiry(
-        {
-          customerUserId: customer.id,
-          portId: 21,
-          isComplete: true,
-        },
-        actor.id,
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    expect(transactionalRepository.save).not.toHaveBeenCalled();
+    await service.createInternalInquiry({ portId: 21 }, actor.id);
+
+    expect(transactionalRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: InquiryStatus.PROCESSING }),
+    );
+  });
+
+  it('does not require cargo name when its cargo type has no catalog options', async () => {
+    const { service, commodityRepository, transactionalRepository } = setup();
+    commodityRepository.exists.mockResolvedValue(false);
+
+    await service.createInternalInquiry(
+      {
+        portId: 21,
+        shipownerTo: 'Owner',
+        vesselName: 'MV Test',
+        dischargeLoadingLocation: 'BERTH',
+        dwt: 10000,
+        grt: 8000,
+        loa: 150,
+        quantityTons: 1200,
+        cargoType: 'IN_BULK',
+        purposeOfCalling: 'MUC_DICH_KHAC',
+      },
+      actor.id,
+    );
+
+    expect(transactionalRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: InquiryStatus.COMPLETED }),
+    );
   });
 
   it('rejects a canonical port paired with the wrong quote form', async () => {
@@ -267,7 +314,6 @@ describe('ShippingAgencyEpdaService increment 1', () => {
     await expect(
       service.createInternalInquiry(
         {
-          customerUserId: customer.id,
           shipownerTo: 'Owner',
           vesselName: 'MV Test',
           portId: 21,
@@ -285,7 +331,6 @@ describe('ShippingAgencyEpdaService increment 1', () => {
 
     await service.createInternalInquiry(
       {
-        customerUserId: customer.id,
         shipownerTo: 'Owner',
         vesselName: 'MV Test',
         portId: 21,
@@ -314,7 +359,6 @@ describe('ShippingAgencyEpdaService increment 1', () => {
 
     await service.createInternalInquiry(
       {
-        customerUserId: customer.id,
         shipownerTo: 'Owner',
         vesselName: 'MV Test',
         portId: 21,
@@ -351,7 +395,6 @@ describe('ShippingAgencyEpdaService increment 1', () => {
     await expect(
       service.createInternalInquiry(
         {
-          customerUserId: customer.id,
           shipownerTo: 'Owner',
           vesselName: 'MV Test',
           portId: 21,
@@ -372,7 +415,7 @@ describe('ShippingAgencyEpdaService increment 1', () => {
     expect(transactionalUserRepository.findOne).toHaveBeenCalledWith({
       where: { id: actor.id },
     });
-    expect(userRepository.findOne).toHaveBeenCalledTimes(1);
+    expect(userRepository.findOne).not.toHaveBeenCalled();
     expect(inquiryRepository.save).not.toHaveBeenCalled();
     expect(events).toContain('transaction:rollback');
     expect(events).not.toContain('transaction:commit');
@@ -429,8 +472,116 @@ describe('ShippingAgencyEpdaService increment 1', () => {
     );
   });
 
+  it('derives update status from saved fields', async () => {
+    const existing = {
+      id: 1,
+      serviceType,
+      user: customer,
+      userId: customer.id,
+      processedById: actor.id,
+      epdaLockedAt: null,
+      epdaWorkingParams: null,
+      portId: 21,
+      status: InquiryStatus.PROCESSING,
+    };
+    const { service, transactionalRepository } = setup(existing);
+
+    await service.updateEpda(1, {}, actor.id);
+
+    expect(transactionalRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: InquiryStatus.PROCESSING }),
+    );
+  });
+
+  it('rejects arbitrary client working parameters on draft save', async () => {
+    const existing = {
+      id: 1,
+      serviceType,
+      user: customer,
+      userId: customer.id,
+      processedById: actor.id,
+      epdaLockedAt: null,
+      epdaWorkingParams: { coeff: { clearanceFee: 50 } },
+      portId: 21,
+      status: InquiryStatus.PROCESSING,
+    };
+    const { service, transactionalRepository } = setup(existing);
+
+    await expect(
+      service.updateEpda(
+        1,
+        { epdaWorkingParams: { coeff: { clearanceFee: 999 } } },
+        actor.id,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(transactionalRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('invalidates pinned working parameters when port changes', async () => {
+    const pinned = { coeff: { clearanceFee: 50 } };
+    const existing = {
+      id: 1,
+      serviceType,
+      user: customer,
+      userId: customer.id,
+      processedById: actor.id,
+      epdaLockedAt: null,
+      epdaWorkingParams: pinned,
+      portId: 21,
+      portOfCall: 'HAI PHONG',
+      quoteForm: 'HN',
+      status: InquiryStatus.PROCESSING,
+    };
+    const {
+      service,
+      portRepository,
+      transactionalRepository,
+      effectiveParameters,
+    } = setup(existing);
+    portRepository.findOne.mockResolvedValue({
+      id: 22,
+      portOfCall: 'HAI PHONG',
+      province: { area: 1 },
+    });
+
+    await service.updateEpda(1, { portId: 22 }, actor.id);
+
+    expect(transactionalRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        portId: 22,
+        epdaWorkingParams: effectiveParameters,
+      }),
+    );
+  });
+
+  it('rejects locking an incomplete EPDA even when status says completed', async () => {
+    const existing = {
+      id: 1,
+      serviceType,
+      user: customer,
+      userId: customer.id,
+      processedById: actor.id,
+      portId: 21,
+      epdaSnapshot: null,
+      epdaLockedAt: null,
+      status: InquiryStatus.COMPLETED,
+    };
+    const { service, transactionalRepository, effectiveParameters } =
+      setup(existing);
+
+    await expect(
+      service.lockEpda(
+        1,
+        { epdaSnapshot: { params: effectiveParameters } },
+        actor.id,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(transactionalRepository.save).not.toHaveBeenCalled();
+  });
+
   it('serializes lock attempts behind a pessimistic row lock', async () => {
     const existing = {
+      ...completeEpdaFields,
       id: 1,
       serviceType,
       user: customer,
@@ -482,6 +633,7 @@ describe('ShippingAgencyEpdaService increment 1', () => {
 
   it('resolves effective tariff params before acquiring the inquiry row lock', async () => {
     const existing = {
+      ...completeEpdaFields,
       id: 1,
       serviceType,
       user: customer,
@@ -568,6 +720,7 @@ describe('ShippingAgencyEpdaService increment 1', () => {
       coeff: { clearanceFee: 49, pilotageSingleRate: 0.003 },
     };
     const existing = {
+      ...completeEpdaFields,
       id: 1,
       serviceType,
       user: customer,
@@ -599,7 +752,7 @@ describe('ShippingAgencyEpdaService increment 1', () => {
           params: pinnedParams,
           grand_total: 900,
         },
-        epdaLockedAt: expect.any(Date),
+        epdaLockedAt: expect.any(Date) as Date,
       }),
     );
     // Skip freezes working params; live effective must not overwrite them.
@@ -608,6 +761,7 @@ describe('ShippingAgencyEpdaService increment 1', () => {
 
   it('locks with Apply when params match current effective parameters', async () => {
     const existing = {
+      ...completeEpdaFields,
       id: 1,
       serviceType,
       user: customer,
@@ -642,13 +796,14 @@ describe('ShippingAgencyEpdaService increment 1', () => {
           params: effectiveParameters,
           grand_total: 1500,
         },
-        epdaLockedAt: expect.any(Date),
+        epdaLockedAt: expect.any(Date) as Date,
       }),
     );
   });
 
   it('rejects lock with arbitrary params that match neither working nor live (409)', async () => {
     const existing = {
+      ...completeEpdaFields,
       id: 1,
       serviceType,
       user: customer,
@@ -685,6 +840,7 @@ describe('ShippingAgencyEpdaService increment 1', () => {
 
   it('rejects negative totals when locking a snapshot', async () => {
     const existing = {
+      ...completeEpdaFields,
       id: 1,
       serviceType,
       user: customer,
@@ -737,6 +893,7 @@ describe('ShippingAgencyEpdaService increment 1', () => {
 
   it('lets the first serialized lock win and rejects a second snapshot', async () => {
     const existing = {
+      ...completeEpdaFields,
       id: 1,
       serviceType,
       user: customer,
@@ -773,7 +930,7 @@ describe('ShippingAgencyEpdaService increment 1', () => {
     });
   });
 
-  it('writes audit through the transaction manager and notifies only after commit', async () => {
+  it('writes audit through the transaction manager', async () => {
     const existing = {
       id: 1,
       serviceType,
@@ -783,23 +940,9 @@ describe('ShippingAgencyEpdaService increment 1', () => {
       epdaLockedAt: null,
       status: InquiryStatus.PROCESSING,
     };
-    const {
-      service,
-      fieldChangeService,
-      transactionManager,
-      notificationService,
-      events,
-    } = setup(existing);
+    const { service, fieldChangeService, transactionManager } = setup(existing);
 
-    await service.updateEpda(
-      1,
-      {
-        confirmedCustomerFieldChanges: [
-          { field: 'loa', previousValue: '100', newValue: '101' },
-        ],
-      },
-      actor.id,
-    );
+    await service.updateEpda(1, { loa: 101 }, actor.id);
 
     expect(fieldChangeService.logFieldChanges).toHaveBeenCalledWith(
       expect.any(Number),
@@ -808,39 +951,5 @@ describe('ShippingAgencyEpdaService increment 1', () => {
       expect.any(Array),
       transactionManager,
     );
-    expect(notificationService.notifyCustomerFieldChanges).toHaveBeenCalled();
-    expect(events.indexOf('transaction:commit')).toBeLessThan(
-      events.indexOf('notification:customer-fields'),
-    );
-  });
-
-  it('keeps a committed EPDA mutation successful when post-commit notification fails', async () => {
-    const existing = {
-      id: 1,
-      serviceType,
-      user: customer,
-      userId: customer.id,
-      processedById: actor.id,
-      epdaLockedAt: null,
-      status: InquiryStatus.PROCESSING,
-    };
-    const { service, notificationService, transactionalRepository } =
-      setup(existing);
-    (
-      notificationService.notifyCustomerFieldChanges as jest.Mock
-    ).mockRejectedValueOnce(new Error('notification database unavailable'));
-
-    await expect(
-      service.updateEpda(
-        1,
-        {
-          confirmedCustomerFieldChanges: [
-            { field: 'loa', previousValue: '100', newValue: '101' },
-          ],
-        },
-        actor.id,
-      ),
-    ).resolves.toBeDefined();
-    expect(transactionalRepository.save).toHaveBeenCalledTimes(1);
   });
 });

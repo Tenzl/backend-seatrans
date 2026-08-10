@@ -2,7 +2,6 @@ import { Transform, Type, type TransformFnParams } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
-  IsBoolean,
   IsDateString,
   IsIn,
   IsInt,
@@ -16,7 +15,6 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { AgencyOtherExpenseDto } from './agency-other-expense.dto';
-import { ConfirmedCustomerFieldChangeDto } from './confirmed-customer-field-change.dto';
 import {
   EPDA_QUOTE_FORMS,
   type EpdaQuoteForm,
@@ -245,18 +243,4 @@ export class UpdateShippingAgencyEpdaDto {
   @IsOptional()
   @IsObject()
   epdaWorkingParams?: Record<string, unknown>;
-
-  /** Staff-confirmed overrides of customer-submitted values (audit log). */
-  @IsOptional()
-  @ValidateNested({ each: true })
-  @Type(() => ConfirmedCustomerFieldChangeDto)
-  confirmedCustomerFieldChanges?: ConfirmedCustomerFieldChangeDto[];
-
-  /**
-   * Whether all required EPDA fields are filled (computed by the admin UI).
-   * Drives the draft status: true → COMPLETED, false → PROCESSING.
-   */
-  @IsOptional()
-  @IsBoolean()
-  isComplete?: boolean;
 }

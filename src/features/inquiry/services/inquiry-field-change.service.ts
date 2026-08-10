@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
-import { ConfirmedCustomerFieldChangeDto } from '../dto/confirmed-customer-field-change.dto';
 import {
   InquiryFieldChangeAction,
   InquiryFieldChangeLog,
@@ -71,42 +70,10 @@ export class InquiryFieldChangeService {
     await repository.save(rows);
   }
 
-  async logConfirmedChanges(
-    inquiryId: number,
-    actorUserId: number,
-    action: InquiryFieldChangeAction,
-    changes: ConfirmedCustomerFieldChangeDto[] | undefined,
-    customerSubmittedSnapshot: Record<string, string> | null | undefined,
-    manager?: EntityManager,
-  ): Promise<void> {
-    if (!changes?.length) return;
-    const repository =
-      manager?.getRepository(InquiryFieldChangeLog) ?? this.logRepo;
-
-    const rows = changes.map((change) => {
-      const original =
-        originalValueFromSnapshot(customerSubmittedSnapshot, change.field) ??
-        change.previousValue ??
-        null;
-
-      return repository.create({
-        inquiryId,
-        fieldName: change.field,
-        previousValue: original,
-        newValue: change.newValue ?? null,
-        changedByUserId: actorUserId,
-        action,
-      });
-    });
-
-    await repository.save(rows);
-  }
-
   async listForInquiry(
     inquiryId: number,
     page = 0,
     size = 6,
-    customerSubmittedSnapshot?: Record<string, string> | null,
   ): Promise<InquiryFieldChangePage> {
     const safePage = Math.max(0, page);
     const safeSize = Math.min(50, Math.max(1, size));
@@ -124,15 +91,11 @@ export class InquiryFieldChangeService {
 
     return {
       content: rows.map((row) => {
-        const original =
-          originalValueFromSnapshot(customerSubmittedSnapshot, row.fieldName) ??
-          row.previousValue;
-
         return {
           id: row.id,
           inquiryId: row.inquiryId,
           fieldName: row.fieldName,
-          previousValue: original,
+          previousValue: row.previousValue,
           newValue: row.newValue,
           action: row.action,
           createdAt: row.createdAt.toISOString(),

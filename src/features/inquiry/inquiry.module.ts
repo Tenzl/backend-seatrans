@@ -11,6 +11,7 @@ import { InquiryIdempotencyKey } from './entities/inquiry-idempotency-key.entity
 import { ServiceType } from '../logistics/entities/service-type.entity';
 import { User } from '../auth/entities/user.entity';
 import { Port } from '../ports/entities/port.entity';
+import { CommoditiesModule } from '../commodities/commodities.module';
 import { ServiceInquiryService } from './services/service-inquiry.service';
 import { ShippingAgencyEpdaService } from './services/shipping-agency-epda.service';
 import { InquiryDocumentService } from './services/inquiry-document.service';
@@ -47,6 +48,7 @@ import { InquirySubmissionLifecycle } from './services/inquiry-submission-lifecy
     ]),
     NotificationModule,
     EpdaParametersModule,
+    CommoditiesModule,
   ],
   providers: [
     InquiryRepositoryRegistry,

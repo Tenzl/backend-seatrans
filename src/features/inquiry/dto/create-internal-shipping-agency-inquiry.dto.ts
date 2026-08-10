@@ -2,18 +2,15 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
-  IsBoolean,
   IsDateString,
   IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
-  IsObject,
   IsOptional,
   IsString,
   MaxLength,
   Min,
-  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { AgencyOtherExpenseDto } from './agency-other-expense.dto';
@@ -26,27 +23,18 @@ import {
  * Internal-only: create shipping agency inquiry with EPDA fields pre-filled.
  */
 export class CreateInternalShippingAgencyInquiryDto {
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  customerUserId!: number;
-
   @IsOptional()
   @IsString()
   @MaxLength(2000)
   notes?: string;
 
-  @ValidateIf(
-    (dto: CreateInternalShippingAgencyInquiryDto) => dto.isComplete !== false,
-  )
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
   shipownerTo?: string | null;
 
-  @ValidateIf(
-    (dto: CreateInternalShippingAgencyInquiryDto) => dto.isComplete !== false,
-  )
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
@@ -107,9 +95,7 @@ export class CreateInternalShippingAgencyInquiryDto {
   @IsNotEmpty()
   portOfCall?: string;
 
-  @ValidateIf(
-    (dto: CreateInternalShippingAgencyInquiryDto) => dto.isComplete !== false,
-  )
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   dischargeLoadingLocation?: string | null;
@@ -224,19 +210,4 @@ export class CreateInternalShippingAgencyInquiryDto {
   @IsNumber()
   @Min(0)
   shorecraneHireUsdPerMt?: number;
-
-  /**
-   * Soft-snapshot of tariff params at create time (unlocked draft baseline).
-   */
-  @IsOptional()
-  @IsObject()
-  epdaWorkingParams?: Record<string, unknown>;
-
-  /**
-   * Whether all required EPDA fields are filled (computed by the admin UI).
-   * Drives the initial status: true → COMPLETED, false → PROCESSING.
-   */
-  @IsOptional()
-  @IsBoolean()
-  isComplete?: boolean;
 }

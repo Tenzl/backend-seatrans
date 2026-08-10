@@ -5,7 +5,6 @@ import { UpdateShippingAgencyEpdaDto } from './update-shipping-agency-epda.dto';
 describe('shipping-agency EPDA DTO contract', () => {
   it('accepts HN and retains every create-only EPDA field', async () => {
     const dto = await validateDto(CreateInternalShippingAgencyInquiryDto, {
-      customerUserId: 10,
       shipownerTo: 'Owner',
       vesselName: 'MV Test',
       portId: 21,
@@ -59,7 +58,6 @@ describe('shipping-agency EPDA DTO contract', () => {
   it('rejects client-owned epdaSnapshot from create drafts', async () => {
     await expect(
       validateDto(CreateInternalShippingAgencyInquiryDto, {
-        customerUserId: 10,
         shipownerTo: 'Owner',
         vesselName: 'MV Test',
         portId: 21,
@@ -84,7 +82,6 @@ describe('shipping-agency EPDA DTO contract', () => {
   it('requires canonical portId for every internal EPDA draft', async () => {
     await expect(
       validateDto(CreateInternalShippingAgencyInquiryDto, {
-        customerUserId: 10,
         shipownerTo: 'Owner',
         vesselName: 'MV Test',
         dischargeLoadingLocation: 'BERTH',
@@ -94,7 +91,6 @@ describe('shipping-agency EPDA DTO contract', () => {
 
   it('does not require client-owned portOfCall or quoteForm fields', async () => {
     const dto = await validateDto(CreateInternalShippingAgencyInquiryDto, {
-      customerUserId: 10,
       shipownerTo: 'Owner',
       vesselName: 'MV Test',
       portId: 21,
@@ -106,27 +102,58 @@ describe('shipping-agency EPDA DTO contract', () => {
     expect(dto.quoteForm).toBeUndefined();
   });
 
-  it('accepts a partial processing draft without complete-only vessel fields', async () => {
+  it('accepts a partial draft without complete-only vessel fields', async () => {
     const dto = await validateDto(CreateInternalShippingAgencyInquiryDto, {
-      customerUserId: 10,
       portId: 21,
-      isComplete: false,
     });
 
-    expect(dto).toMatchObject({
-      customerUserId: 10,
-      portId: 21,
-      isComplete: false,
+    expect(dto).toMatchObject({ portId: 21 });
+  });
+
+  it('rejects client-owned completeness and create working parameters', async () => {
+    await expect(
+      validateDto(CreateInternalShippingAgencyInquiryDto, {
+        portId: 21,
+        isComplete: true,
+        epdaWorkingParams: { coeff: { clearanceFee: 1 } },
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        details: expect.arrayContaining([
+          expect.objectContaining({ field: 'isComplete' }),
+          expect.objectContaining({ field: 'epdaWorkingParams' }),
+        ]) as unknown[],
+      },
     });
   });
 
-  it('rejects a complete draft when complete-only vessel fields are missing', async () => {
+  it('rejects client-owned completeness on draft updates', async () => {
+    await expect(
+      validateDto(UpdateShippingAgencyEpdaDto, { isComplete: false }),
+    ).rejects.toMatchObject({
+      response: {
+        details: [
+          expect.objectContaining({ field: 'isComplete' }),
+        ] as unknown[],
+      },
+    });
+  });
+
+  it('rejects a client owner supplied by an internal create caller', async () => {
     await expect(
       validateDto(CreateInternalShippingAgencyInquiryDto, {
         customerUserId: 10,
         portId: 21,
-        isComplete: true,
       }),
-    ).rejects.toBeDefined();
+    ).rejects.toMatchObject({
+      response: {
+        details: [
+          {
+            field: 'customerUserId',
+            message: 'property customerUserId should not exist',
+          },
+        ],
+      },
+    });
   });
 });

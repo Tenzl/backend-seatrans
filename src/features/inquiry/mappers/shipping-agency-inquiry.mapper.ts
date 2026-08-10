@@ -1,5 +1,6 @@
 import { ShippingAgencyInquiryEntity } from '../entities/shipping-agency-inquiry.entity';
 import { resolveGarbageUsdRate } from '../constants/epda-garbage.defaults';
+import { InquiryCreatedSource } from '../enums/inquiry-created-source.enum';
 
 export type InquiryResponseAudience = 'user' | 'admin';
 
@@ -37,6 +38,11 @@ function shippingAgencyInternalEpdaFields(
   row: ShippingAgencyInquiryEntity,
 ): Record<string, unknown> {
   return {
+    employeeInCharge: userSummary(row.processedBy),
+    clientSubmittedBy:
+      row.createdSource === InquiryCreatedSource.CUSTOMER_PORTAL
+        ? userSummary(row.user)
+        : null,
     epdaDocumentDate: row.epdaDocumentDate,
     shipType: row.shipType,
     shipownerNationality: row.shipownerNationality,
@@ -60,6 +66,12 @@ function shippingAgencyInternalEpdaFields(
     customerSubmittedSnapshot: row.customerSubmittedSnapshot,
     processedById: row.processedById,
   };
+}
+
+function userSummary(user: ShippingAgencyInquiryEntity['user'] | null) {
+  return user
+    ? { id: user.id, fullName: user.fullName, email: user.email }
+    : null;
 }
 
 export function mapShippingAgencyInquiryFields(

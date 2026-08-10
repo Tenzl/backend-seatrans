@@ -321,9 +321,7 @@ export class InquiryQueryService {
     return base;
   }
 
-  private parseCursor(
-    query: ListInquiriesQueryDto,
-  ): InquiryListCursor | null {
+  private parseCursor(query: ListInquiriesQueryDto): InquiryListCursor | null {
     if (!query.cursorSubmittedAt || query.cursorId == null) {
       return null;
     }
@@ -342,8 +340,7 @@ export class InquiryQueryService {
     const dateTo = dateToRaw ? new Date(dateToRaw) : null;
     return {
       qPattern: q ? buildContainsLikePattern(q) : null,
-      dateFrom:
-        dateFrom && !Number.isNaN(dateFrom.getTime()) ? dateFrom : null,
+      dateFrom: dateFrom && !Number.isNaN(dateFrom.getTime()) ? dateFrom : null,
       dateTo: dateTo && !Number.isNaN(dateTo.getTime()) ? dateTo : null,
     };
   }
@@ -386,6 +383,14 @@ export class InquiryQueryService {
       .leftJoinAndSelect('inquiry.serviceType', 'serviceType')
       .orderBy('inquiry.submittedAt', 'DESC')
       .addOrderBy('inquiry.id', 'DESC');
+
+    if (
+      audience === 'admin' &&
+      this.repositories.isShippingAgency(serviceSlug)
+    ) {
+      qb.leftJoinAndSelect('inquiry.user', 'clientSubmittedBy');
+      qb.leftJoinAndSelect('inquiry.processedBy', 'employeeInCharge');
+    }
 
     if (filters.archivedFilter === 'active') {
       qb.andWhere('inquiry.deleted_at IS NULL');
@@ -593,10 +598,13 @@ export class InquiryQueryService {
 
     const rowByKey = new Map<string, BaseInquiry>();
     for (const [slug, ids] of idsBySlug) {
-      // List hydrate: serviceType only — toResponse never reads user.
+      // Admin shipping rows also need the two party relations shown in EPDA.
       const rows = await this.repositories.forSlug(slug).find({
         where: ids.map((id) => ({ id })),
-        relations: { serviceType: true },
+        relations:
+          audience === 'admin' && this.repositories.isShippingAgency(slug)
+            ? { serviceType: true, user: true, processedBy: true }
+            : { serviceType: true },
       });
       for (const row of rows) {
         rowByKey.set(`${slug}:${row.id}`, row);
