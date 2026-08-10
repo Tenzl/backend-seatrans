@@ -49,6 +49,8 @@ export function toPortDto(port: Port): PortDto {
     code: port.code ?? null,
     longitude: port.longitude ?? null,
     latitude: port.latitude ?? null,
+    type: port.type ?? 'PORT',
+    inCharge: port.inCharge ?? false,
     isActive: port.isActive,
     hasInfo: port.hasInfo,
     createdAt: port.createdAt,

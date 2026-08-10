@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -22,10 +23,12 @@ export class BillOfLadingPreviewDto {
   @IsOptional() @IsInt() @Min(1) consigneePartyId?: number;
   @PreviewText(2_000) notifyAddress?: string;
   @IsOptional() @IsInt() @Min(1) notifyPartyId?: number;
+  /** Same as Consignee — mirrors Consigned to order of into Notify address. */
+  @IsOptional() @IsBoolean() notifyPartySameAsConsignee?: boolean;
 
   @PreviewText(300) placeOfReceipt?: string;
+  /** Vessel and voyage in one string (e.g. `SITC MINHE / 2615N`). */
   @PreviewText(300) oceanVessel?: string;
-  @PreviewText(200) voyageNumber?: string;
   @PreviewText(300) portOfLoading?: string;
   @PreviewText(300) portOfDischarge?: string;
   @PreviewText(300) placeOfDelivery?: string;

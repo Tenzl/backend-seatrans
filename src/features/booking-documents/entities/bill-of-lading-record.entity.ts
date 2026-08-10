@@ -22,9 +22,6 @@ import { BookingRecord } from './booking-record.entity';
 @Index('idx_bill_of_lading_records_ocean_vessel', ['oceanVessel'], {
   where: '"deleted_at" IS NULL',
 })
-@Index('idx_bill_of_lading_records_voyage_number', ['voyageNumber'], {
-  where: '"deleted_at" IS NULL',
-})
 export class BillOfLadingRecord extends BookingDocumentRecordBase {
   readonly documentType = BookingDocumentType.BILL_OF_LADING;
 
@@ -61,16 +58,4 @@ export class BillOfLadingRecord extends BookingDocumentRecordBase {
     update: false,
   })
   readonly oceanVessel!: string | null;
-
-  @Column({
-    name: 'voyage_number',
-    type: 'varchar',
-    length: 200,
-    nullable: true,
-    asExpression: "(payload ->> 'voyageNumber')",
-    generatedType: 'STORED',
-    insert: false,
-    update: false,
-  })
-  readonly voyageNumber!: string | null;
 }

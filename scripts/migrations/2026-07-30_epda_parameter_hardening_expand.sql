@@ -139,9 +139,10 @@ BEGIN
   END IF;
 END $$;
 
-CREATE OR REPLACE FUNCTION set_epda_parameter_updated_at()
+CREATE OR REPLACE FUNCTION public.set_epda_parameter_updated_at()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = pg_catalog
 AS $$
 BEGIN
   NEW.updated_at := now();
@@ -156,9 +157,10 @@ BEFORE UPDATE ON epda_parameter_set
 FOR EACH ROW
 EXECUTE FUNCTION set_epda_parameter_updated_at();
 
-CREATE OR REPLACE FUNCTION validate_epda_group_member()
+CREATE OR REPLACE FUNCTION public.validate_epda_group_member()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = pg_catalog
 AS $$
 DECLARE
   target_scope VARCHAR(10);
@@ -167,7 +169,7 @@ DECLARE
 BEGIN
   SELECT scope, area
   INTO target_scope, target_area
-  FROM epda_parameter_set
+  FROM public.epda_parameter_set
   WHERE id = NEW.group_id;
 
   IF target_scope IS DISTINCT FROM 'GROUP' THEN
@@ -176,8 +178,8 @@ BEGIN
 
   SELECT province.area
   INTO member_area
-  FROM ports port
-  LEFT JOIN provinces province ON province.id = port.province_id
+  FROM public.ports AS port
+  LEFT JOIN public.provinces AS province ON province.id = port.province_id
   WHERE port.id = NEW.port_id;
 
   IF member_area IS NULL OR target_area IS DISTINCT FROM member_area::text THEN

@@ -41,8 +41,8 @@ type PartyPayload = BookingDocumentPayload & {
   consignor?: string;
   consignedToOrderOf?: string;
   notifyAddress?: string;
-  deliverTo?: string;
   notifyPartySameAsConsignee?: boolean;
+  deliverTo?: string;
   to?: string;
 };
 
@@ -75,7 +75,14 @@ export class BookingDocumentPayloadValidator {
       throw new BadRequestException('Request body must be an object');
     }
 
-    const dto = plainToInstance(DTO_BY_TYPE[type], payload, {
+    const body =
+      type === BookingDocumentType.BILL_OF_LADING
+        ? this.foldLegacyBillOfLadingVoyage(
+            payload as Record<string, unknown>,
+          )
+        : payload;
+
+    const dto = plainToInstance(DTO_BY_TYPE[type], body, {
       enableImplicitConversion: false,
     });
     const errors = await validate(dto, {
@@ -218,6 +225,36 @@ export class BookingDocumentPayloadValidator {
   }
 
   /**
+   * Drop removed `voyageNumber` before DTO whitelist validation. Fold any
+   * leftover value into `oceanVessel` so old clients/payloads still load.
+   */
+  private foldLegacyBillOfLadingVoyage(
+    payload: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (!Object.prototype.hasOwnProperty.call(payload, 'voyageNumber')) {
+      return payload;
+    }
+    const next = { ...payload };
+    const vessel =
+      typeof next.oceanVessel === 'string' ? next.oceanVessel.trim() : '';
+    const voyage =
+      typeof next.voyageNumber === 'string' ? next.voyageNumber.trim() : '';
+    delete next.voyageNumber;
+    if (
+      vessel &&
+      voyage &&
+      !vessel.toLowerCase().includes(voyage.toLowerCase())
+    ) {
+      next.oceanVessel = `${vessel} / ${voyage}`;
+    } else if (!vessel && voyage) {
+      next.oceanVessel = voyage;
+    } else if (vessel) {
+      next.oceanVessel = vessel;
+    }
+    return next;
+  }
+
+  /**
    * DO cargo/container rows mirror BL: prefer `containers`; migrate legacy
    * `cargoRows`; re-derive `cargoRows` (PDF table input) from containers and
    * the (AN-synced) shipment `descriptionOfGoods`.
@@ -247,7 +284,9 @@ export class BookingDocumentPayloadValidator {
     ].filter((id): id is number => typeof id === 'number');
     if (ids.length === 0) {
       if (type === BookingDocumentType.ARRIVAL_NOTICE) {
-        this.normalizeSameAs(payload);
+        this.normalizeSameAsAn(payload);
+      } else if (type === BookingDocumentType.BILL_OF_LADING) {
+        this.normalizeSameAsBl(payload);
       }
       return;
     }
@@ -343,12 +382,14 @@ export class BookingDocumentPayloadValidator {
         'consignedToOrderOf',
         PartnerAdditionType.CONSIGNEE,
       );
-      normalize(
-        payload.notifyPartyId,
-        'Notify Party',
-        'notifyAddress',
-        PartnerAdditionType.NOTIFY_PARTY,
-      );
+      if (!payload.notifyPartySameAsConsignee) {
+        normalize(
+          payload.notifyPartyId,
+          'Notify Party',
+          'notifyAddress',
+          PartnerAdditionType.NOTIFY_PARTY,
+        );
+      }
     } else if (type === BookingDocumentType.DELIVERY_ORDER) {
       normalize(
         payload.consigneePartyId,
@@ -365,11 +406,13 @@ export class BookingDocumentPayloadValidator {
     }
 
     if (type === BookingDocumentType.ARRIVAL_NOTICE) {
-      this.normalizeSameAs(payload);
+      this.normalizeSameAsAn(payload);
+    } else if (type === BookingDocumentType.BILL_OF_LADING) {
+      this.normalizeSameAsBl(payload);
     }
   }
 
-  private normalizeSameAs(payload: PartyPayload): void {
+  private normalizeSameAsAn(payload: PartyPayload): void {
     if (!payload.notifyPartySameAsConsignee) return;
 
     const consigneeId =
@@ -397,6 +440,32 @@ export class BookingDocumentPayloadValidator {
     payload.notifyPartySameAsConsignee = false;
     payload.notifyPartyId = undefined;
     payload.notifyParty = '';
+  }
+
+  private normalizeSameAsBl(payload: PartyPayload): void {
+    if (!payload.notifyPartySameAsConsignee) return;
+
+    const consignedId =
+      typeof payload.consigneePartyId === 'number'
+        ? payload.consigneePartyId
+        : undefined;
+    const consignedText = (payload.consignedToOrderOf ?? '').trim();
+
+    if (consignedId != null) {
+      payload.notifyPartyId = consignedId;
+      payload.notifyAddress = payload.consignedToOrderOf ?? '';
+      return;
+    }
+
+    if (consignedText.length > 0) {
+      payload.notifyPartyId = undefined;
+      payload.notifyAddress = payload.consignedToOrderOf ?? '';
+      return;
+    }
+
+    payload.notifyPartySameAsConsignee = false;
+    payload.notifyPartyId = undefined;
+    payload.notifyAddress = '';
   }
 
   private formatPartyName(partner: BookingPartner): string {

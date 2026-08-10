@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsIn,
   IsInt,
   IsNumberString,
   IsOptional,
@@ -7,6 +8,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { PORT_TYPES, type PortType } from '../entities/port.entity';
 
 export class CreatePortDto {
   @IsString()
@@ -45,6 +47,14 @@ export class CreatePortDto {
   @IsOptional()
   @IsNumberString()
   latitude?: string;
+
+  @IsOptional()
+  @IsIn(PORT_TYPES)
+  type?: PortType;
+
+  @IsOptional()
+  @IsBoolean()
+  inCharge?: boolean;
 
   @IsOptional()
   @IsBoolean()

@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -22,10 +21,6 @@ import {
   toPortDto,
 } from './port-normalization';
 import { DEFAULT_PORT_LIST_LIMIT, PortsQuery } from './ports-query';
-import {
-  EPDA_PORT_MEMBERSHIP_READER,
-  type EpdaPortMembershipReader,
-} from './epda-port-membership.reader';
 import { PUBLIC_PROVINCES_CACHE_PREFIX } from '../provinces/provinces.service';
 import { ShortTtlCacheService } from '../../shared/redis/short-ttl-cache.service';
 
@@ -38,8 +33,6 @@ export class PortsService {
     private readonly portRepository: Repository<Port>,
     @InjectRepository(Province)
     private readonly provinceRepository: Repository<Province>,
-    @Inject(EPDA_PORT_MEMBERSHIP_READER)
-    private readonly epdaMembershipReader: EpdaPortMembershipReader,
     private readonly cache: ShortTtlCacheService,
   ) {
     this.query = new PortsQuery(portRepository);
@@ -98,6 +91,8 @@ export class PortsService {
     }
 
     const province = await this.resolveProvince(dto.provinceId);
+    const inCharge = dto.inCharge ?? false;
+    this.assertInChargeProvince(inCharge, province);
 
     const duplicate = await this.findDuplicatePort(
       normalizedName,
@@ -116,6 +111,8 @@ export class PortsService {
       code: dto.code?.trim() || null,
       longitude: dto.longitude ?? null,
       latitude: dto.latitude ?? null,
+      type: dto.type ?? 'PORT',
+      inCharge,
       isActive: dto.isActive ?? true,
       hasInfo: dto.hasInfo ?? 0,
     });
@@ -144,7 +141,8 @@ export class PortsService {
       dto.provinceId === undefined
         ? port.province
         : await this.resolveProvince(dto.provinceId);
-    await this.assertAreaChangeAllowed(port, province);
+    const inCharge = dto.inCharge ?? port.inCharge;
+    this.assertInChargeProvince(inCharge, province);
 
     const duplicate = await this.findDuplicatePort(
       normalizedName,
@@ -157,7 +155,11 @@ export class PortsService {
     port.name = normalizedName;
     port.portOfCall = normalizePortOfCall(dto.portOfCall, normalizedName);
     port.province = province ?? null;
+    port.inCharge = inCharge;
 
+    if (dto.type !== undefined) {
+      port.type = dto.type;
+    }
     if (dto.zoneCode !== undefined) {
       port.zoneCode = dto.zoneCode?.trim() || null;
     }
@@ -230,20 +232,23 @@ export class PortsService {
     return province;
   }
 
-  private async assertAreaChangeAllowed(
-    port: Port,
-    nextProvince: Province | null,
-  ): Promise<void> {
-    const currentArea = normalizeProvinceAreaCode(port.province?.area ?? null);
-    const nextArea = normalizeProvinceAreaCode(nextProvince?.area ?? null);
-    if (currentArea === nextArea) return;
+  private assertInChargeProvince(
+    inCharge: boolean,
+    province: Province | null,
+  ): void {
+    if (!inCharge) return;
 
-    const groupLabel = await this.epdaMembershipReader.findGroupLabel(port.id);
-    if (!groupLabel) return;
+    if (!province) {
+      throw new BadRequestException(
+        'provinceId is required when inCharge is true',
+      );
+    }
 
-    throw new ConflictException(
-      `Port belongs to EPDA group ${groupLabel}; remove it from the group before changing area`,
-    );
+    if (normalizeProvinceAreaCode(province.area) === null) {
+      throw new BadRequestException(
+        'inCharge requires a province with area 1, 2, or 3',
+      );
+    }
   }
 
   private async findDuplicatePort(

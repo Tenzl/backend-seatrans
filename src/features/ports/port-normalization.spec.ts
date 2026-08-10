@@ -77,6 +77,8 @@ function createPort(overrides: Partial<Port> = {}): Port {
     code: null,
     longitude: null,
     latitude: null,
+    type: 'PORT',
+    inCharge: false,
     isActive: true,
     hasInfo: 1,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),

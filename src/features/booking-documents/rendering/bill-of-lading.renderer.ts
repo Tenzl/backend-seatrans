@@ -56,7 +56,7 @@ const LABEL_TO_VALUE_GAP = 3;
 const BLACK = rgb(0, 0, 0);
 const SURRENDERED_RED = rgb(1, 0, 0);
 /** Debug outlines for BL field cells on the blank PNG — set false for production PDFs. */
-const BL_DRAW_FIELD_OUTLINES = true;
+const BL_DRAW_FIELD_OUTLINES = process.env.NODE_ENV !== 'production';
 const FIELD_OUTLINE_RED = rgb(1, 0, 0);
 const FIELD_OUTLINE_WIDTH = 0.8;
 const SURRENDERED_LABEL = 'SURRENDERED';
@@ -107,14 +107,9 @@ const BOX = {
   oceanVessel: {
     x: 62.5,
     top: 271.0 + LABEL_TO_VALUE_GAP,
-    maxWidth: 90,
+    /** Spans former Ocean vessel + Voyage no. cells (was 90; voyage ended ≈189). */
+    maxWidth: 126.5,
     maxLines: 2,
-  },
-  voyageNumber: {
-    x: 157.0,
-    top: 271.0 + LABEL_TO_VALUE_GAP,
-    maxWidth: 32,
-    maxLines: 1,
   },
   portOfLoading: {
     x: 193.8,
@@ -296,7 +291,6 @@ function drawBillOfLadingFieldOutlines(page: PDFPage): void {
   drawFieldOutline(page, BOX.notifyAddress);
   drawFieldOutline(page, BOX.placeOfReceipt);
   drawFieldOutline(page, BOX.oceanVessel);
-  drawFieldOutline(page, BOX.voyageNumber);
   drawFieldOutline(page, BOX.portOfLoading);
   drawFieldOutline(page, BOX.portOfDischarge);
   drawFieldOutline(page, BOX.placeOfDelivery);
@@ -834,8 +828,7 @@ export function renderBillOfLading(
   drawBoxText(page, font, payload.consignedToOrderOf, BOX.consignedToOrderOf);
   drawBoxText(page, font, payload.notifyAddress, BOX.notifyAddress);
   drawBoxText(page, font, payload.placeOfReceipt, BOX.placeOfReceipt);
-  drawBoxText(page, font, payload.oceanVessel, BOX.oceanVessel);
-  drawBoxText(page, font, payload.voyageNumber, BOX.voyageNumber);
+  drawBoxText(page, font, (payload.oceanVessel ?? '').trim(), BOX.oceanVessel);
   drawBoxText(page, font, payload.portOfLoading, BOX.portOfLoading);
   drawBoxText(page, font, payload.portOfDischarge, BOX.portOfDischarge);
   drawBoxText(page, font, payload.placeOfDelivery, BOX.placeOfDelivery);

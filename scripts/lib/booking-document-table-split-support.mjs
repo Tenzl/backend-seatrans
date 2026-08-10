@@ -34,7 +34,6 @@ export const GENERATED_COLUMNS = Object.freeze({
   bill_of_lading_records: [
     'fbl_number',
     'ocean_vessel',
-    'voyage_number',
   ],
 });
 
@@ -87,7 +86,6 @@ export const REQUIRED_INDEXES = Object.freeze([
   'uq_bill_of_lading_records_active_booking',
   'idx_bill_of_lading_records_fbl_number',
   'idx_bill_of_lading_records_ocean_vessel',
-  'idx_bill_of_lading_records_voyage_number',
 ]);
 
 export function parseBookingDocumentSplitArgs(argv) {

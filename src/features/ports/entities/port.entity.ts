@@ -9,6 +9,9 @@ import {
 } from 'typeorm';
 import { Province } from '../../provinces/entities/province.entity';
 
+export const PORT_TYPES = ['PORT', 'DEPORT'] as const;
+export type PortType = (typeof PORT_TYPES)[number];
+
 @Entity('ports')
 export class Port {
   @PrimaryGeneratedColumn()
@@ -50,6 +53,12 @@ export class Port {
 
   @Column({ name: 'code', type: 'varchar', length: 50, nullable: true })
   code!: string | null;
+
+  @Column({ type: 'varchar', length: 10, default: 'PORT' })
+  type!: PortType;
+
+  @Column({ name: 'in_charge', default: false })
+  inCharge!: boolean;
 
   @Column({ name: 'is_active', default: true })
   isActive!: boolean;

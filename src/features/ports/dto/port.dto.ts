@@ -1,3 +1,5 @@
+import type { PortType } from '../entities/port.entity';
+
 export class PortDto {
   id: number;
   name: string;
@@ -10,6 +12,8 @@ export class PortDto {
   code: string | null;
   longitude: string | null;
   latitude: string | null;
+  type: PortType;
+  inCharge: boolean;
   isActive: boolean;
   hasInfo: number;
   createdAt: Date;
