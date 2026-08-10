@@ -47,7 +47,7 @@ describe('booking workflow migration', () => {
   it('defaults to dry-run and rejects a mismatched apply target', () => {
     const dryRun = spawnSync(process.execPath, [runner], {
       encoding: 'utf8',
-      env: { ...process.env, DB_DATABASE: 'booking_review_test' },
+      env: { ...process.env, DB_URL: '', DB_DATABASE: 'booking_review_test' },
     });
     expect(dryRun.status).toBe(0);
     expect(dryRun.stdout).toContain('Dry-run only');
@@ -62,7 +62,7 @@ describe('booking workflow migration', () => {
       ],
       {
         encoding: 'utf8',
-        env: { ...process.env, DB_DATABASE: 'booking_review_test' },
+        env: { ...process.env, DB_URL: '', DB_DATABASE: 'booking_review_test' },
       },
     );
     expect(rejected.status).toBe(1);
@@ -83,7 +83,7 @@ describe('booking workflow migration', () => {
       ],
       {
         encoding: 'utf8',
-        env: { ...process.env, DB_DATABASE: 'booking_review_test' },
+        env: { ...process.env, DB_URL: '', DB_DATABASE: 'booking_review_test' },
       },
     );
     expect(rejected.status).toBe(1);

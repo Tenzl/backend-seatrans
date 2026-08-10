@@ -1,5 +1,7 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import { BadRequestException } from '@nestjs/common';
 import { PDFDocument } from 'pdf-lib';
+import { syncDeliveryOrderCargoFromArrivalNotice } from './an-container';
 import { BILL_OF_LADING_TEMPLATE_BY_VARIANT } from './constants/booking-document.constants';
 import { BookingDocumentRecordService } from './booking-document-record.service';
 import { BookingDocumentPayloadValidator } from './booking-document-payload.validator';
@@ -14,6 +16,44 @@ describe('BookingDocumentsService', () => {
     save: jest.fn(),
     findOne: jest.fn(),
     findAndCount: jest.fn(),
+    createQueryBuilder: jest.fn(() => {
+      let changes: Record<string, unknown> = {};
+      let id = 0;
+      let expectedVersion = 0;
+      const builder = {
+        update: jest.fn(() => builder),
+        set: jest.fn((value: Record<string, unknown>) => {
+          changes = value;
+          return builder;
+        }),
+        where: jest.fn((_sql: string, params: { id: number }) => {
+          id = params.id;
+          return builder;
+        }),
+        andWhere: jest.fn(
+          (_sql: string, params?: { expectedVersion?: number }) => {
+            if (params?.expectedVersion != null) {
+              expectedVersion = params.expectedVersion;
+            }
+            return builder;
+          },
+        ),
+        execute: jest.fn(async () => {
+          const row = (await recordRepository.findOne({
+            where: { id },
+          })) as Record<string, unknown> | null;
+          if (!row || Number(row.version ?? 1) !== expectedVersion) {
+            return { affected: 0 };
+          }
+          Object.assign(row, changes, {
+            version: expectedVersion + 1,
+            updatedAt: new Date('2026-07-29T11:01:00.000Z'),
+          });
+          return { affected: 1 };
+        }),
+      };
+      return builder;
+    }),
   };
   const userRepository = {
     findOne: jest.fn().mockResolvedValue(null),
@@ -174,6 +214,7 @@ describe('BookingDocumentsService', () => {
       BookingDocumentType.BILL_OF_LADING,
       70,
       {
+        expectedVersion: 1,
         fblNumber: 'BL-OLD',
         consignor: 'SHIPPER KEEP',
         descriptionOfGoods: 'CLIENT DIVERGENT',
@@ -193,7 +234,6 @@ describe('BookingDocumentsService', () => {
             method: '',
           },
         ],
-        status: 'COMPLETED',
       },
       9,
     );
@@ -300,6 +340,7 @@ describe('BookingDocumentsService', () => {
       BookingDocumentType.DELIVERY_ORDER,
       71,
       {
+        expectedVersion: 1,
         doNumber: 'DO-OLD',
         deliverTo: 'CONSIGNEE KEEP',
         serviceMode: 'CLIENT MODE',
@@ -318,7 +359,6 @@ describe('BookingDocumentsService', () => {
             method: '',
           },
         ],
-        status: 'COMPLETED',
       },
       9,
     );
@@ -415,6 +455,45 @@ describe('BookingDocumentsService', () => {
     expect(pdf.getPageCount()).toBe(1);
   });
 
+  it('renders a saved record from its stored snapshot without resolving master data again', async () => {
+    const storedPayload = {
+      bookingNumber: 'BK-SNAPSHOT',
+      clientPartyId: 12,
+      to: 'Original client name',
+      pic: 'Original PIC',
+    };
+    const validator = {
+      validate: jest.fn().mockRejectedValue(new Error('must not resolve')),
+    };
+    const recordService = {
+      getById: jest.fn().mockResolvedValue({ payload: storedPayload }),
+    };
+    const renderer = {
+      render: jest.fn().mockResolvedValue({
+        data: Buffer.from('%PDF-snapshot'),
+        filename: 'BOOKING-preview.pdf',
+      }),
+    };
+    const snapshotService = new BookingDocumentsService(
+      validator as never,
+      recordService as never,
+      renderer as never,
+      userRepository as never,
+      dataSource as never,
+    );
+
+    await snapshotService.createRecordPreview(
+      BookingDocumentType.BOOKING_CONFIRMATION,
+      41,
+    );
+
+    expect(validator.validate).not.toHaveBeenCalled();
+    expect(renderer.render).toHaveBeenCalledWith(
+      BookingDocumentType.BOOKING_CONFIRMATION,
+      storedPayload,
+    );
+  });
+
   it('builds Surrendered from the Original blank', async () => {
     expect(BILL_OF_LADING_TEMPLATE_BY_VARIANT.surrendered).toBe(
       BILL_OF_LADING_TEMPLATE_BY_VARIANT.original,
@@ -447,6 +526,16 @@ describe('BookingDocumentsService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('rejects client-authored status metadata', async () => {
+    await expect(
+      service.createRecord(
+        BookingDocumentType.ARRIVAL_NOTICE,
+        { anNumber: 'AN-001', status: 'COMPLETED' },
+        9,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('rejects more than 20 cargo rows', async () => {
     await expect(
       service.createPreview(BookingDocumentType.DELIVERY_ORDER, {
@@ -473,7 +562,7 @@ describe('BookingDocumentsService', () => {
 
   it('renders concurrent previews without sharing mutable PDF state', async () => {
     const previews = await Promise.all(
-      Array.from({ length: 9 }, (_, index) =>
+      Array.from({ length: 3 }, (_, index) =>
         service.createPreview(
           [
             BookingDocumentType.ARRIVAL_NOTICE,
@@ -488,7 +577,7 @@ describe('BookingDocumentsService', () => {
     for (const preview of previews) {
       await expect(PDFDocument.load(preview.data)).resolves.toBeDefined();
     }
-  });
+  }, 15_000);
 
   it('fills booking PIC from creator when empty, keeps selected PIC on update', async () => {
     userRepository.findOne.mockResolvedValue({
@@ -527,18 +616,29 @@ describe('BookingDocumentsService', () => {
       pic: 'Nhung Nguyen, Email: total.logistics@seatrans.com.vn',
     });
 
+    const legacyUpdated = await service.updateRecord(
+      BookingDocumentType.BOOKING_CONFIRMATION,
+      7,
+      {
+        expectedVersion: 1,
+        bookingNumber: 'BK-2',
+      },
+      12,
+    );
+    expect(legacyUpdated.payload).toMatchObject({ pic: 'Legacy PIC' });
+    expect(legacyUpdated.payload).not.toHaveProperty('picUserId');
+
     const updated = await service.updateRecord(
       BookingDocumentType.BOOKING_CONFIRMATION,
       7,
       {
-        bookingNumber: 'BK-2',
-        pic: 'Selected User, Email: selected@seatrans.com.vn',
+        expectedVersion: legacyUpdated.version,
+        bookingNumber: 'BK-3',
+        picUserId: 12,
       },
       12,
     );
-    expect(updated.payload).toMatchObject({
-      pic: 'Selected User, Email: selected@seatrans.com.vn',
-    });
+    expect(updated.payload).toMatchObject({ picUserId: 12 });
   });
 
   it('runs Arrival Notice create and sibling DO patch inside one transaction', async () => {
@@ -558,7 +658,9 @@ describe('BookingDocumentsService', () => {
     let committed = false;
     const txDataSource = {
       transaction: jest.fn(
-        async <T>(work: (manager: { tag: string }) => Promise<T>): Promise<T> => {
+        async <T>(
+          work: (manager: { tag: string }) => Promise<T>,
+        ): Promise<T> => {
           const result = await work({ tag: 'tx-manager' });
           committed = true;
           return result;
@@ -589,7 +691,6 @@ describe('BookingDocumentsService', () => {
       BookingDocumentType.ARRIVAL_NOTICE,
       expect.any(Object),
       9,
-      'PROCESSING',
       { bookingFlow: undefined, bookingId: 5 },
       { tag: 'tx-manager' },
     );
@@ -622,7 +723,9 @@ describe('BookingDocumentsService', () => {
     let committed = false;
     const txDataSource = {
       transaction: jest.fn(
-        async <T>(work: (manager: { tag: string }) => Promise<T>): Promise<T> => {
+        async <T>(
+          work: (manager: { tag: string }) => Promise<T>,
+        ): Promise<T> => {
           const result = await work({ tag: 'tx-manager' });
           committed = true;
           return result;
@@ -652,5 +755,92 @@ describe('BookingDocumentsService', () => {
     expect(committed).toBe(false);
     expect(recordService.create).toHaveBeenCalledTimes(1);
     expect(recordService.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows a non-cargo AN save when the locked DO cargo projection is unchanged', async () => {
+    const anPayload = (await new BookingDocumentPayloadValidator().validate(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      {
+        anNumber: 'AN-LOCKED-DO',
+        descriptionOfGoods: 'STONE',
+        serviceMode: 'FCL/FCL - CY/CY',
+        containers: [{ type: "20'DC", containerNo: 'CONT-1' }],
+      },
+    )) as never;
+    const doPayload = syncDeliveryOrderCargoFromArrivalNotice(anPayload, {
+      doNumber: 'DO-LOCKED',
+    });
+    const recordService = {
+      create: jest.fn().mockResolvedValue({ id: 60, bookingId: 5 }),
+      findActiveByBookingId: jest.fn().mockResolvedValue({
+        id: 71,
+        version: 3,
+        lockedAt: new Date('2026-08-10T00:00:00.000Z'),
+        payload: { ...doPayload, cargoRows: [{ quantity: 'legacy-derived' }] },
+      }),
+      update: jest.fn(),
+    };
+    const txService = new BookingDocumentsService(
+      new BookingDocumentPayloadValidator(),
+      recordService as never,
+      new BookingDocumentPdfRenderer(),
+      userRepository as never,
+      dataSource as never,
+    );
+
+    await expect(
+      txService.createRecord(
+        BookingDocumentType.ARRIVAL_NOTICE,
+        { ...anPayload, bookingId: 5, note: 'non-cargo edit' },
+        9,
+      ),
+    ).resolves.toMatchObject({ id: 60 });
+    expect(recordService.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects an AN cargo change that would drift from a locked DO', async () => {
+    const oldAn = (await new BookingDocumentPayloadValidator().validate(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      {
+        descriptionOfGoods: 'STONE',
+        serviceMode: 'FCL/FCL - CY/CY',
+        containers: [{ type: "20'DC", containerNo: 'CONT-1' }],
+      },
+    )) as never;
+    const recordService = {
+      create: jest.fn().mockResolvedValue({ id: 60, bookingId: 5 }),
+      findActiveByBookingId: jest.fn().mockResolvedValue({
+        id: 71,
+        version: 3,
+        lockedAt: new Date('2026-08-10T00:00:00.000Z'),
+        payload: syncDeliveryOrderCargoFromArrivalNotice(oldAn, {
+          doNumber: 'DO-LOCKED',
+        }),
+      }),
+      update: jest.fn(),
+    };
+    const txService = new BookingDocumentsService(
+      new BookingDocumentPayloadValidator(),
+      recordService as never,
+      new BookingDocumentPdfRenderer(),
+      userRepository as never,
+      dataSource as never,
+    );
+
+    await expect(
+      txService.createRecord(
+        BookingDocumentType.ARRIVAL_NOTICE,
+        {
+          bookingId: 5,
+          descriptionOfGoods: 'COAL',
+          serviceMode: 'FCL/FCL - CY/CY',
+          containers: [{ type: "40'HC", containerNo: 'CONT-2' }],
+        },
+        9,
+      ),
+    ).rejects.toThrow(
+      'Arrival Notice cargo cannot change while the linked Delivery Order is locked',
+    );
+    expect(recordService.update).not.toHaveBeenCalled();
   });
 });

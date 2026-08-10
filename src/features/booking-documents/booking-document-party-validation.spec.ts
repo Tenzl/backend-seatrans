@@ -145,9 +145,9 @@ describe('Booking document Party validation', () => {
         {
           containerSealNumber: "SITU2608023 / SITR892061 / 20'DC",
           quantity: '21 CRATE(S)',
-          descriptionOfGoods: 'STONE',
-          grossWeight: '21000',
-          measurement: '7.86',
+          descriptionOfGoods: 'row note',
+          grossWeight: '21000 KGS',
+          measurement: '7.86 CBM',
         },
       ],
     });
@@ -219,8 +219,8 @@ describe('Booking document Party validation', () => {
       ],
       descriptionOfGoods: 'STONE',
       numberAndKindOfPackages: '21 CRATE(S)',
-      grossWeight: '21000',
-      measurement: '7.86',
+      grossWeight: '21000 KGS',
+      measurement: '7.86 CBM',
     });
   });
 
@@ -246,8 +246,8 @@ describe('Booking document Party validation', () => {
         },
       ],
       descriptionOfGoods: "20'DC\nSTONE",
-      grossWeight: '100',
-      measurement: '2',
+      grossWeight: '100 KGS',
+      measurement: '2 CBM',
     });
   });
 
@@ -268,8 +268,8 @@ describe('Booking document Party validation', () => {
 
     expect(result).toMatchObject({
       descriptionOfGoods: 'LEGACY STONE',
-      grossWeight: '100',
-      measurement: '2',
+      grossWeight: '100 KGS',
+      measurement: '2 CBM',
     });
   });
 

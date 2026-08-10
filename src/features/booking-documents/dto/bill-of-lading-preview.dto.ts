@@ -61,8 +61,8 @@ export class BillOfLadingPreviewDto {
 
   /** e.g. FREIGHT COLLECT */
   @PreviewText(300) freightTerms?: string;
-  /** e.g. CLEAN ON BOARD Jun 14, 2026 */
-  @PreviewText(300) cleanOnBoard?: string;
+  /** On-board date only; PDF always prefixes with fixed "CLEAN ON BOARD". */
+  @PreviewText(100) cleanOnBoardDate?: string;
 
   @PreviewText(500) declarationOfInterest?: string;
   @PreviewText(500) declaredValue?: string;

@@ -42,5 +42,6 @@ export class BookingConfirmationPreviewDto {
   @PreviewText(300) motherVessel?: string;
   @PreviewText(300) motherVoyage?: string;
   /** Selected internal PIC user as `fullName, Email: email` (fallback: creator). */
+  @IsOptional() @IsInt() @Min(1) picUserId?: number;
   @PreviewText(500) pic?: string;
 }

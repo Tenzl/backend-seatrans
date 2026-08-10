@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { BookingDocumentRecordService } from './booking-document-record.service';
 import { BookingDocumentPayloadValidator } from './booking-document-payload.validator';
@@ -67,6 +68,47 @@ function createRepositoryMock() {
     remove: jest.fn((record: StoredRecord) => {
       records.delete(record.id);
       return Promise.resolve(record);
+    }),
+    createQueryBuilder: jest.fn(() => {
+      let changes: Record<string, unknown> = {};
+      let id = 0;
+      let expectedVersion = 0;
+      const builder = {
+        update: jest.fn(() => builder),
+        set: jest.fn((value: Record<string, unknown>) => {
+          changes = value;
+          return builder;
+        }),
+        where: jest.fn((_sql: string, params: { id: number }) => {
+          id = params.id;
+          return builder;
+        }),
+        andWhere: jest.fn(
+          (_sql: string, params?: { expectedVersion?: number }) => {
+            if (params?.expectedVersion != null) {
+              expectedVersion = params.expectedVersion;
+            }
+            return builder;
+          },
+        ),
+        execute: jest.fn(() => {
+          const row = records.get(id);
+          if (!row || Number(row.version) !== expectedVersion) {
+            return Promise.resolve({ affected: 0 });
+          }
+          const resolved = Object.fromEntries(
+            Object.entries(changes)
+              .filter(([key]) => key !== 'version')
+              .map(([key, value]) => [key, value]),
+          );
+          Object.assign(row, resolved, {
+            version: expectedVersion + 1,
+            updatedAt: new Date('2026-08-04T01:06:00.000Z'),
+          });
+          return Promise.resolve({ affected: 1 });
+        }),
+      };
+      return builder;
     }),
   };
   return repository;
@@ -166,7 +208,19 @@ describe('BookingDocumentRecordService lifecycle', () => {
     const updated = await service.updateRecord(
       BookingDocumentType.ARRIVAL_NOTICE,
       created.id,
-      { anNumber: 'AN-101', status: BookingDocumentStatus.COMPLETED },
+      {
+        expectedVersion: created.version,
+        anNumber: 'AN-101',
+        date: '2026-08-04',
+        agent: 'Agent',
+        shipper: 'Shipper',
+        consignee: 'Consignee',
+        vesselVoyage: 'Vessel / V1',
+        eta: '2026-08-10',
+        portOfDischarge: 'QNH',
+        descriptionOfGoods: 'Stone',
+        containers: [{ containerNo: 'CONT-1' }],
+      },
       8,
     );
     expect(updated).toMatchObject({
@@ -175,30 +229,55 @@ describe('BookingDocumentRecordService lifecycle', () => {
       updatedByUserId: 8,
     });
 
-    await service.lockRecord(BookingDocumentType.ARRIVAL_NOTICE, created.id, 8);
+    const locked = await service.lockRecord(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      created.id,
+      8,
+      updated.version,
+    );
     await expect(
       service.updateRecord(
         BookingDocumentType.ARRIVAL_NOTICE,
         created.id,
-        { anNumber: 'AN-102' },
+        { anNumber: 'AN-102', expectedVersion: locked.version },
         8,
       ),
     ).rejects.toBeInstanceOf(ConflictException);
-    await service.unlockRecord(
+    const unlocked = await service.unlockRecord(
       BookingDocumentType.ARRIVAL_NOTICE,
       created.id,
       9,
+      locked.version,
     );
     await service.archiveRecord(
       BookingDocumentType.ARRIVAL_NOTICE,
       created.id,
       9,
+      unlocked.version,
     );
 
     const listed = await service.listRecords(
       BookingDocumentType.ARRIVAL_NOTICE,
     );
     expect(listed.totalElements).toBe(0);
+  });
+
+  it('derives status on the server and rejects locking an incomplete document', async () => {
+    const created = await service.createRecord(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      { anNumber: 'AN-INCOMPLETE' },
+      4,
+    );
+
+    expect(created.status).toBe(BookingDocumentStatus.PROCESSING);
+    await expect(
+      service.lockRecord(
+        BookingDocumentType.ARRIVAL_NOTICE,
+        created.id,
+        4,
+        created.version,
+      ),
+    ).rejects.toThrow('Document is incomplete');
   });
 
   it('builds the Import workflow across three physical tables', async () => {
@@ -292,9 +371,23 @@ describe('BookingDocumentRecordService lifecycle', () => {
   });
 
   it('prevents child creation and updates while the root booking is locked', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 4,
+      fullName: 'Operator',
+      email: 'operator@seatrans.test',
+    });
     const booking = await service.createRecord(
       BookingDocumentType.BOOKING_CONFIRMATION,
-      { bookingNumber: 'IMP-LOCK', bookingFlow: BookingFlow.IMPORT },
+      {
+        bookingNumber: 'IMP-LOCK',
+        bookingFlow: BookingFlow.IMPORT,
+        to: 'Client',
+        vesselVoyage: 'Vessel / V1',
+        portOfLoading: 'SGN',
+        portOfDischarge: 'QNH',
+        commodity: 'Stone',
+        cargoVolumes: { "20'DC": 1 },
+      },
       4,
     );
     const arrivalNotice = await service.createRecord(
@@ -306,13 +399,14 @@ describe('BookingDocumentRecordService lifecycle', () => {
       BookingDocumentType.BOOKING_CONFIRMATION,
       booking.id,
       4,
+      booking.version,
     );
 
     await expect(
       service.updateRecord(
         BookingDocumentType.ARRIVAL_NOTICE,
         arrivalNotice.id,
-        { anNumber: 'AN-LOCK-2' },
+        { anNumber: 'AN-LOCK-2', expectedVersion: arrivalNotice.version },
         4,
       ),
     ).rejects.toBeInstanceOf(ConflictException);

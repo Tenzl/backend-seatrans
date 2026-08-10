@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
@@ -7,16 +11,12 @@ import { syncDeliveryOrderCargoFromArrivalNotice } from './an-container';
 import { resolveBookingPic } from './booking-pic';
 import { BookingDocumentRecordService } from './booking-document-record.service';
 import { BookingDocumentPayloadValidator } from './booking-document-payload.validator';
-import {
-  BookingDocumentPayload,
-  BookingDocumentPreview,
-} from './booking-document.types';
+import { BookingDocumentPreview } from './booking-document.types';
 import { User } from '../auth/entities/user.entity';
 import { ArrivalNoticePreviewDto } from './dto/arrival-notice-preview.dto';
 import { BookingConfirmationPreviewDto } from './dto/booking-confirmation-preview.dto';
 import { DeliveryOrderPreviewDto } from './dto/delivery-order-preview.dto';
 import { UpsertBookingDocumentRecordDto } from './dto/upsert-booking-document-record.dto';
-import { BookingDocumentStatus } from './enums/booking-document-status.enum';
 import { BookingDocumentType } from './enums/booking-document-type.enum';
 import { BookingFlow } from './enums/booking-flow.enum';
 import { BookingDocumentPdfRenderer } from './rendering/booking-document-pdf.renderer';
@@ -37,26 +37,19 @@ export class BookingDocumentsService {
     body: unknown,
     createdByUserId: number,
   ) {
-    const { status, bookingFlow, bookingId, payload } =
+    const { bookingFlow, bookingId, payload } =
       await this.parseUpsertBody(body);
-    let validatedPayload = await this.payloadValidator.validate(
-      type,
-      payload,
-    );
-    if (
-      type === BookingDocumentType.DELIVERY_ORDER &&
-      bookingId != null
-    ) {
+    let validatedPayload = await this.payloadValidator.validate(type, payload);
+    if (type === BookingDocumentType.DELIVERY_ORDER && bookingId != null) {
       validatedPayload = await this.overwriteDoCargoFromAn(
         bookingId,
-        validatedPayload as DeliveryOrderPreviewDto,
+        validatedPayload,
       );
     }
     if (type === BookingDocumentType.BOOKING_CONFIRMATION) {
       validatedPayload = await this.applyBookingPic(
-        validatedPayload as BookingConfirmationPreviewDto,
+        validatedPayload,
         createdByUserId,
-        (validatedPayload as BookingConfirmationPreviewDto).pic,
       );
     }
 
@@ -66,14 +59,10 @@ export class BookingDocumentsService {
         type,
         validatedPayload,
         createdByUserId,
-        status ?? BookingDocumentStatus.PROCESSING,
         { bookingFlow, bookingId },
         manager,
       );
-      if (
-        type === BookingDocumentType.ARRIVAL_NOTICE &&
-        bookingId != null
-      ) {
+      if (type === BookingDocumentType.ARRIVAL_NOTICE && bookingId != null) {
         const anPayload = validatedPayload as ArrivalNoticePreviewDto;
         await this.patchSiblingDoCargoFromAn(
           bookingId,
@@ -101,26 +90,20 @@ export class BookingDocumentsService {
     actorUserId: number,
   ) {
     const existing = await this.recordService.getById(type, id);
-    const { status, payload } = await this.parseUpsertBody(body);
-    let validatedPayload = await this.payloadValidator.validate(
-      type,
-      payload,
-    );
+    const { expectedVersion, payload } = await this.parseUpsertBody(body, true);
+    let validatedPayload = await this.payloadValidator.validate(type, payload);
     const bookingId = existing.bookingId ?? undefined;
-    if (
-      type === BookingDocumentType.DELIVERY_ORDER &&
-      bookingId != null
-    ) {
+    if (type === BookingDocumentType.DELIVERY_ORDER && bookingId != null) {
       validatedPayload = await this.overwriteDoCargoFromAn(
         bookingId,
-        validatedPayload as DeliveryOrderPreviewDto,
+        validatedPayload,
       );
     }
     if (type === BookingDocumentType.BOOKING_CONFIRMATION) {
       validatedPayload = await this.applyBookingPic(
-        validatedPayload as BookingConfirmationPreviewDto,
+        validatedPayload,
         existing.createdByUserId,
-        (validatedPayload as BookingConfirmationPreviewDto).pic,
+        existing.payload,
       );
     }
 
@@ -131,13 +114,10 @@ export class BookingDocumentsService {
         id,
         validatedPayload,
         actorUserId,
-        status,
+        expectedVersion!,
         manager,
       );
-      if (
-        type === BookingDocumentType.ARRIVAL_NOTICE &&
-        bookingId != null
-      ) {
+      if (type === BookingDocumentType.ARRIVAL_NOTICE && bookingId != null) {
         const anPayload = validatedPayload as ArrivalNoticePreviewDto;
         await this.patchSiblingDoCargoFromAn(
           bookingId,
@@ -150,24 +130,31 @@ export class BookingDocumentsService {
     });
   }
 
-  async lockRecord(type: BookingDocumentType, id: number, actorUserId: number) {
-    return this.recordService.lock(type, id, actorUserId);
+  async lockRecord(
+    type: BookingDocumentType,
+    id: number,
+    actorUserId: number,
+    expectedVersion: number,
+  ) {
+    return this.recordService.lock(type, id, actorUserId, expectedVersion);
   }
 
   async unlockRecord(
     type: BookingDocumentType,
     id: number,
     actorUserId: number,
+    expectedVersion: number,
   ) {
-    return this.recordService.unlock(type, id, actorUserId);
+    return this.recordService.unlock(type, id, actorUserId, expectedVersion);
   }
 
   async archiveRecord(
     type: BookingDocumentType,
     id: number,
     actorUserId: number,
+    expectedVersion: number,
   ) {
-    return this.recordService.archive(type, id, actorUserId);
+    return this.recordService.archive(type, id, actorUserId, expectedVersion);
   }
 
   async permanentDeleteRecord(type: BookingDocumentType, id: number) {
@@ -183,36 +170,55 @@ export class BookingDocumentsService {
     payload: unknown,
     actorUserId?: number,
   ): Promise<BookingDocumentPreview> {
-    let validatedPayload = await this.payloadValidator.validate(
-      type,
-      payload,
-    );
+    let validatedPayload = await this.payloadValidator.validate(type, payload);
     if (
       type === BookingDocumentType.BOOKING_CONFIRMATION &&
       actorUserId != null
     ) {
       validatedPayload = await this.applyBookingPic(
-        validatedPayload as BookingConfirmationPreviewDto,
+        validatedPayload,
         actorUserId,
-        (validatedPayload as BookingConfirmationPreviewDto).pic,
       );
     }
     return this.pdfRenderer.render(type, validatedPayload);
   }
 
+  async createRecordPreview(
+    type: BookingDocumentType,
+    id: number,
+  ): Promise<BookingDocumentPreview> {
+    const record = await this.recordService.getById(type, id);
+    return this.pdfRenderer.render(type, record.payload);
+  }
+
   private async applyBookingPic(
     payload: BookingConfirmationPreviewDto,
     creatorUserId: number,
-    existingPic?: string | null,
+    existing?: BookingConfirmationPreviewDto,
   ): Promise<BookingConfirmationPreviewDto> {
-    const creator = await this.userRepository.findOne({
-      where: { id: creatorUserId },
+    const selectedUserId = payload.picUserId ?? existing?.picUserId;
+    const legacyPic = selectedUserId == null ? existing?.pic?.trim() : '';
+    if (legacyPic) {
+      return this.payloadValidator.validate(
+        BookingDocumentType.BOOKING_CONFIRMATION,
+        { ...payload, pic: legacyPic },
+      );
+    }
+    const userId = selectedUserId ?? creatorUserId;
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
     });
-    const pic = resolveBookingPic(creator, existingPic);
-    return (await this.payloadValidator.validate(
+    if (selectedUserId != null && !user) {
+      throw new BadRequestException(`Unknown picUserId ${selectedUserId}`);
+    }
+    const pic = resolveBookingPic(
+      user,
+      selectedUserId == null ? existing?.pic : undefined,
+    );
+    return await this.payloadValidator.validate(
       BookingDocumentType.BOOKING_CONFIRMATION,
-      { ...payload, pic },
-    )) as BookingConfirmationPreviewDto;
+      { ...payload, picUserId: selectedUserId ?? user?.id, pic },
+    );
   }
 
   /** DO cargo/containers mirror BL: owned by AN, read-only on the DO form. */
@@ -231,10 +237,10 @@ export class BookingDocumentsService {
       an.payload as ArrivalNoticePreviewDto,
       doPayload,
     );
-    return (await this.payloadValidator.validate(
+    return await this.payloadValidator.validate(
       BookingDocumentType.DELIVERY_ORDER,
       synced,
-    )) as DeliveryOrderPreviewDto;
+    );
   }
 
   /** When AN cargo changes, keep the sibling DO cargo in lockstep. */
@@ -249,27 +255,49 @@ export class BookingDocumentsService {
       bookingId,
       manager,
     );
-    if (!doc || doc.lockedAt) return;
+    if (!doc) return;
     const synced = syncDeliveryOrderCargoFromArrivalNotice(
       anPayload,
       doc.payload as DeliveryOrderPreviewDto,
     );
-    const validated = (await this.payloadValidator.validate(
+    if (doc.lockedAt) {
+      if (
+        JSON.stringify(this.doCargoProjection(synced)) !==
+        JSON.stringify(this.doCargoProjection(doc.payload))
+      ) {
+        throw new ConflictException(
+          'Arrival Notice cargo cannot change while the linked Delivery Order is locked',
+        );
+      }
+      return;
+    }
+    const validated = await this.payloadValidator.validate(
       BookingDocumentType.DELIVERY_ORDER,
       synced,
-    )) as BookingDocumentPayload;
+    );
     await this.recordService.update(
       BookingDocumentType.DELIVERY_ORDER,
       doc.id,
       validated,
       actorUserId,
-      undefined,
+      doc.version,
       manager,
     );
   }
 
-  private async parseUpsertBody(body: unknown): Promise<{
-    status?: BookingDocumentStatus;
+  private doCargoProjection(payload: DeliveryOrderPreviewDto) {
+    return {
+      serviceMode: payload.serviceMode,
+      descriptionOfGoods: payload.descriptionOfGoods,
+      containers: payload.containers,
+    };
+  }
+
+  private async parseUpsertBody(
+    body: unknown,
+    requireVersion = false,
+  ): Promise<{
+    expectedVersion?: number;
     bookingFlow?: BookingFlow;
     bookingId?: number;
     payload: unknown;
@@ -279,14 +307,14 @@ export class BookingDocumentsService {
     }
 
     const {
-      status: rawStatus,
+      expectedVersion: rawExpectedVersion,
       bookingFlow: rawBookingFlow,
       bookingId: rawBookingId,
       ...payload
     } = body as Record<string, unknown>;
 
     const envelope = plainToInstance(UpsertBookingDocumentRecordDto, {
-      status: rawStatus,
+      expectedVersion: rawExpectedVersion,
       bookingFlow: rawBookingFlow,
       bookingId: rawBookingId,
     });
@@ -307,9 +335,12 @@ export class BookingDocumentsService {
         ],
       });
     }
+    if (requireVersion && envelope.expectedVersion == null) {
+      throw new BadRequestException('expectedVersion is required');
+    }
 
     return {
-      status: envelope.status,
+      expectedVersion: envelope.expectedVersion,
       bookingFlow: envelope.bookingFlow,
       bookingId: envelope.bookingId,
       payload,

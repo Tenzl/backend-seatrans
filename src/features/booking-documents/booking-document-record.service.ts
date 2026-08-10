@@ -6,6 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DeepPartial, EntityManager, IsNull, Repository } from 'typeorm';
 import { saveWithOptimisticLock } from '../../shared/utils/optimistic-lock';
+import { containerRowHasCargo } from './an-container';
 import { BookingDocumentPayload } from './booking-document.types';
 import { ArrivalNoticePreviewDto } from './dto/arrival-notice-preview.dto';
 import { BillOfLadingPreviewDto } from './dto/bill-of-lading-preview.dto';
@@ -33,13 +34,53 @@ const WORKFLOW_TYPES: Record<BookingFlow, BookingDocumentType[]> = {
 };
 
 type ChildRecord =
-  | ArrivalNoticeRecord
-  | DeliveryOrderRecord
-  | BillOfLadingRecord;
+  ArrivalNoticeRecord | DeliveryOrderRecord | BillOfLadingRecord;
 type DocumentRecord = BookingRecord | ChildRecord;
 type WorkflowFields = {
   bookingFlow?: BookingFlow;
   bookingId?: number;
+};
+
+const REQUIRED_TEXT_FIELDS: Record<BookingDocumentType, string[]> = {
+  [BookingDocumentType.BOOKING_CONFIRMATION]: [
+    'bookingNumber',
+    'to',
+    'vesselVoyage',
+    'portOfLoading',
+    'portOfDischarge',
+    'commodity',
+    'pic',
+  ],
+  [BookingDocumentType.ARRIVAL_NOTICE]: [
+    'anNumber',
+    'date',
+    'agent',
+    'shipper',
+    'consignee',
+    'vesselVoyage',
+    'eta',
+    'portOfDischarge',
+    'descriptionOfGoods',
+  ],
+  [BookingDocumentType.BILL_OF_LADING]: [
+    'fblNumber',
+    'consignor',
+    'consignedToOrderOf',
+    'oceanVessel',
+    'portOfLoading',
+    'portOfDischarge',
+    'descriptionOfGoods',
+    'placeOfIssue',
+    'dateOfIssue',
+  ],
+  [BookingDocumentType.DELIVERY_ORDER]: [
+    'doNumber',
+    'date',
+    'deliverTo',
+    'vesselVoyage',
+    'portOfDischarge',
+    'descriptionOfGoods',
+  ],
 };
 
 @Injectable()
@@ -59,7 +100,6 @@ export class BookingDocumentRecordService {
     type: BookingDocumentType,
     payload: BookingDocumentPayload,
     createdByUserId: number,
-    status: BookingDocumentStatus = BookingDocumentStatus.PROCESSING,
     workflow: WorkflowFields = {},
     manager?: EntityManager,
   ) {
@@ -68,11 +108,11 @@ export class BookingDocumentRecordService {
       workflow,
       manager,
     );
-    const snapshot = this.clonePayload(type, payload);
+    const snapshot = this.clonePayload(payload);
     const repository = this.repository(type, manager);
     const record = repository.create({
       payload: snapshot,
-      status,
+      status: this.statusFor(type, snapshot),
       createdByUserId,
       updatedByUserId: createdByUserId,
       ...workflowFields,
@@ -171,41 +211,23 @@ export class BookingDocumentRecordService {
     id: number,
     payload: BookingDocumentPayload,
     actorUserId: number,
-    status?: BookingDocumentStatus,
+    expectedVersion: number,
     manager?: EntityManager,
   ) {
     const record = await this.findActiveOrFail(type, id, false, manager);
     await this.assertMutable(type, record, manager);
-
-    record.payload = this.clonePayload(type, payload);
-    record.updatedByUserId = actorUserId;
-    if (status) record.status = status;
-
-    return this.toResponse(
+    const snapshot = this.clonePayload(payload);
+    return this.casUpdate(
       type,
-      await saveWithOptimisticLock(
-        () => this.repository(type, manager).save(record),
-        'Document record was modified concurrently; reload and retry',
-      ),
-    );
-  }
-
-  async complete(
-    type: BookingDocumentType,
-    id: number,
-    actorUserId: number,
-    manager?: EntityManager,
-  ) {
-    const record = await this.findActiveOrFail(type, id, false, manager);
-    await this.assertMutable(type, record, manager);
-    record.status = BookingDocumentStatus.COMPLETED;
-    record.updatedByUserId = actorUserId;
-    return this.toResponse(
-      type,
-      await saveWithOptimisticLock(
-        () => this.repository(type, manager).save(record),
-        'Document record was modified concurrently; reload and retry',
-      ),
+      record,
+      expectedVersion,
+      {
+        payload: snapshot,
+        status: this.statusFor(type, snapshot),
+        updatedByUserId: actorUserId,
+      },
+      manager,
+      'locked_at IS NULL',
     );
   }
 
@@ -213,51 +235,54 @@ export class BookingDocumentRecordService {
     type: BookingDocumentType,
     id: number,
     actorUserId: number,
+    expectedVersion: number,
     manager?: EntityManager,
   ) {
     const record = await this.findActiveOrFail(type, id, false, manager);
     if (record.lockedAt) {
       throw new ConflictException('Document record is already locked');
     }
-    record.lockedAt = new Date();
-    record.updatedByUserId = actorUserId;
-    try {
-      return this.toResponse(
-        type,
-        await saveWithOptimisticLock(
-          () => this.repository(type, manager).save(record),
-          'Document record was modified concurrently; reload and retry',
-        ),
+    const missing = this.missingRequiredFields(type, record.payload);
+    if (missing.length > 0) {
+      throw new ConflictException(
+        `Document is incomplete; missing: ${missing.join(', ')}`,
       );
-    } catch (error) {
-      if (error instanceof ConflictException) {
-        const fresh = await this.findActiveOrFail(type, id, false, manager);
-        if (fresh.lockedAt) {
-          throw new ConflictException('Document record is already locked');
-        }
-      }
-      throw error;
     }
+    return this.casUpdate(
+      type,
+      record,
+      expectedVersion,
+      {
+        lockedAt: new Date(),
+        status: BookingDocumentStatus.COMPLETED,
+        updatedByUserId: actorUserId,
+      },
+      manager,
+      'locked_at IS NULL',
+    );
   }
 
   async unlock(
     type: BookingDocumentType,
     id: number,
     actorUserId: number,
+    expectedVersion: number,
     manager?: EntityManager,
   ) {
     const record = await this.findActiveOrFail(type, id, false, manager);
     if (!record.lockedAt) {
       throw new ConflictException('Document record is not locked');
     }
-    record.lockedAt = null;
-    record.updatedByUserId = actorUserId;
-    return this.toResponse(
+    return this.casUpdate(
       type,
-      await saveWithOptimisticLock(
-        () => this.repository(type, manager).save(record),
-        'Document record was modified concurrently; reload and retry',
-      ),
+      record,
+      expectedVersion,
+      {
+        lockedAt: null,
+        updatedByUserId: actorUserId,
+      },
+      manager,
+      'locked_at IS NOT NULL',
     );
   }
 
@@ -265,18 +290,21 @@ export class BookingDocumentRecordService {
     type: BookingDocumentType,
     id: number,
     actorUserId: number,
+    expectedVersion: number,
     manager?: EntityManager,
   ) {
     const record = await this.findActiveOrFail(type, id, false, manager);
-    record.deletedAt = new Date();
-    record.deletedByUserId = actorUserId;
-    record.updatedByUserId = actorUserId;
-    return this.toResponse(
+    return this.casUpdate(
       type,
-      await saveWithOptimisticLock(
-        () => this.repository(type, manager).save(record),
-        'Document record was modified concurrently; reload and retry',
-      ),
+      record,
+      expectedVersion,
+      {
+        deletedAt: new Date(),
+        deletedByUserId: actorUserId,
+        updatedByUserId: actorUserId,
+      },
+      manager,
+      'deleted_at IS NULL',
     );
   }
 
@@ -446,18 +474,85 @@ export class BookingDocumentRecordService {
   }
 
   private clonePayload(
-    type: BookingDocumentType,
     payload: BookingDocumentPayload,
   ): Record<string, unknown> {
-    const snapshot = JSON.parse(JSON.stringify(payload)) as Record<
-      string,
-      unknown
-    >;
-    if (type === BookingDocumentType.BILL_OF_LADING) {
-      delete snapshot.showSurrendered;
-      delete snapshot.includeCompanyStamp;
+    return JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
+  }
+
+  private statusFor(
+    type: BookingDocumentType,
+    payload: Record<string, unknown>,
+  ): BookingDocumentStatus {
+    return this.missingRequiredFields(type, payload).length === 0
+      ? BookingDocumentStatus.COMPLETED
+      : BookingDocumentStatus.PROCESSING;
+  }
+
+  private missingRequiredFields(
+    type: BookingDocumentType,
+    payload: Record<string, unknown>,
+  ): string[] {
+    const missing = REQUIRED_TEXT_FIELDS[type].filter(
+      (field) =>
+        typeof payload[field] !== 'string' ||
+        payload[field].trim().length === 0,
+    );
+    if (type === BookingDocumentType.BOOKING_CONFIRMATION) {
+      const volumes = payload.cargoVolumes;
+      const hasVolume =
+        (typeof payload.volume === 'string' && payload.volume.trim() !== '') ||
+        (typeof volumes === 'object' &&
+          volumes !== null &&
+          Object.values(volumes).some(
+            (value) => typeof value === 'number' && value > 0,
+          ));
+      if (!hasVolume) missing.push('cargoVolumes');
+    } else {
+      const containers = Array.isArray(payload.containers)
+        ? payload.containers
+        : [];
+      if (!containers.some((row) => containerRowHasCargo(row as never))) {
+        missing.push('containers');
+      }
     }
-    return snapshot;
+    return missing;
+  }
+
+  private async casUpdate(
+    type: BookingDocumentType,
+    record: DocumentRecord,
+    expectedVersion: number,
+    changes: Record<string, unknown>,
+    manager?: EntityManager,
+    statePredicate?: string,
+  ) {
+    if (Number(record.version ?? 1) !== expectedVersion) {
+      throw new ConflictException(
+        'Document record was modified concurrently; reload and retry',
+      );
+    }
+    let query = this.repository(type, manager)
+      .createQueryBuilder()
+      .update()
+      .set({
+        ...changes,
+        version: () => '"version" + 1',
+      })
+      .where('id = :id', { id: Number(record.id) })
+      .andWhere('version = :expectedVersion', { expectedVersion })
+      .andWhere('deleted_at IS NULL');
+    if (statePredicate) query = query.andWhere(statePredicate);
+    const result = await query.execute();
+    if (result.affected !== 1) {
+      throw new ConflictException(
+        'Document record was modified concurrently; reload and retry',
+      );
+    }
+    const updated = await this.repository(type, manager).findOne({
+      where: { id: Number(record.id) },
+    });
+    if (!updated) throw new NotFoundException('Document record not found');
+    return this.toResponse(type, updated);
   }
 
   private referenceNumber(

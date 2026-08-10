@@ -57,6 +57,19 @@ export class BookingDocumentsAdminController {
     return this.bookingDocuments.getRecord(type, id);
   }
 
+  @Get(':type/records/:id/preview')
+  async previewRecord(
+    @Param('type', new ParseEnumPipe(BookingDocumentType))
+    type: BookingDocumentType,
+    @Param('id', ParseIntPipe) id: number,
+    @Res() response: Response,
+  ): Promise<void> {
+    this.sendPreview(
+      response,
+      await this.bookingDocuments.createRecordPreview(type, id),
+    );
+  }
+
   @Get('bookings/:id/workflow')
   getWorkflow(@Param('id', ParseIntPipe) id: number) {
     return this.bookingDocuments.getWorkflow(id);
@@ -98,12 +111,14 @@ export class BookingDocumentsAdminController {
     @Param('type', new ParseEnumPipe(BookingDocumentType))
     type: BookingDocumentType,
     @Param('id', ParseIntPipe) id: number,
+    @Body('expectedVersion', ParseIntPipe) expectedVersion: number,
     @Req() request: AuthenticatedRequest,
   ) {
     return this.bookingDocuments.lockRecord(
       type,
       id,
       this.requireActorUserId(request),
+      expectedVersion,
     );
   }
 
@@ -114,12 +129,14 @@ export class BookingDocumentsAdminController {
     @Param('type', new ParseEnumPipe(BookingDocumentType))
     type: BookingDocumentType,
     @Param('id', ParseIntPipe) id: number,
+    @Body('expectedVersion', ParseIntPipe) expectedVersion: number,
     @Req() request: AuthenticatedRequest,
   ) {
     return this.bookingDocuments.unlockRecord(
       type,
       id,
       this.requireActorUserId(request),
+      expectedVersion,
     );
   }
 
@@ -130,12 +147,14 @@ export class BookingDocumentsAdminController {
     @Param('type', new ParseEnumPipe(BookingDocumentType))
     type: BookingDocumentType,
     @Param('id', ParseIntPipe) id: number,
+    @Query('expectedVersion', ParseIntPipe) expectedVersion: number,
     @Req() request: AuthenticatedRequest,
   ): Promise<void> {
     await this.bookingDocuments.archiveRecord(
       type,
       id,
       this.requireActorUserId(request),
+      expectedVersion,
     );
   }
 
@@ -167,6 +186,13 @@ export class BookingDocumentsAdminController {
       body,
       request.user?.id,
     );
+    this.sendPreview(response, preview);
+  }
+
+  private sendPreview(
+    response: Response,
+    preview: { data: Buffer; filename: string },
+  ): void {
     response.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="${preview.filename}"`,

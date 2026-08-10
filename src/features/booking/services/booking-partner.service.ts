@@ -463,6 +463,7 @@ export class BookingPartnerService {
       throw new NotFoundException('Partner not found');
     }
 
+    await this.assertNoDocumentReferences(this.dataSource, id);
     await this.partnerRepository.remove(row);
   }
 
@@ -486,11 +487,66 @@ export class BookingPartnerService {
         );
       }
 
+      await this.assertNoDocumentReferences(manager);
       await manager.query(
         'TRUNCATE TABLE booking_partners RESTART IDENTITY CASCADE',
       );
       return { deleted };
     });
+  }
+
+  private async assertNoDocumentReferences(
+    executor: Pick<DataSource | EntityManager, 'query'>,
+    partnerId?: number,
+  ): Promise<void> {
+    // ponytail: JSON ids cannot be protected by a database FK. This check is
+    // intentionally the smallest guard; normalize party refs if concurrent
+    // partner deletion/document creation becomes a real workload.
+    const rows = await executor.query<Array<{ isReferenced: boolean }>>(
+      `SELECT EXISTS (
+        SELECT 1 FROM booking_records
+        WHERE NULLIF(payload ->> 'clientPartyId', '') IS NOT NULL
+          AND ($1::text IS NULL OR payload ->> 'clientPartyId' = $1::text)
+        UNION ALL
+        SELECT 1 FROM arrival_notice_records
+        WHERE COALESCE(
+          NULLIF(payload ->> 'agentPartyId', ''),
+          NULLIF(payload ->> 'shipperPartyId', ''),
+          NULLIF(payload ->> 'consigneePartyId', ''),
+          NULLIF(payload ->> 'notifyPartyId', '')
+        ) IS NOT NULL
+          AND ($1::text IS NULL OR $1::text IN (
+            payload ->> 'agentPartyId', payload ->> 'shipperPartyId',
+            payload ->> 'consigneePartyId', payload ->> 'notifyPartyId'
+          ))
+        UNION ALL
+        SELECT 1 FROM bill_of_lading_records
+        WHERE COALESCE(
+          NULLIF(payload ->> 'shipperPartyId', ''),
+          NULLIF(payload ->> 'consigneePartyId', ''),
+          NULLIF(payload ->> 'notifyPartyId', '')
+        ) IS NOT NULL
+          AND ($1::text IS NULL OR $1::text IN (
+            payload ->> 'shipperPartyId', payload ->> 'consigneePartyId',
+            payload ->> 'notifyPartyId'
+          ))
+        UNION ALL
+        SELECT 1 FROM delivery_order_records
+        WHERE COALESCE(
+          NULLIF(payload ->> 'consigneePartyId', ''),
+          NULLIF(payload ->> 'notifyPartyId', '')
+        ) IS NOT NULL
+          AND ($1::text IS NULL OR $1::text IN (
+            payload ->> 'consigneePartyId', payload ->> 'notifyPartyId'
+          ))
+      ) AS "isReferenced"`,
+      [partnerId == null ? null : String(partnerId)],
+    );
+    if (rows[0]?.isReferenced) {
+      throw new ConflictException(
+        'Partner is referenced by a booking document and cannot be deleted',
+      );
+    }
   }
 
   private applyFilters(

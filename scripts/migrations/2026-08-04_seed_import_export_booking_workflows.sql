@@ -89,7 +89,7 @@ BEGIN
         'grossWeight', '20,700 KGS',
         'measurement', '7.26 CBM',
         'freightTerms', 'FREIGHT COLLECT',
-        'cleanOnBoard', 'CLEAN ON BOARD Jun 14, 2026',
+        'cleanOnBoardDate', '14/06/2026',
         'declarationOfInterest', '',
         'declaredValue', '',
         'freightAmount', 'AS ARRANGED',

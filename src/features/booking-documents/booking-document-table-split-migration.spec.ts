@@ -89,7 +89,7 @@ describe('booking document table split migration', () => {
   it('requires the exact target database and destructive confirmation', () => {
     const missingTarget = spawnSync(process.execPath, [runner], {
       encoding: 'utf8',
-      env: { ...process.env, DB_DATABASE: 'booking_split_test' },
+      env: { ...process.env, DB_URL: '', DB_DATABASE: 'booking_split_test' },
     });
     expect(missingTarget.status).toBe(1);
     expect(missingTarget.stderr).toContain(
@@ -101,7 +101,7 @@ describe('booking document table split migration', () => {
       [runner, '--apply', '--target-db=booking_split_test', '--confirm=WRONG'],
       {
         encoding: 'utf8',
-        env: { ...process.env, DB_DATABASE: 'booking_split_test' },
+        env: { ...process.env, DB_URL: '', DB_DATABASE: 'booking_split_test' },
       },
     );
     expect(wrongConfirmation.status).toBe(1);

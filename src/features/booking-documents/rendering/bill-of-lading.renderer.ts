@@ -55,6 +55,10 @@ const CARGO_TOTAL_DASH_PAD = 2;
 const LABEL_TO_VALUE_GAP = 3;
 const BLACK = rgb(0, 0, 0);
 const SURRENDERED_RED = rgb(1, 0, 0);
+/** Debug outlines for BL field cells on the blank PNG — set false for production PDFs. */
+const BL_DRAW_FIELD_OUTLINES = true;
+const FIELD_OUTLINE_RED = rgb(1, 0, 0);
+const FIELD_OUTLINE_WIDTH = 0.8;
 const SURRENDERED_LABEL = 'SURRENDERED';
 const SURRENDERED_FONT_SIZE = 22;
 const SURRENDERED_X = 350;
@@ -148,18 +152,30 @@ const BOX = {
   measurement: { x: 516.0, top: 323.5, maxWidth: 50, maxLines: 22 },
   /** Cargo body must stop above these two footer lines (kept as-is). */
   freightTerms: { x: 242.0, top: 528.0, maxWidth: 200, maxLines: 2 },
-  cleanOnBoard: { x: 242.0, top: 538.0, maxWidth: 200, maxLines: 2 },
-  declarationOfInterest: { x: 72.0, top: 576.0, maxWidth: 210, maxLines: 3 },
-  declaredValue: { x: 310.0, top: 576.0, maxWidth: 210, maxLines: 3 },
+  /**
+   * Fixed "CLEAN ON BOARD" + optional date (`cleanOnBoardDate`).
+   * Date-only input on the form; label text is always drawn on the PDF.
+   */
+  cleanOnBoardDate: { x: 242.0, top: 538.0, maxWidth: 200, maxLines: 2 },
+  /**
+   * Declaration value cells (black rectangles on blank), measured from
+   * bl-original.jpg @ 1654×2340 → A4. Left 29.9–182.1 / right 403.1–564.7,
+   * both tops ≈572.8 (inner text inset ~3pt). Not the printed labels above.
+   * Nudged +5pt down; declarationOfInterest also +5pt right.
+   */
+  declarationOfInterest: { x: 65.0, top: 604.0, maxWidth: 160, maxLines: 2 },
+  declaredValue: { x: 404.0, top: 604.0, maxWidth: 160, maxLines: 2 },
   freightAmount: { x: 76.5, top: 715.0, maxWidth: 110, maxLines: 2 },
   freightPayableAt: { x: 258.0, top: 715.0, maxWidth: 121, maxLines: 2 },
-  placeOfIssue: { x: 385.5, top: 715.0, maxWidth: 115, maxLines: 2 },
-  dateOfIssue: { x: 507.8, top: 715.0, maxWidth: 70, maxLines: 1 },
+  /** Place widened; date nudged right within the same "Place and date of issue" cell. */
+  placeOfIssue: { x: 385.5, top: 715.0, maxWidth: 140, maxLines: 2 },
+  dateOfIssue: { x: 530.0, top: 715.0, maxWidth: 50, maxLines: 1 },
   numberOfOriginals: { x: 267.8, top: 737.5, maxWidth: 80, maxLines: 1 },
   deliveryApplyTo: { x: 74.2, top: 761.0, maxWidth: 280, maxLines: 5 },
+  /** Manager stamp image anchor only — not outlined (stamp cell stays blank chrome). */
   stamp: { x: 400.0, top: 740.0, maxWidth: 160, maxLines: 1 },
-  insuranceNotCovered: { x: 68.5, top: 735.5 },
-  insuranceCovered: { x: 121.0, top: 735.5 },
+  insuranceNotCovered: { x: 65.5, top: 735.5 },
+  insuranceCovered: { x: 118.0, top: 735.5 },
 } as const;
 
 function pdfYFromTop(top: number, fontSize: number, font: PDFFont): number {
@@ -233,6 +249,74 @@ function drawBoxText(
       color: BLACK,
     });
   });
+}
+
+/** Red stroke around a TopLeft cell (height = maxLines × line step). */
+function drawFieldOutline(
+  page: PDFPage,
+  field: TopLeft,
+  fontSize = FONT_SIZE,
+): void {
+  const maxLines = field.maxLines ?? 1;
+  const height = maxLines * (fontSize + LINE_GAP);
+  const top = field.top + BL_CONTENT_Y_OFFSET;
+  page.drawRectangle({
+    x: field.x,
+    y: BL_PAGE_HEIGHT - top - height,
+    width: field.maxWidth,
+    height,
+    borderColor: FIELD_OUTLINE_RED,
+    borderWidth: FIELD_OUTLINE_WIDTH,
+  });
+}
+
+function drawPointOutline(
+  page: PDFPage,
+  point: { x: number; top: number },
+  size = 10,
+): void {
+  const top = point.top + BL_CONTENT_Y_OFFSET;
+  page.drawRectangle({
+    x: point.x,
+    y: BL_PAGE_HEIGHT - top - size,
+    width: size,
+    height: size,
+    borderColor: FIELD_OUTLINE_RED,
+    borderWidth: FIELD_OUTLINE_WIDTH,
+  });
+}
+
+/** Overlay red boxes for every calibrated BL cell (layout debugging). */
+function drawBillOfLadingFieldOutlines(page: PDFPage): void {
+  if (!BL_DRAW_FIELD_OUTLINES) return;
+
+  drawFieldOutline(page, BOX.fblNumber, FONT_SIZE_FBL);
+  drawFieldOutline(page, BOX.consignor);
+  drawFieldOutline(page, BOX.consignedToOrderOf);
+  drawFieldOutline(page, BOX.notifyAddress);
+  drawFieldOutline(page, BOX.placeOfReceipt);
+  drawFieldOutline(page, BOX.oceanVessel);
+  drawFieldOutline(page, BOX.voyageNumber);
+  drawFieldOutline(page, BOX.portOfLoading);
+  drawFieldOutline(page, BOX.portOfDischarge);
+  drawFieldOutline(page, BOX.placeOfDelivery);
+  drawFieldOutline(page, BOX.marksAndNumbers);
+  drawFieldOutline(page, BOX.numberAndKindOfPackages);
+  drawFieldOutline(page, BOX.descriptionOfGoods);
+  drawFieldOutline(page, BOX.grossWeight);
+  drawFieldOutline(page, BOX.measurement);
+  drawFieldOutline(page, BOX.freightTerms);
+  drawFieldOutline(page, BOX.cleanOnBoardDate);
+  drawFieldOutline(page, BOX.declarationOfInterest, FONT_SIZE_SMALL);
+  drawFieldOutline(page, BOX.declaredValue, FONT_SIZE_SMALL);
+  drawFieldOutline(page, BOX.freightAmount);
+  drawFieldOutline(page, BOX.freightPayableAt);
+  drawFieldOutline(page, BOX.placeOfIssue);
+  drawFieldOutline(page, BOX.dateOfIssue);
+  drawFieldOutline(page, BOX.numberOfOriginals);
+  drawFieldOutline(page, BOX.deliveryApplyTo);
+  drawPointOutline(page, BOX.insuranceNotCovered);
+  drawPointOutline(page, BOX.insuranceCovered);
 }
 
 /** Leading number from a cargo cell (`21 CRATE(S)`, `21,000`, `7.86`). */
@@ -802,7 +886,22 @@ export function renderBillOfLading(
   }
 
   drawBoxText(page, bold, payload.freightTerms, BOX.freightTerms);
-  drawBoxText(page, font, payload.cleanOnBoard, BOX.cleanOnBoard);
+  {
+    const legacy =
+      typeof (payload as { cleanOnBoard?: unknown }).cleanOnBoard === 'string'
+        ? (payload as { cleanOnBoard?: string }).cleanOnBoard
+        : undefined;
+    const rawDate =
+      (payload.cleanOnBoardDate ?? '').trim() ||
+      (legacy ?? '').replace(/^CLEAN\s+ON\s+BOARD\s*/i, '').trim();
+    const onBoardDate = formatPdfDateTime(rawDate) || rawDate;
+    drawBoxText(
+      page,
+      font,
+      onBoardDate ? `CLEAN ON BOARD ${onBoardDate}` : 'CLEAN ON BOARD',
+      BOX.cleanOnBoardDate,
+    );
+  }
   drawBoxText(
     page,
     font,
@@ -862,4 +961,7 @@ export function renderBillOfLading(
       opacity: 0.92,
     });
   }
+
+  // Drawn last so red outlines sit above text/stamps for layout calibration.
+  drawBillOfLadingFieldOutlines(page);
 }

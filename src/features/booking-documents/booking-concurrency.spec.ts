@@ -1,8 +1,12 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
 import { ConflictException } from '@nestjs/common';
 import { OptimisticLockVersionMismatchError } from 'typeorm';
 import { BookingDocumentRecordService } from './booking-document-record.service';
 import { BookingDocumentType } from './enums/booking-document-type.enum';
-import { mapOptimisticLockError, saveWithOptimisticLock } from '../../shared/utils/optimistic-lock';
+import {
+  mapOptimisticLockError,
+  saveWithOptimisticLock,
+} from '../../shared/utils/optimistic-lock';
 import { BookingPartnerService } from '../booking/services/booking-partner.service';
 import { BookingPartner } from '../booking/entities/booking-partner.entity';
 
@@ -40,11 +44,17 @@ describe('CONC-01 optimistic concurrency', () => {
         createdAt: new Date('2026-08-07T00:00:00.000Z'),
         updatedAt: new Date('2026-08-07T00:00:00.000Z'),
       }),
-      save: jest
-        .fn()
-        .mockRejectedValue(
-          new OptimisticLockVersionMismatchError('ArrivalNoticeRecord', 1, 2),
-        ),
+      save: jest.fn(),
+      createQueryBuilder: jest.fn(() => {
+        const builder = {
+          update: jest.fn(() => builder),
+          set: jest.fn(() => builder),
+          where: jest.fn(() => builder),
+          andWhere: jest.fn(() => builder),
+          execute: jest.fn().mockResolvedValue({ affected: 0 }),
+        };
+        return builder;
+      }),
       create: jest.fn(),
       find: jest.fn(),
       findAndCount: jest.fn(),
@@ -61,8 +71,14 @@ describe('CONC-01 optimistic concurrency', () => {
       service.update(
         BookingDocumentType.ARRIVAL_NOTICE,
         10,
-        { anNumber: 'AN-2', containers: [], cargoRows: [], descriptionOfGoods: '' },
+        {
+          anNumber: 'AN-2',
+          containers: [],
+          cargoRows: [],
+          descriptionOfGoods: '',
+        },
         9,
+        1,
       ),
     ).rejects.toMatchObject({
       response: expect.objectContaining({
@@ -103,8 +119,8 @@ describe('CONC-01 optimistic concurrency', () => {
       getRepository: jest.fn(() => repository),
     };
     const dataSource = {
-      transaction: jest.fn(async (work: (m: typeof manager) => Promise<unknown>) =>
-        work(manager),
+      transaction: jest.fn(
+        async (work: (m: typeof manager) => Promise<unknown>) => work(manager),
       ),
     };
     const fieldChangeService = {
@@ -152,8 +168,8 @@ describe('CONC-01 optimistic concurrency', () => {
       getRepository: jest.fn(() => repository),
     };
     const dataSource = {
-      transaction: jest.fn(async (work: (m: typeof manager) => Promise<unknown>) =>
-        work(manager),
+      transaction: jest.fn(
+        async (work: (m: typeof manager) => Promise<unknown>) => work(manager),
       ),
     };
     const service = new BookingPartnerService(

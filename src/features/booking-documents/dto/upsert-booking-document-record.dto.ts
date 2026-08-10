@@ -1,15 +1,12 @@
 import { IsEnum, IsInt, IsOptional, IsPositive } from 'class-validator';
-import { BookingDocumentStatus } from '../enums/booking-document-status.enum';
 import { BookingFlow } from '../enums/booking-flow.enum';
 
-/**
- * Create/update envelope. Form fields live alongside `status` in the body;
- * the service strips `status` before payload validation.
- */
+/** Workflow metadata and concurrency token alongside document form fields. */
 export class UpsertBookingDocumentRecordDto {
   @IsOptional()
-  @IsEnum(BookingDocumentStatus)
-  status?: BookingDocumentStatus;
+  @IsInt()
+  @IsPositive()
+  expectedVersion?: number;
 
   @IsOptional()
   @IsEnum(BookingFlow)

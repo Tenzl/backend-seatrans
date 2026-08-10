@@ -115,16 +115,16 @@ describe('BookingDocumentsAdminController', () => {
     await controller.updateRecord(
       BookingDocumentType.ARRIVAL_NOTICE,
       3,
-      { anNumber: 'AN-3', status: 'COMPLETED' },
+      { anNumber: 'AN-3', expectedVersion: 4 },
       { user: { id: 2 } } as never,
     );
-    await controller.lockRecord(BookingDocumentType.ARRIVAL_NOTICE, 3, {
+    await controller.lockRecord(BookingDocumentType.ARRIVAL_NOTICE, 3, 5, {
       user: { id: 2 },
     } as never);
-    await controller.unlockRecord(BookingDocumentType.ARRIVAL_NOTICE, 3, {
+    await controller.unlockRecord(BookingDocumentType.ARRIVAL_NOTICE, 3, 6, {
       user: { id: 2 },
     } as never);
-    await controller.archiveRecord(BookingDocumentType.ARRIVAL_NOTICE, 3, {
+    await controller.archiveRecord(BookingDocumentType.ARRIVAL_NOTICE, 3, 7, {
       user: { id: 2 },
     } as never);
     await controller.permanentDeleteRecord(
@@ -135,23 +135,26 @@ describe('BookingDocumentsAdminController', () => {
     expect(updateRecord).toHaveBeenCalledWith(
       BookingDocumentType.ARRIVAL_NOTICE,
       3,
-      { anNumber: 'AN-3', status: 'COMPLETED' },
+      { anNumber: 'AN-3', expectedVersion: 4 },
       2,
     );
     expect(lockRecord).toHaveBeenCalledWith(
       BookingDocumentType.ARRIVAL_NOTICE,
       3,
       2,
+      5,
     );
     expect(unlockRecord).toHaveBeenCalledWith(
       BookingDocumentType.ARRIVAL_NOTICE,
       3,
       2,
+      6,
     );
     expect(archiveRecord).toHaveBeenCalledWith(
       BookingDocumentType.ARRIVAL_NOTICE,
       3,
       2,
+      7,
     );
     expect(permanentDeleteRecord).toHaveBeenCalledWith(
       BookingDocumentType.ARRIVAL_NOTICE,
@@ -172,6 +175,7 @@ describe('BookingDocumentsAdminController', () => {
 
     expect(pathFor('listRecords')).toBe(':type/records');
     expect(pathFor('getRecord')).toBe(':type/records/:id');
+    expect(pathFor('previewRecord')).toBe(':type/records/:id/preview');
     expect(pathFor('createRecord')).toBe(':type/records');
     expect(pathFor('updateRecord')).toBe(':type/records/:id');
     expect(pathFor('lockRecord')).toBe(':type/records/:id/lock');
