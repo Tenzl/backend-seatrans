@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { EpdaParameterGroupMember } from '../epda-parameters/entities/epda-parameter-group-member.entity';
-import { EpdaParameterSet } from '../epda-parameters/entities/epda-parameter-set.entity';
 import type { EpdaPortMembershipReader } from './epda-port-membership.reader';
 
 @Injectable()
@@ -12,8 +11,6 @@ export class TypeOrmEpdaPortMembershipReader
   constructor(
     @InjectRepository(EpdaParameterGroupMember)
     private readonly epdaGroupMemberRepository: Repository<EpdaParameterGroupMember>,
-    @InjectRepository(EpdaParameterSet)
-    private readonly epdaParameterSetRepository: Repository<EpdaParameterSet>,
   ) {}
 
   async findGroupLabel(portId: number): Promise<string | null> {

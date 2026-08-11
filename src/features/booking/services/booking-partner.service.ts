@@ -202,6 +202,9 @@ export class BookingPartnerService {
         manager,
         dto.customerId,
       );
+      if (!partner.customerId?.trim()) {
+        throw new BadRequestException('customerId could not be assigned');
+      }
       partner.createdBy = actor;
       partner.updatedBy = actor;
 
@@ -759,6 +762,9 @@ export class BookingPartnerService {
 
   private async generateCustomerId(manager: EntityManager): Promise<string> {
     const [id] = await this.reserveCustomerIdBlock(manager, 1);
+    if (!id) {
+      throw new BadRequestException('Failed to generate customer id');
+    }
     return id;
   }
 
@@ -779,16 +785,28 @@ export class BookingPartnerService {
       [datePart],
     );
 
-    const rows = await manager.query<Array<{ current_value: number | string }>>(
+    // TypeORM returns [rows, rowCount] for UPDATE/DELETE (not a plain rows array).
+    const rawResult = await manager.query(
       'UPDATE customer_id_sequences SET current_value = current_value + $1 WHERE sequence_date = $2 RETURNING current_value',
       [count, datePart],
     );
+    const rows: Array<{
+      current_value?: number | string;
+      currentValue?: number | string;
+    }> = Array.isArray(rawResult)
+      ? Array.isArray(rawResult[0])
+        ? rawResult[0]
+        : rawResult
+      : [];
+    const first = rows[0];
+    const end = Number(first?.current_value ?? first?.currentValue);
 
-    if (!rows.length) {
-      throw new BadRequestException('Failed to reserve customer id sequence');
+    if (!Number.isFinite(end) || end < count) {
+      throw new BadRequestException(
+        'Failed to reserve customer id sequence; ensure customer_id_sequences exists and is writable',
+      );
     }
 
-    const end = Number(rows[0].current_value);
     const start = end - count + 1;
     const ids: string[] = [];
     for (let value = start; value <= end; value++) {

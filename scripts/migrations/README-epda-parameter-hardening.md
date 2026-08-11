@@ -68,9 +68,19 @@ Then smoke-test EPDA create/edit, save/delete audit history, and ports with and
 without overrides. Store the runner manifest with the provider backup
 reference.
 
+## Membership cutover (2026-08-11)
+
+Runtime now reads/writes only `epda_parameter_group_members`. Re-sync from
+legacy JSONB with:
+
+```bash
+# apply scripts/migrations/2026-08-11_epda_group_members_remigrate.sql
+```
+
+API responses still expose `memberPortIds`, hydrated from the membership table.
+
 ## Contract phase
 
 There is deliberately no contract/drop migration in this rollout.
-`member_port_ids` remains available for dual-write rollback. Dropping it
-requires a new backup, a separate reviewed migration, and explicit production
-approval after the observation period.
+`member_port_ids` remains on `epda_parameter_set` until a separately approved
+contract drop after observation. Do not dual-write it anymore.

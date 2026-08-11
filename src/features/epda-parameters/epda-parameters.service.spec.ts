@@ -430,8 +430,14 @@ describe('EpdaParametersService increment 1', () => {
       'SELECT pg_advisory_xact_lock(hashtext($1))',
       ['epda-group-area:1'],
     );
-    expect(sibling.memberPortIds).toEqual([30]);
+    expect(membershipRepo.delete).toHaveBeenCalledWith({ groupId: 5 });
+    expect(membershipRepo.delete).toHaveBeenCalledWith({
+      portId: expect.anything(),
+    });
+    expect(membershipRepo.save).toHaveBeenCalled();
     expect(saved.memberPortIds).toEqual([21]);
+    // JSONB dual-write removed — sibling.memberPortIds is not rewritten.
+    expect(sibling.memberPortIds).toEqual([21, 30]);
   });
 
   it('serializes group creation with membership mutations in the same area', async () => {
@@ -483,6 +489,10 @@ describe('EpdaParametersService increment 1', () => {
           },
         ),
     };
+    membershipRepo.find.mockResolvedValue([
+      { groupId: 5, portId: 21 },
+      { groupId: 5, portId: 22 },
+    ]);
     transactionManager.getRepository.mockImplementation((entity: unknown) => {
       if (entity === EpdaParameterSet) return transactionalRepo;
       if (entity === EpdaParameterGroupMember) return membershipRepo;

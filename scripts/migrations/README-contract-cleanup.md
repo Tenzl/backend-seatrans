@@ -10,8 +10,9 @@ and a separately approved contract migration.
 ### `epda_parameter_set.member_port_ids`
 
 Reason: group membership is normalized in
-`epda_parameter_group_members`; the JSONB column remains only for the temporary
-dual-read/dual-write rollback window.
+`epda_parameter_group_members`; the JSONB column remains only until a contract
+drop. Runtime no longer dual-reads or dual-writes this column after the
+2026-08-11 membership cutover / remigration.
 
 Drop only after all of the following are true:
 

@@ -83,6 +83,19 @@ describe('EPDA parameter resolution', () => {
     expect(portOverride.area).toBe('2');
   });
 
+  it('clears stale JSONB members when the membership table has no rows', () => {
+    const group = {
+      id: 5,
+      scope: 'GROUP',
+      area: '1',
+      memberPortIds: [99],
+    } as EpdaParameterSet;
+
+    hydrateEpdaParameterRows([group], [], []);
+
+    expect(group.memberPortIds).toEqual([]);
+  });
+
   it('accepts only canonical area keys', () => {
     expect(normalizeEpdaAreaKey(' 3 ')).toBe('3');
     expect(normalizeEpdaAreaKey('MIDDLE')).toBeNull();

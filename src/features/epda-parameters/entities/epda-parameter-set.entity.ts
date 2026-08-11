@@ -126,7 +126,7 @@ export class EpdaParameterSet {
   @Column({ type: 'varchar', length: 100, nullable: true })
   name!: string | null;
 
-  /** Legacy dual-write during rollout; normalized membership is the source of truth. */
+  /** Legacy column retained until contract drop; runtime membership uses epda_parameter_group_members. */
   @Column({ name: 'member_port_ids', type: 'jsonb', nullable: true })
   memberPortIds!: number[] | null;
 

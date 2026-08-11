@@ -377,7 +377,7 @@ export class EpdaParametersService {
           area: normalizedArea,
           portId: null,
           name: normalizedName,
-          memberPortIds: [],
+          memberPortIds: null,
           values: values ?? {},
         }),
       );
@@ -497,8 +497,9 @@ export class EpdaParametersService {
   }
 
   /**
-   * Replace a group's member ports. A port belongs to at most one group per area,
-   * so any incoming port is first removed from sibling groups in the same area.
+   * Replace a group's member ports. A port belongs to at most one group
+   * (enforced by rewriting epda_parameter_group_members). JSONB member_port_ids
+   * is no longer written.
    */
   async setGroupMembers(
     id: number,
@@ -558,31 +559,16 @@ export class EpdaParametersService {
         );
       }
 
-      const siblings = await parameterRepo.find({
-        where: { scope: 'GROUP', area: groupArea },
-      });
       const existingMemberships = await membershipRepo.find({
         where: { groupId: id },
       });
-      const beforeMembers =
-        existingMemberships.length > 0
-          ? existingMemberships.map((member) => member.portId)
-          : [...(group.memberPortIds ?? [])];
-      const changedSiblings = siblings
-        .filter((sibling) => sibling.id !== id)
-        .filter((sibling) =>
-          (sibling.memberPortIds ?? []).some((portId) =>
-            unique.includes(portId),
-          ),
-        );
-      for (const sibling of changedSiblings) {
-        sibling.memberPortIds = (sibling.memberPortIds ?? []).filter(
-          (portId) => !unique.includes(portId),
-        );
-      }
+      const beforeMembers = existingMemberships
+        .map((member) => member.portId)
+        .sort((left, right) => left - right);
 
       await membershipRepo.delete({ groupId: id });
       if (unique.length > 0) {
+        // One port → one group globally (unique on port_id if present, else rewrite).
         await membershipRepo.delete({ portId: In(unique) });
         await membershipRepo.save(
           unique.map((portId) =>
@@ -590,11 +576,12 @@ export class EpdaParametersService {
           ),
         );
       }
-      if (changedSiblings.length) await parameterRepo.save(changedSiblings);
+
+      // Bump optimistic version without dual-writing JSONB membership.
       const saved = await this.versionControl.updateWithVersion(
         parameterRepo,
         group,
-        { memberPortIds: unique },
+        { name: group.name },
         expectedVersion,
         `Group ${id}`,
       );
