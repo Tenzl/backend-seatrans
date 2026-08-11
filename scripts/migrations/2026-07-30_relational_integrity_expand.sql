@@ -41,17 +41,7 @@ BEGIN
         ('total_logistics_inquiries', 'processed_by', 'users', 'NO ACTION', 'fk_total_logistics_inquiries_processed_users'),
         ('total_logistics_inquiries', 'deleted_by', 'users', 'SET NULL', 'fk_total_logistics_inquiries_deleted_users'),
 
-        ('inquiry_documents', 'uploaded_by', 'users', 'NO ACTION', 'fk_inquiry_documents_uploaded_by_users'),
-
-        ('booking_shipping', 'booking_partner_id', 'booking_partners', 'NO ACTION', 'fk_booking_shipping_partner'),
-        ('booking_shipping', 'place_of_receipt_port_id', 'ports', 'NO ACTION', 'fk_booking_shipping_receipt_port'),
-        ('booking_shipping', 'port_of_loading_port_id', 'ports', 'NO ACTION', 'fk_booking_shipping_loading_port'),
-        ('booking_shipping', 'port_of_discharge_port_id', 'ports', 'NO ACTION', 'fk_booking_shipping_discharge_port'),
-        ('booking_shipping', 'place_of_delivery_port_id', 'ports', 'NO ACTION', 'fk_booking_shipping_delivery_port'),
-        ('booking_shipping', 'final_destination_port_id', 'ports', 'NO ACTION', 'fk_booking_shipping_destination_port'),
-
-        ('booking_transit_ports', 'booking_shipping_id', 'booking_shipping', 'CASCADE', 'fk_booking_transit_ports_shipping'),
-        ('booking_transit_ports', 'port_id', 'ports', 'NO ACTION', 'fk_booking_transit_ports_port')
+        ('inquiry_documents', 'uploaded_by', 'users', 'NO ACTION', 'fk_inquiry_documents_uploaded_by_users')
     ) AS desired(
       source_table,
       source_column,
@@ -210,40 +200,3 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_inquiry_documents_active_target
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_inquiry_documents_active_target_type
   ON inquiry_documents (service_slug, target_id, document_type, uploaded_at DESC)
   WHERE is_active = TRUE;
-
--- statement-break
-CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uq_booking_shipping_partner
-  ON booking_shipping (booking_partner_id);
-
--- statement-break
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_booking_shipping_receipt_port
-  ON booking_shipping (place_of_receipt_port_id)
-  WHERE place_of_receipt_port_id IS NOT NULL;
-
--- statement-break
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_booking_shipping_loading_port
-  ON booking_shipping (port_of_loading_port_id)
-  WHERE port_of_loading_port_id IS NOT NULL;
-
--- statement-break
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_booking_shipping_discharge_port
-  ON booking_shipping (port_of_discharge_port_id)
-  WHERE port_of_discharge_port_id IS NOT NULL;
-
--- statement-break
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_booking_shipping_delivery_port
-  ON booking_shipping (place_of_delivery_port_id)
-  WHERE place_of_delivery_port_id IS NOT NULL;
-
--- statement-break
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_booking_shipping_destination_port
-  ON booking_shipping (final_destination_port_id)
-  WHERE final_destination_port_id IS NOT NULL;
-
--- statement-break
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_booking_transit_ports_shipping_order
-  ON booking_transit_ports (booking_shipping_id, sort_order, id);
-
--- statement-break
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_booking_transit_ports_port
-  ON booking_transit_ports (port_id);

@@ -5,12 +5,14 @@ Migration ID: `2026-07-30_relational_integrity_expand_v1`
 Scope:
 
 - Audit the existing foreign keys for booking-document creator, inquiry user
-  actors, inquiry-document uploader, booking shipping and transit ports.
+  actors, and inquiry-document uploader.
 - Add a missing foreign key as `NOT VALID` without replacing an existing
   semantically equivalent TypeORM-named constraint.
 - Add only the missing query-path indexes with
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS`.
 - Do not validate constraints, remove columns, rewrite rows or delete data.
+- Legacy unused `booking_shipping` / `booking_transit_ports` were removed from
+  this expand scope; drop them via `2026-08-11_drop_booking_shipping_tables.sql`.
 
 ## Safe dry-run
 

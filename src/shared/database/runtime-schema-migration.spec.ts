@@ -18,9 +18,6 @@ describe('runtime schema migration contract', () => {
     expect(sql).toMatch(
       /CREATE TABLE IF NOT EXISTS shipping_agency_field_change_logs/i,
     );
-    expect(sql).toMatch(
-      /CREATE TABLE IF NOT EXISTS booking_partner_field_change_logs/i,
-    );
     expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS admin_audit_logs/i);
     expect(sql).toMatch(
       /GREATEST\(\s*\(SELECT last_value FROM inquiry_global_id_seq\)/i,

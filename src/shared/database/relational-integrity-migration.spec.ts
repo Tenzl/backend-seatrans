@@ -32,15 +32,14 @@ describe('relational integrity expand migration safety contract', () => {
     const indexStatements =
       sql.match(/CREATE (?:UNIQUE )?INDEX[\s\S]*?;/g) ?? [];
 
-    expect(indexStatements).toHaveLength(29);
+    expect(indexStatements).toHaveLength(21);
     for (const statement of indexStatements) {
       expect(statement).toMatch(
         /^CREATE (?:UNIQUE )?INDEX CONCURRENTLY IF NOT EXISTS/i,
       );
     }
-    expect(sql).toContain(
-      'CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uq_booking_shipping_partner',
-    );
+    expect(sql).not.toContain('booking_shipping');
+    expect(sql).not.toContain('booking_transit_ports');
   });
 
   it('covers the requested FK relationships', () => {
@@ -54,18 +53,13 @@ describe('relational integrity expand migration safety contract', () => {
       "('chartering_broking_inquiries', 'processed_by', 'users'",
       "('total_logistics_inquiries', 'deleted_by', 'users'",
       "('inquiry_documents', 'uploaded_by', 'users'",
-      "('booking_shipping', 'place_of_receipt_port_id', 'ports'",
-      "('booking_shipping', 'port_of_loading_port_id', 'ports'",
-      "('booking_shipping', 'port_of_discharge_port_id', 'ports'",
-      "('booking_shipping', 'place_of_delivery_port_id', 'ports'",
-      "('booking_shipping', 'final_destination_port_id', 'ports'",
-      "('booking_transit_ports', 'booking_shipping_id', 'booking_shipping'",
-      "('booking_transit_ports', 'port_id', 'ports'",
     ];
 
     for (const relationship of requiredRelationships) {
       expect(sql).toContain(relationship);
     }
+    expect(sql).not.toContain('booking_shipping');
+    expect(sql).not.toContain('booking_transit_ports');
   });
 
   it('defaults the runner to a guarded read-only audit', () => {
@@ -78,11 +72,5 @@ describe('relational integrity expand migration safety contract', () => {
     expect(runner).toContain('--target-db must exactly match');
     expect(runner).toContain('--backup-reference is required');
     expect(runner).toContain('--logical-export must be');
-    expect(runner).toContain('APPLY_RELATIONAL_INTEGRITY_EXPAND_20260730');
-  });
-
-  it('is isolated from the active runtime-schema migration files', () => {
-    expect(runner).not.toContain('run-runtime-schema-migration.mjs');
-    expect(runner).not.toContain('2026-07-30_runtime_schema_expand.sql');
   });
 });

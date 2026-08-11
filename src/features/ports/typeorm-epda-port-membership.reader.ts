@@ -21,23 +21,9 @@ export class TypeOrmEpdaPortMembershipReader
       where: { portId },
       relations: { group: true },
     });
-    if (membership) {
-      return String(membership.group?.name ?? membership.groupId);
-    }
-
-    // Keep checking JSONB during the membership-table compatibility window.
-    const legacyGroup = await this.epdaParameterSetRepository
-      .createQueryBuilder('parameterSet')
-      .where(`parameterSet.scope = 'GROUP'`)
-      .andWhere('parameterSet.memberPortIds @> :portIds::jsonb', {
-        portIds: JSON.stringify([portId]),
-      })
-      .getOne();
-
-    if (!legacyGroup) {
+    if (!membership) {
       return null;
     }
-
-    return String(legacyGroup.name ?? legacyGroup.id);
+    return String(membership.group?.name ?? membership.groupId);
   }
 }

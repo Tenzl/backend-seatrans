@@ -34,12 +34,6 @@ import {
 import { ListPartnerOptionsQueryDto } from '../dto/list-partner-options-query.dto';
 import { PartnerAdditionType } from '../enums/partner-addition-type.enum';
 import { UpdateCustomerStatusDto } from '../dto/update-customer-status.dto';
-import { BookingPartnerFieldChangeAction } from '../entities/booking-partner-field-change-log.entity';
-import {
-  diffPartnerFieldSnapshots,
-  partnerFieldSnapshot,
-} from './booking-partner-audit';
-import { BookingPartnerFieldChangeService } from './booking-partner-field-change.service';
 import { buildPartnerContainsPattern } from './partner-search';
 import { saveWithOptimisticLock } from '../../../shared/utils/optimistic-lock';
 
@@ -53,7 +47,6 @@ export class BookingPartnerService {
     @InjectRepository(BookingPartner)
     private readonly partnerRepository: Repository<BookingPartner>,
     private readonly dataSource: DataSource,
-    private readonly fieldChangeService: BookingPartnerFieldChangeService,
   ) {}
 
   async listPartnerOptions(
@@ -197,7 +190,6 @@ export class BookingPartnerService {
   async createPartner(
     dto: UpsertBookingPartnerDto,
     actor: string,
-    actorUserId?: number,
   ): Promise<BookingPartnerDetailResponseDto> {
     this.validatePartnerInput(dto);
 
@@ -214,21 +206,6 @@ export class BookingPartnerService {
       partner.updatedBy = actor;
 
       const saved = await repository.save(partner);
-      if (actorUserId != null) {
-        await this.fieldChangeService.logFieldChanges(
-          saved.id,
-          actorUserId,
-          BookingPartnerFieldChangeAction.PARTNER_CREATE,
-          Object.entries(partnerFieldSnapshot(saved)).map(
-            ([field, newValue]) => ({
-              field,
-              previousValue: null,
-              newValue,
-            }),
-          ),
-          manager,
-        );
-      }
       return this.toDetailResponse(saved);
     });
   }
@@ -308,7 +285,6 @@ export class BookingPartnerService {
     id: number,
     dto: UpsertBookingPartnerDto,
     actor: string,
-    actorUserId?: number,
   ): Promise<BookingPartnerDetailResponseDto> {
     this.validatePartnerInput(dto);
 
@@ -326,7 +302,6 @@ export class BookingPartnerService {
       }
 
       this.assertPartnerUnlocked(row);
-      const before = partnerFieldSnapshot(row);
       this.assignUpsertFields(row, dto);
       row.updatedBy = actor;
 
@@ -334,15 +309,6 @@ export class BookingPartnerService {
         () => repository.save(row),
         'Partner was modified concurrently; reload and retry',
       );
-      if (actorUserId != null) {
-        await this.fieldChangeService.logFieldChanges(
-          saved.id,
-          actorUserId,
-          BookingPartnerFieldChangeAction.PARTNER_UPDATE,
-          diffPartnerFieldSnapshots(before, partnerFieldSnapshot(saved)),
-          manager,
-        );
-      }
       return this.toDetailResponse(saved);
     });
   }
@@ -351,7 +317,6 @@ export class BookingPartnerService {
     id: number,
     dto: UpdateCustomerStatusDto,
     actor: string,
-    actorUserId?: number,
   ): Promise<BookingPartnerDetailResponseDto> {
     return this.dataSource.transaction(async (manager) => {
       const repository = manager.getRepository(BookingPartner);
@@ -367,7 +332,6 @@ export class BookingPartnerService {
       }
 
       this.assertPartnerUnlocked(row);
-      const before = partnerFieldSnapshot(row);
       row.customerStatus = dto.customerStatus;
       row.updatedBy = actor;
 
@@ -375,15 +339,6 @@ export class BookingPartnerService {
         () => repository.save(row),
         'Partner was modified concurrently; reload and retry',
       );
-      if (actorUserId != null) {
-        await this.fieldChangeService.logFieldChanges(
-          saved.id,
-          actorUserId,
-          BookingPartnerFieldChangeAction.PARTNER_UPDATE,
-          diffPartnerFieldSnapshots(before, partnerFieldSnapshot(saved)),
-          manager,
-        );
-      }
       return this.toDetailResponse(saved);
     });
   }
@@ -395,7 +350,6 @@ export class BookingPartnerService {
   async lockPartner(
     id: number,
     actor: string,
-    actorUserId: number,
   ): Promise<BookingPartnerDetailResponseDto> {
     return this.dataSource.transaction(async (manager) => {
       const repository = manager.getRepository(BookingPartner);
@@ -435,26 +389,8 @@ export class BookingPartnerService {
         throw new NotFoundException('Partner not found');
       }
 
-      await this.fieldChangeService.logFieldChanges(
-        saved.id,
-        actorUserId,
-        BookingPartnerFieldChangeAction.PARTNER_LOCK,
-        [
-          {
-            field: 'Partner locked',
-            previousValue: null,
-            newValue: saved.lockedAt ? String(saved.lockedAt) : null,
-          },
-        ],
-        manager,
-      );
       return this.toDetailResponse(saved);
     });
-  }
-
-  async listFieldChangeLogs(partnerId: number, page = 0, size = 6) {
-    await this.getDetail(partnerId, true);
-    return this.fieldChangeService.listForPartner(partnerId, page, size);
   }
 
   async delete(id: number): Promise<void> {
@@ -468,7 +404,7 @@ export class BookingPartnerService {
   }
 
   /**
-   * Wipe ALL partners (and their FK-dependent rows: shipping, addition types)
+   * Wipe ALL partners (and their FK-dependent rows: addition types)
    * so a fresh dataset can be imported. TRUNCATE ... CASCADE clears dependent
    * tables regardless of their FK onDelete config, and resets identities.
    */

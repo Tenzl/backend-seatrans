@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -22,7 +21,6 @@ import { BookingPartnerImportService } from '../services/booking-partner-import.
 import { BookingPartnerImportJobsService } from '../services/booking-partner-import-jobs.service';
 import { ListBookingPartnersDto } from '../dto/list-booking-partners.dto';
 import { ListPartnerOptionsQueryDto } from '../dto/list-partner-options-query.dto';
-import { ListPartnerFieldChangesQueryDto } from '../dto/list-partner-field-changes-query.dto';
 import { UpsertBookingPartnerDto } from '../dto/upsert-booking-partner.dto';
 import { UpdateCustomerStatusDto } from '../dto/update-customer-status.dto';
 import { Request } from 'express';
@@ -148,18 +146,6 @@ export class AdminBookingPartnerController {
     return this.bookingPartnerService.listPartners(query);
   }
 
-  @Get(':id/field-changes')
-  listPartnerFieldChanges(
-    @Param('id', ParseIntPipe) id: number,
-    @Query() query: ListPartnerFieldChangesQueryDto,
-  ) {
-    return this.bookingPartnerService.listFieldChangeLogs(
-      id,
-      query.page ?? 0,
-      query.size ?? 6,
-    );
-  }
-
   @Get(':id')
   getPartner(
     @Param('id', ParseIntPipe) id: number,
@@ -175,11 +161,7 @@ export class AdminBookingPartnerController {
     @Body() dto: UpsertBookingPartnerDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    return this.bookingPartnerService.createPartner(
-      dto,
-      this.currentActor(req),
-      this.requireActorUserId(req),
-    );
+    return this.bookingPartnerService.createPartner(dto, this.currentActor(req));
   }
 
   @Put(':id')
@@ -192,7 +174,6 @@ export class AdminBookingPartnerController {
       id,
       dto,
       this.currentActor(req),
-      this.requireActorUserId(req),
     );
   }
 
@@ -206,7 +187,6 @@ export class AdminBookingPartnerController {
       id,
       dto,
       this.currentActor(req),
-      this.requireActorUserId(req),
     );
   }
 
@@ -215,11 +195,7 @@ export class AdminBookingPartnerController {
     @Param('id', ParseIntPipe) id: number,
     @Req() req: AuthenticatedRequest,
   ) {
-    return this.bookingPartnerService.lockPartner(
-      id,
-      this.currentActor(req),
-      this.requireActorUserId(req),
-    );
+    return this.bookingPartnerService.lockPartner(id, this.currentActor(req));
   }
 
   @Delete()
@@ -242,13 +218,5 @@ export class AdminBookingPartnerController {
 
   private currentActor(req: AuthenticatedRequest): string {
     return req.user?.email ?? req.user?.fullName ?? 'system';
-  }
-
-  private requireActorUserId(req: AuthenticatedRequest): number {
-    const actorUserId = req.user?.id;
-    if (actorUserId == null) {
-      throw new BadRequestException('User not authenticated');
-    }
-    return actorUserId;
   }
 }

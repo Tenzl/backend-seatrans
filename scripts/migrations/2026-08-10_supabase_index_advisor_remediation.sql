@@ -10,8 +10,6 @@ DROP INDEX CONCURRENTLY IF EXISTS public."IDX_662a209046149225a82b2bf32d";
 DROP INDEX CONCURRENTLY IF EXISTS public.idx_notifications_user_id_created_at;
 DROP INDEX CONCURRENTLY IF EXISTS public.idx_notifications_user_id_unread;
 DROP INDEX CONCURRENTLY IF EXISTS public.idx_provinces_area_code;
-DROP INDEX CONCURRENTLY IF EXISTS public.idx_inquiry_field_change_logs_changed_by;
-DROP INDEX CONCURRENTLY IF EXISTS public.idx_inquiry_field_change_logs_inquiry_id;
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrival_notice_records_created_by
   ON public.arrival_notice_records (created_by_user_id);
@@ -47,11 +45,6 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_gallery_images_commodity
   ON public.gallery_images (commodity_id);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_gallery_images_port
   ON public.gallery_images (port_id);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_inquiry_change_logs_changed_by
-  ON public.inquiry_field_change_logs (changed_by_user_id);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_inquiry_change_logs_inquiry
-  ON public.inquiry_field_change_logs (inquiry_id);
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_offices_province
   ON public.offices (province_id);

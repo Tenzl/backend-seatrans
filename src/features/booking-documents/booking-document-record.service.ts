@@ -330,6 +330,7 @@ export class BookingDocumentRecordService {
       },
       manager,
       'deleted_at IS NOT NULL',
+      { requireActive: false },
     );
   }
 
@@ -575,12 +576,14 @@ export class BookingDocumentRecordService {
     changes: Record<string, unknown>,
     manager?: EntityManager,
     statePredicate?: string,
+    options?: { requireActive?: boolean },
   ) {
     if (Number(record.version ?? 1) !== expectedVersion) {
       throw new ConflictException(
         'Document record was modified concurrently; reload and retry',
       );
     }
+    const requireActive = options?.requireActive !== false;
     let query = this.repository(type, manager)
       .createQueryBuilder()
       .update()
@@ -589,8 +592,11 @@ export class BookingDocumentRecordService {
         version: () => '"version" + 1',
       })
       .where('id = :id', { id: Number(record.id) })
-      .andWhere('version = :expectedVersion', { expectedVersion })
-      .andWhere('deleted_at IS NULL');
+      .andWhere('version = :expectedVersion', { expectedVersion });
+    // Active rows only — except restore, which must match archived rows.
+    if (requireActive) {
+      query = query.andWhere('deleted_at IS NULL');
+    }
     if (statePredicate) query = query.andWhere(statePredicate);
     const result = await query.execute();
     if (result.affected !== 1) {

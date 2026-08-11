@@ -176,7 +176,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 
 -- The audit entity uses this canonical table name. The legacy
--- inquiry_field_change_logs table is intentionally retained for contract later.
+-- Legacy inquiry_field_change_logs was dropped; canonical audit table:
 CREATE TABLE IF NOT EXISTS shipping_agency_field_change_logs (
   id BIGSERIAL PRIMARY KEY,
   inquiry_id BIGINT NOT NULL
@@ -213,22 +213,6 @@ CREATE INDEX IF NOT EXISTS idx_shipping_field_logs_inquiry_created
   ON shipping_agency_field_change_logs (inquiry_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_shipping_field_logs_actor_created
   ON shipping_agency_field_change_logs (changed_by_user_id, created_at DESC);
-
-CREATE TABLE IF NOT EXISTS booking_partner_field_change_logs (
-  id BIGSERIAL PRIMARY KEY,
-  partner_id BIGINT NOT NULL
-    REFERENCES booking_partners(id) ON DELETE CASCADE,
-  changed_by_user_id BIGINT NOT NULL REFERENCES users(id),
-  action VARCHAR(32) NOT NULL,
-  field_name VARCHAR(64) NOT NULL,
-  previous_value TEXT,
-  new_value TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_booking_partner_field_logs_partner_created
-  ON booking_partner_field_change_logs (partner_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_booking_partner_field_logs_actor_created
-  ON booking_partner_field_change_logs (changed_by_user_id, created_at DESC);
 
 ALTER TABLE booking_partners
   ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ;

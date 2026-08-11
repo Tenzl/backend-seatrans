@@ -37,14 +37,6 @@ const FK_SPECS = [
   ['total_logistics_inquiries', 'processed_by', 'users', 'a'],
   ['total_logistics_inquiries', 'deleted_by', 'users', 'n'],
   ['inquiry_documents', 'uploaded_by', 'users', 'a'],
-  ['booking_shipping', 'booking_partner_id', 'booking_partners', 'a'],
-  ['booking_shipping', 'place_of_receipt_port_id', 'ports', 'a'],
-  ['booking_shipping', 'port_of_loading_port_id', 'ports', 'a'],
-  ['booking_shipping', 'port_of_discharge_port_id', 'ports', 'a'],
-  ['booking_shipping', 'place_of_delivery_port_id', 'ports', 'a'],
-  ['booking_shipping', 'final_destination_port_id', 'ports', 'a'],
-  ['booking_transit_ports', 'booking_shipping_id', 'booking_shipping', 'c'],
-  ['booking_transit_ports', 'port_id', 'ports', 'a'],
 ].map(([sourceTable, sourceColumn, targetTable, deleteAction]) => ({
   sourceTable,
   sourceColumn,
@@ -74,14 +66,6 @@ const INDEX_NAMES = [
   'idx_inquiry_documents_uploader_history',
   'idx_inquiry_documents_active_target',
   'idx_inquiry_documents_active_target_type',
-  'uq_booking_shipping_partner',
-  'idx_booking_shipping_receipt_port',
-  'idx_booking_shipping_loading_port',
-  'idx_booking_shipping_discharge_port',
-  'idx_booking_shipping_delivery_port',
-  'idx_booking_shipping_destination_port',
-  'idx_booking_transit_ports_shipping_order',
-  'idx_booking_transit_ports_port',
 ];
 
 function loadEnvFile(path) {
@@ -344,56 +328,10 @@ async function inspectSchema(client) {
       [INDEX_NAMES],
     );
 
-    let bookingPartnerUniqueIndex = null;
-    if (
-      !missingTableSet.has('booking_shipping') &&
-      !missingColumnSet.has('booking_shipping.booking_partner_id')
-    ) {
-      const equivalentUniqueResult = await client.query(
-        `SELECT index_class.relname AS index_name,
-                index_info.indisvalid AS valid,
-                index_info.indisready AS ready,
-                pg_get_indexdef(index_info.indexrelid) AS definition
-           FROM pg_index index_info
-           JOIN pg_class index_class
-             ON index_class.oid = index_info.indexrelid
-           JOIN pg_attribute partner_attribute
-             ON partner_attribute.attrelid = index_info.indrelid
-            AND partner_attribute.attname = 'booking_partner_id'
-          WHERE index_info.indrelid = 'public.booking_shipping'::regclass
-            AND index_info.indisunique
-            AND index_info.indnkeyatts = 1
-            AND index_info.indpred IS NULL
-            AND index_info.indkey[0] = partner_attribute.attnum
-          ORDER BY index_info.indexrelid
-          LIMIT 1`,
-      );
-      bookingPartnerUniqueIndex = equivalentUniqueResult.rows[0] ?? null;
-    }
     const indexes = indexResult.rows.map((item) => ({
       ...item,
-      semanticEquivalent:
-        item.index_name === 'uq_booking_shipping_partner'
-          ? bookingPartnerUniqueIndex
-          : null,
+      semanticEquivalent: null,
     }));
-
-    let duplicateBookingPartners = [];
-    if (
-      !missingTableSet.has('booking_shipping') &&
-      !missingColumnSet.has('booking_shipping.booking_partner_id')
-    ) {
-      const duplicateResult = await client.query(
-        `SELECT booking_partner_id::text AS booking_partner_id,
-                count(*)::integer AS count
-           FROM booking_shipping
-          GROUP BY booking_partner_id
-         HAVING count(*) > 1
-          ORDER BY booking_partner_id
-          LIMIT 20`,
-      );
-      duplicateBookingPartners = duplicateResult.rows;
-    }
 
     await client.query('COMMIT');
     return {
@@ -403,7 +341,7 @@ async function inspectSchema(client) {
       foreignKeys,
       orphans,
       indexes,
-      duplicateBookingPartners,
+      duplicateBookingPartners: [],
     };
   } catch (error) {
     await client.query('ROLLBACK');

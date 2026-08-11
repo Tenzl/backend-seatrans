@@ -25,17 +25,6 @@ Drop only after all of the following are true:
 
 ## Confirmed future table drop
 
-### `inquiry_field_change_logs`
-
-Reason: this is the unused table created by the old startup bootstrap. The
-canonical entity and 174 current audit records use
-`shipping_agency_field_change_logs`.
-
-Read-only preflight on 2026-07-30 found zero rows in the legacy table. Do not
-drop it until a fresh preflight still reports zero rows and repository-wide
-search confirms no runtime, report, export, or external integration references
-it.
-
 ### `cargo_types`
 
 The table still exists and has not passed a contract preflight. Its former
@@ -43,6 +32,27 @@ direct-write drop runner was removed because it had no backup, target,
 advisory-lock, checksum-ledger, or confirmation guard. Drop this table only
 after exporting its rows, proving zero application and integration references,
 and approving a separately guarded contract migration.
+
+## Already dropped
+
+### `inquiry_field_change_logs`
+
+Dropped via `2026-08-11_drop_legacy_unused_tables.sql`. Canonical audit table is
+`shipping_agency_field_change_logs`.
+
+### `booking_partner_field_change_logs`
+
+Dropped via the same migration; partner field-change feature removed from the app.
+
+### `migrations`
+
+Dropped via the same migration; leftover tracker unrelated to
+`app_schema_migrations` / `app_data_migrations`.
+
+### `booking_shipping` / `booking_transit_ports`
+
+Dropped via `2026-08-11_drop_booking_shipping_tables.sql`. Unused by
+`backend2.0` / `dashboard_admin` (booking ports live in document JSON payloads).
 
 ## Already absent; do not schedule another drop
 
@@ -68,6 +78,7 @@ shows that a separate environment still contains them.
 
 ## Not drop candidates
 
+- `inquiry_idempotency_keys`: required for public inquiry submit idempotency.
 - `epda_parameter_set.area`: AREA and GROUP records still use this shared
   column; only PORT rows are constrained to `NULL`.
 - `shipping_agency_inquiries.details`: still written by the current inquiry

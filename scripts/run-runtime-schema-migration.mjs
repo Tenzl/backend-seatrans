@@ -204,18 +204,10 @@ async function inspectRuntimeSchema(client) {
     );
     return result.rows[0]?.count ?? 0;
   };
-  const legacyExists = await client.query(
-    `SELECT to_regclass('public.inquiry_field_change_logs') IS NOT NULL
-       AS exists`,
-  );
   const counts = {
     notifications: await countRows('notifications'),
     canonicalAuditLogs: await countRows('shipping_agency_field_change_logs'),
     adminAuditLogs: await countRows('admin_audit_logs'),
-    legacyAuditLogs:
-      legacyExists.rows[0]?.exists === true
-        ? await countRows('inquiry_field_change_logs')
-        : null,
   };
 
   return {

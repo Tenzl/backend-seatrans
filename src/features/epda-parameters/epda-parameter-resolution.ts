@@ -225,10 +225,10 @@ export function hydrateEpdaParameterRows(
       row.area = normalizeEpdaAreaKey(row.area);
     }
     if (row.scope === 'GROUP') {
-      const normalizedMembers = membersByGroup.get(row.id);
-      row.memberPortIds = normalizedMembers
-        ? normalizedMembers.sort((left, right) => left - right)
-        : (row.memberPortIds ?? []);
+      // Normalized membership table is the only source; never fall back to JSONB.
+      row.memberPortIds = (membersByGroup.get(row.id) ?? []).sort(
+        (left, right) => left - right,
+      );
     }
     return row;
   });
