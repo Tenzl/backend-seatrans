@@ -3,7 +3,6 @@ import {
   Body,
   Controller,
   Delete,
-  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
@@ -16,8 +15,8 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { AdminSection } from '../../../shared/decorators/admin-section.decorator';
-import { PermanentDelete } from '../../../shared/decorators/permanent-delete.decorator';
-import { isAdminRoleName } from '../../roles/section-access.service';
+import { ApiAdminOnly } from '../../../shared/decorators/api-admin.decorator';
+import { SectionPermanentDelete } from '../../../shared/decorators/permanent-delete.decorator';
 import { ServiceInquiryService } from '../services/service-inquiry.service';
 import { ShippingAgencyEpdaService } from '../services/shipping-agency-epda.service';
 import { ListInquiriesQueryDto } from '../dto/list-inquiries-query.dto';
@@ -50,60 +49,25 @@ export class AdminInquiryController {
   ) {}
 
   @Get()
-  list(@Query() query: ListInquiriesQueryDto, @Req() req: StaffRequest) {
-    const includeArchived = isAdminRoleName(req.user?.role?.name);
-    return this.inquiryService.listForAdmin(query, { includeArchived });
+  list(@Query() query: ListInquiriesQueryDto) {
+    return this.inquiryService.listForAdmin(query);
   }
 
   @Delete('batch')
   @HttpCode(HttpStatus.NO_CONTENT)
-  deleteBatch(
-    @Body() dto: DeleteInquiriesDto,
-    @Query() query: DeleteInquiriesQueryDto,
-    @Req() req: StaffRequest,
-  ) {
-    const actorUserId = req.user?.id;
-    if (!actorUserId) {
-      throw new BadRequestException('User not authenticated');
-    }
-
-    const serviceSlug = query.serviceSlug?.trim() || undefined;
-    return this.inquiryService.softDeleteBatch(
-      dto.ids,
-      actorUserId,
-      serviceSlug,
-    );
-  }
-
-  @Delete('batch/permanent')
-  @PermanentDelete({
+  @SectionPermanentDelete('epda-inquiry', {
     resourceType: 'inquiry_batch',
     detailSources: [
       { kind: 'body', key: 'ids', label: 'resourceIds' },
       { kind: 'query', key: 'serviceSlug' },
     ],
   })
-  hardDeleteBatch(
+  deleteBatch(
     @Body() dto: DeleteInquiriesDto,
     @Query() query: DeleteInquiriesQueryDto,
   ) {
     const serviceSlug = query.serviceSlug?.trim() || undefined;
-    return this.inquiryService.hardDeleteBatchByAdmin(dto.ids, serviceSlug);
-  }
-
-  @Post('batch/restore')
-  restoreBatch(
-    @Body() dto: DeleteInquiriesDto,
-    @Query() query: DeleteInquiriesQueryDto,
-    @Req() req: StaffRequest,
-  ) {
-    if (!isAdminRoleName(req.user?.role?.name)) {
-      throw new ForbiddenException(
-        'Only administrators can restore archived inquiries',
-      );
-    }
-    const serviceSlug = query.serviceSlug?.trim() || undefined;
-    return this.inquiryService.restoreBatchByAdmin(dto.ids, serviceSlug);
+    return this.inquiryService.hardDeleteBatch(dto.ids, serviceSlug);
   }
 
   /**
@@ -163,6 +127,20 @@ export class AdminInquiryController {
     return this.shippingAgencyEpdaService.lockEpda(id, dto, actorUserId);
   }
 
+  /** Admin-only: unlock a frozen EPDA so staff can edit it again. */
+  @Post('shipping-agency/:id/epda/unlock')
+  @ApiAdminOnly()
+  unlockShippingAgencyEpda(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: StaffRequest,
+  ) {
+    const actorUserId = req.user?.id;
+    if (!actorUserId) {
+      throw new BadRequestException('User not authenticated');
+    }
+    return this.shippingAgencyEpdaService.unlockEpda(id, actorUserId);
+  }
+
   @Get('shipping-agency/:id/epda/field-changes')
   listShippingAgencyFieldChanges(
     @Param('id', ParseIntPipe) id: number,
@@ -217,43 +195,14 @@ export class AdminInquiryController {
 
   @Delete(':serviceType/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(
-    @Param('serviceType') serviceType: string,
-    @Param('id', ParseIntPipe) id: number,
-    @Req() req: StaffRequest,
-  ) {
-    const actorUserId = req.user?.id;
-    if (!actorUserId) {
-      throw new BadRequestException('User not authenticated');
-    }
-
-    return this.inquiryService.softDeleteBatch([id], actorUserId, serviceType);
-  }
-
-  @Delete(':serviceType/:id/permanent')
-  @PermanentDelete({
+  @SectionPermanentDelete('epda-inquiry', {
     resourceType: 'inquiry',
     idSource: { kind: 'param', key: 'id' },
   })
-  @HttpCode(HttpStatus.NO_CONTENT)
-  hardRemove(
+  remove(
     @Param('serviceType') serviceType: string,
     @Param('id', ParseIntPipe) id: number,
   ) {
     return this.inquiryService.hardDeleteByServiceAndId(serviceType, id);
-  }
-
-  @Post(':serviceType/:id/restore')
-  restoreOne(
-    @Param('serviceType') serviceType: string,
-    @Param('id', ParseIntPipe) id: number,
-    @Req() req: StaffRequest,
-  ) {
-    if (!isAdminRoleName(req.user?.role?.name)) {
-      throw new ForbiddenException(
-        'Only administrators can restore archived inquiries',
-      );
-    }
-    return this.inquiryService.restoreByServiceAndId(serviceType, id);
   }
 }

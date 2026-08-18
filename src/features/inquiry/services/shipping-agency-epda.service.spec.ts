@@ -14,6 +14,7 @@ import { FreightForwardingInquiryEntity } from '../entities/freight-forwarding-i
 import { TotalLogisticsInquiryEntity } from '../entities/total-logistics-inquiry.entity';
 import { SpecialRequestInquiryEntity } from '../entities/special-request-inquiry.entity';
 import type { Repository } from 'typeorm';
+import { InquiryFieldChangeAction } from '../entities/inquiry-field-change-log.entity';
 
 function queryBuilder(result: unknown) {
   return {
@@ -928,6 +929,46 @@ describe('ShippingAgencyEpdaService increment 1', () => {
         coeff: { clearanceFee: 50, pilotageSingleRate: 0.0045 },
       },
     });
+  });
+
+  it('unlocks a locked EPDA without changing its frozen snapshot', async () => {
+    const snapshot = { params: { rate: 1 }, grand_total: 1234 };
+    const lockedAt = new Date('2026-08-18T01:00:00.000Z');
+    const existing = {
+      id: 1,
+      serviceType,
+      user: customer,
+      userId: customer.id,
+      processedById: actor.id,
+      epdaLockedAt: lockedAt,
+      epdaSnapshot: snapshot,
+      status: InquiryStatus.COMPLETED,
+    };
+    const { service, transactionalRepository, fieldChangeService } =
+      setup(existing);
+
+    const result = await service.unlockEpda(1, actor.id);
+
+    expect(transactionalRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        epdaLockedAt: null,
+        epdaSnapshot: snapshot,
+      }),
+    );
+    expect(fieldChangeService.logFieldChanges).toHaveBeenCalledWith(
+      1,
+      actor.id,
+      InquiryFieldChangeAction.EPDA_UNLOCK,
+      [
+        {
+          field: 'EPDA locked',
+          previousValue: String(lockedAt),
+          newValue: null,
+        },
+      ],
+      expect.anything(),
+    );
+    expect(result).toMatchObject({ epdaLockedAt: null });
   });
 
   it('writes audit through the transaction manager', async () => {

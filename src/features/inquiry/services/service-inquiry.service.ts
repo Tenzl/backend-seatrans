@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -18,10 +19,7 @@ import { ServiceType } from '../../logistics/entities/service-type.entity';
 import { User } from '../../auth/entities/user.entity';
 import { PublicInquiryRequestDto } from '../dto/public-inquiry-request.dto';
 import { InquiryStatus } from '../enums/inquiry-status.enum';
-import {
-  ListInquiriesQueryDto,
-  type InquiryArchivedFilter,
-} from '../dto/list-inquiries-query.dto';
+import { ListInquiriesQueryDto } from '../dto/list-inquiries-query.dto';
 import { UpdateInquiryStatusDto } from '../dto/update-inquiry-status.dto';
 import { UpdateInquiryFormDto } from '../dto/update-inquiry-form.dto';
 import { UpdateInquiryHoursDto } from '../dto/update-inquiry-hours.dto';
@@ -80,11 +78,7 @@ export class ServiceInquiryService {
     }
 
     try {
-      const result = await this.executeSubmitInquiry(
-        dto,
-        files,
-        currentUserId,
-      );
+      const result = await this.executeSubmitInquiry(dto, files, currentUserId);
       if (normalizedKey) {
         await this.idempotencyService.completeSubmit(
           currentUserId,
@@ -326,10 +320,7 @@ export class ServiceInquiryService {
     );
   }
 
-  async listForAdmin(
-    query: ListInquiriesQueryDto,
-    opts: { includeArchived?: boolean } = {},
-  ): Promise<{
+  async listForAdmin(query: ListInquiriesQueryDto): Promise<{
     content: unknown[];
     totalElements: number;
     totalPages: number;
@@ -340,14 +331,11 @@ export class ServiceInquiryService {
       query.serviceType?.trim() || query.serviceSlug?.trim();
     const serviceType =
       await this.resolveServiceTypeFromFilter(serviceTypeFilter);
-    const archivedFilter = opts.includeArchived
-      ? this.normalizeArchivedFilter(query.archived)
-      : 'active';
     return this.queries.list(
       {
         status: query.status,
         serviceType: serviceType ?? undefined,
-        archivedFilter,
+        archivedFilter: 'active',
       },
       query,
       'admin',
@@ -493,51 +481,14 @@ export class ServiceInquiryService {
 
   private chunkIds(ids: number[]): number[][] {
     const chunks: number[][] = [];
-    for (let i = 0; i < ids.length; i += ServiceInquiryService.BATCH_CHUNK_SIZE) {
+    for (
+      let i = 0;
+      i < ids.length;
+      i += ServiceInquiryService.BATCH_CHUNK_SIZE
+    ) {
       chunks.push(ids.slice(i, i + ServiceInquiryService.BATCH_CHUNK_SIZE));
     }
     return chunks;
-  }
-
-  async softDeleteBatch(
-    ids: number[],
-    deletedByUserId: number,
-    serviceSlug?: string,
-  ): Promise<{ deletedCount: number }> {
-    if (!ids.length) return { deletedCount: 0 };
-
-    const manager = this.repositories.shippingAgency.manager;
-    const grouped = await this.queries.groupIdsBySlug(
-      ids,
-      { includeDeleted: false, serviceSlug },
-      manager,
-    );
-    if (!grouped.size) {
-      throw new NotFoundException('One or more inquiries were not found');
-    }
-
-    let deletedCount = 0;
-    const now = new Date();
-    for (const [slug, slugIds] of grouped) {
-      const tableName = this.repositories.tableNameForSlug(slug);
-      for (const chunk of this.chunkIds(slugIds)) {
-        deletedCount += await manager.transaction(async (tx) => {
-          const rows: Array<{ id: string | number }> = await tx.query(
-            `UPDATE ${tableName}
-             SET deleted_at = $2, deleted_by = $3
-             WHERE id = ANY($1::bigint[]) AND deleted_at IS NULL
-             RETURNING id`,
-            [chunk, now, deletedByUserId],
-          );
-          return rows.length;
-        });
-      }
-    }
-
-    if (deletedCount !== ids.length) {
-      throw new NotFoundException('One or more inquiries were not found');
-    }
-    return { deletedCount };
   }
 
   async softDeleteBatchByUser(
@@ -582,14 +533,6 @@ export class ServiceInquiryService {
     return { deletedCount };
   }
 
-  async softDeleteBatchByAdmin(
-    ids: number[],
-    deletedByUserId: number,
-    serviceSlug?: string,
-  ): Promise<{ deletedCount: number }> {
-    return this.softDeleteBatch(ids, deletedByUserId, serviceSlug);
-  }
-
   async hardDeleteByServiceAndId(
     serviceTypeName: string,
     id: number,
@@ -605,6 +548,14 @@ export class ServiceInquiryService {
             },
             manager,
           );
+          if (
+            slug === 'shipping-agency' &&
+            (row as ShippingAgencyInquiryEntity).epdaLockedAt
+          ) {
+            throw new ConflictException(
+              'Locked EPDAs cannot be deleted; an administrator must unlock edit first',
+            );
+          }
           const storedObjectIds = await this.deleteInquiryChildren(
             slug,
             row.id,
@@ -621,7 +572,7 @@ export class ServiceInquiryService {
     await this.inquiryDocumentService.deleteStoredObjectsBestEffort(publicIds);
   }
 
-  async hardDeleteBatchByAdmin(
+  async hardDeleteBatch(
     ids: number[],
     serviceSlug?: string,
   ): Promise<{ deletedCount: number }> {
@@ -655,6 +606,20 @@ export class ServiceInquiryService {
       const tableName = this.repositories.tableNameForSlug(slug);
       for (const chunk of this.chunkIds(slugIds)) {
         const chunkPublicIds = await manager.transaction(async (tx) => {
+          if (slug === 'shipping-agency') {
+            const lockedRows: Array<{ id: string | number }> = await tx.query(
+              `SELECT id FROM ${tableName}
+               WHERE id = ANY($1::bigint[])
+                 AND epda_locked_at IS NOT NULL
+               LIMIT 1`,
+              [chunk.map(String)],
+            );
+            if (lockedRows.length > 0) {
+              throw new ConflictException(
+                'Locked EPDAs cannot be deleted; an administrator must unlock edit first',
+              );
+            }
+          }
           const stored = await this.deleteInquiryChildren(slug, chunk, tx);
           const rows: Array<{ id: string | number }> = await tx.query(
             `DELETE FROM ${tableName}
@@ -664,7 +629,7 @@ export class ServiceInquiryService {
           );
           if (rows.length !== chunk.length) {
             throw new NotFoundException(
-              'One or more inquiries were not found during permanent delete',
+              'One or more inquiries were not found during delete',
             );
           }
           deletedCount += rows.length;
@@ -680,74 +645,6 @@ export class ServiceInquiryService {
 
     await this.inquiryDocumentService.deleteStoredObjectsBestEffort(publicIds);
     return { deletedCount };
-  }
-
-  async restoreBatchByAdmin(
-    ids: number[],
-    serviceSlug?: string,
-  ): Promise<{ restoredCount: number }> {
-    if (!ids.length) return { restoredCount: 0 };
-
-    const manager = this.repositories.shippingAgency.manager;
-    const grouped = await this.queries.groupIdsBySlug(
-      ids,
-      { includeDeleted: true, serviceSlug },
-      manager,
-    );
-    if (!grouped.size) {
-      throw new NotFoundException('One or more inquiries were not found');
-    }
-
-    let restoredCount = 0;
-    for (const [slug, slugIds] of grouped) {
-      const tableName = this.repositories.tableNameForSlug(slug);
-      for (const chunk of this.chunkIds(slugIds)) {
-        restoredCount += await manager.transaction(async (tx) => {
-          const rows: Array<{ id: string | number }> = await tx.query(
-            `UPDATE ${tableName}
-             SET deleted_at = NULL, deleted_by = NULL
-             WHERE id = ANY($1::bigint[])
-             RETURNING id`,
-            [chunk],
-          );
-          return rows.length;
-        });
-      }
-    }
-
-    if (restoredCount !== ids.length) {
-      throw new NotFoundException('One or more inquiries were not found');
-    }
-    return { restoredCount };
-  }
-
-  async restoreByServiceAndId(
-    serviceTypeName: string,
-    id: number,
-  ): Promise<void> {
-    const slug = this.repositories.toSlug(serviceTypeName);
-    const tableName = this.repositories.tableNameForSlug(slug);
-    await this.repositories.shippingAgency.manager.transaction(
-      async (manager) => {
-        const rows: Array<{ id: string | number }> = await manager.query(
-          `UPDATE ${tableName}
-           SET deleted_at = NULL, deleted_by = NULL
-           WHERE id = ANY($1::bigint[])
-           RETURNING id`,
-          [[id]],
-        );
-        if (!rows.length) {
-          throw new NotFoundException('Inquiry not found');
-        }
-      },
-    );
-  }
-
-  private normalizeArchivedFilter(
-    value?: string | null,
-  ): InquiryArchivedFilter {
-    if (value === 'all' || value === 'archived') return value;
-    return 'active';
   }
 
   private async resolveServiceType(

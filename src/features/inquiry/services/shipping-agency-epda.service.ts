@@ -401,6 +401,40 @@ export class ShippingAgencyEpdaService {
     return this.toAdminInquiryPayload(saved);
   }
 
+  async unlockEpda(
+    inquiryId: number,
+    actorUserId: number,
+  ): Promise<Record<string, unknown>> {
+    return this.inquiryRepository.manager.transaction(async (manager) => {
+      const { row, repository } = await this.requireLockedShippingAgencyInquiry(
+        manager,
+        inquiryId,
+      );
+      if (!row.epdaLockedAt) {
+        throw new ConflictException('EPDA is not locked');
+      }
+
+      const previousLockedAt = row.epdaLockedAt;
+      row.epdaLockedAt = null;
+      await this.touchProcessedBy(row, actorUserId, manager);
+      const saved = await repository.save(row);
+      await this.fieldChangeService.logFieldChanges(
+        saved.id,
+        actorUserId,
+        InquiryFieldChangeAction.EPDA_UNLOCK,
+        [
+          {
+            field: 'EPDA locked',
+            previousValue: String(previousLockedAt),
+            newValue: null,
+          },
+        ],
+        manager,
+      );
+      return this.toAdminInquiryPayload(saved);
+    });
+  }
+
   async listFieldChangeLogs(inquiryId: number, page = 0, size = 6) {
     await this.requireShippingAgencyInquiry(inquiryId);
     return this.fieldChangeService.listForInquiry(inquiryId, page, size);
@@ -506,7 +540,7 @@ export class ShippingAgencyEpdaService {
   private assertEpdaUnlocked(row: ShippingAgencyInquiryEntity): void {
     if (row.epdaLockedAt) {
       throw new ConflictException(
-        'EPDA is locked. Unlock is not supported — create a new EPDA to change fields.',
+        'EPDA is locked. Only an administrator can unlock edit.',
       );
     }
   }

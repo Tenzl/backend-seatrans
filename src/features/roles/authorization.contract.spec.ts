@@ -37,8 +37,6 @@ describe('privileged authorization contract', () => {
     [AdminBookingPartnerController, 'removeAllPartners', 'booking_partner_all'],
     [AdminBookingPartnerController, 'removePartner', 'booking_partner'],
     [AdminInquiryDocumentController, 'deleteDocument', 'inquiry_document'],
-    [AdminInquiryController, 'hardDeleteBatch', 'inquiry_batch'],
-    [AdminInquiryController, 'hardRemove', 'inquiry'],
     [EpdaParametersAdminController, 'deletePort', 'epda_port_override'],
     [EpdaParametersAdminController, 'deleteGroup', 'epda_parameter_group'],
     [CategoriesAdminController, 'remove', 'post_category'],
@@ -55,6 +53,14 @@ describe('privileged authorization contract', () => {
   /** Permanent deletes any internal staff holding the section may perform. */
   const sectionPermanentDeletes = [
     [CommoditiesAdminController, 'remove', 'commodity', 'data-commodities'],
+    [
+      BookingDocumentsAdminController,
+      'deleteRecord',
+      'booking_document_record',
+      'booking-documents',
+    ],
+    [AdminInquiryController, 'deleteBatch', 'inquiry_batch', 'epda-inquiry'],
+    [AdminInquiryController, 'remove', 'inquiry', 'epda-inquiry'],
   ] as const;
 
   it('requires the exact ROLE_ADMIN role on RolesAdminController', () => {
@@ -74,8 +80,10 @@ describe('privileged authorization contract', () => {
   ] as const)(
     'reserves AdminUsersController.%s for ROLE_ADMIN',
     (methodName) => {
-      const prototype =
-        AdminUsersController.prototype as unknown as Record<string, object>;
+      const prototype = AdminUsersController.prototype as unknown as Record<
+        string,
+        object
+      >;
       const handler = prototype[methodName];
       expect(
         reflector.getAllAndOverride<string[]>(ROLES_KEY, [
@@ -87,8 +95,10 @@ describe('privileged authorization contract', () => {
   );
 
   it('gates AdminUsersController.listPicOptions behind booking-documents section', () => {
-    const prototype =
-      AdminUsersController.prototype as unknown as Record<string, object>;
+    const prototype = AdminUsersController.prototype as unknown as Record<
+      string,
+      object
+    >;
     expect(
       reflector.getAllAndOverride<string[]>(ROLES_KEY, [
         prototype.listPicOptions,
@@ -196,6 +206,18 @@ describe('privileged authorization contract', () => {
     expect(roles).toEqual(['ROLE_ADMIN']);
   });
 
+  it('reserves EPDA unlock for ROLE_ADMIN', () => {
+    const prototype = AdminInquiryController.prototype as unknown as Record<
+      string,
+      object
+    >;
+    const roles = reflector.getAllAndOverride<string[]>(ROLES_KEY, [
+      prototype.unlockShippingAgencyEpda,
+      AdminInquiryController,
+    ]);
+    expect(roles).toEqual(['ROLE_ADMIN']);
+  });
+
   it.each([
     [AdminInquiryController, 'list'],
     [AdminInquiryController, 'getOne'],
@@ -223,21 +245,17 @@ describe('privileged authorization contract', () => {
     },
   );
 
-  it.each([
-    [AdminInquiryController, 'hardDeleteBatch'],
-    [AdminInquiryController, 'hardRemove'],
-    [AdminInquiryDocumentController, 'deleteDocument'],
-  ] as const)(
-    'keeps inquiry permanent delete %p.%s on ROLE_ADMIN',
-    (controller, methodName) => {
-      const prototype = controller.prototype as unknown as Record<
+  it('keeps inquiry-document permanent delete on ROLE_ADMIN', () => {
+    const prototype =
+      AdminInquiryDocumentController.prototype as unknown as Record<
         string,
         object
       >;
-      const handler = prototype[methodName];
-      expect(
-        reflector.getAllAndOverride<string[]>(ROLES_KEY, [handler, controller]),
-      ).toEqual(['ROLE_ADMIN']);
-    },
-  );
+    expect(
+      reflector.getAllAndOverride<string[]>(ROLES_KEY, [
+        prototype.deleteDocument,
+        AdminInquiryDocumentController,
+      ]),
+    ).toEqual(['ROLE_ADMIN']);
+  });
 });

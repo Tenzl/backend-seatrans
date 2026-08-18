@@ -15,6 +15,7 @@ export enum InquiryFieldChangeAction {
   /** Historical only — issue-to-customer flow removed; kept for existing audit rows. */
   EPDA_ISSUE = 'EPDA_ISSUE',
   EPDA_LOCK = 'EPDA_LOCK',
+  EPDA_UNLOCK = 'EPDA_UNLOCK',
 }
 
 @Entity('shipping_agency_field_change_logs')

@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 import type { EntityManager, EntityTarget, Repository } from 'typeorm';
 import { ServiceInquiryService } from './service-inquiry.service';
 import { ShippingAgencyInquiryEntity } from '../entities/shipping-agency-inquiry.entity';
@@ -130,7 +130,9 @@ describe('ServiceInquiryService user batch delete', () => {
     );
     expect(managerQuery).toHaveBeenNthCalledWith(
       2,
-      expect.stringMatching(/UPDATE shipping_agency_inquiries[\s\S]*ANY\(\$1::bigint\[\]\)/),
+      expect.stringMatching(
+        /UPDATE shipping_agency_inquiries[\s\S]*ANY\(\$1::bigint\[\]\)/,
+      ),
       [[7], expect.any(Date), 42, 42],
     );
     expect(shippingRepo.save).not.toHaveBeenCalled();
@@ -160,11 +162,12 @@ describe('ServiceInquiryService user batch delete', () => {
     ).resolves.toEqual({ deletedCount: 3 });
 
     expect(shippingRepo.save).not.toHaveBeenCalled();
-    const updateCalls = managerQuery.mock.calls.filter((call) =>
+    const managerCalls = managerQuery.mock.calls as Array<[string, unknown?]>;
+    const updateCalls = managerCalls.filter((call) =>
       String(call[0]).includes('UPDATE shipping_agency_inquiries'),
     );
     expect(updateCalls).toHaveLength(1);
-    expect(updateCalls[0][1][0]).toEqual(ids);
+    expect((updateCalls[0]?.[1] as unknown[])[0]).toEqual(ids);
   });
 
   it('commits document metadata and inquiry deletion before Cloudinary cleanup', async () => {
@@ -219,9 +222,27 @@ describe('ServiceInquiryService user batch delete', () => {
     expect(shippingRepo.remove).not.toHaveBeenCalled();
   });
 
+  it('refuses to hard-delete a locked EPDA', async () => {
+    shippingRepo.findOne.mockResolvedValue({
+      id: 7,
+      epdaLockedAt: new Date('2026-08-18T01:00:00.000Z'),
+      serviceType: { name: 'SHIPPING AGENCY' },
+    });
+
+    await expect(
+      service.hardDeleteByServiceAndId('shipping-agency', 7),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(managerQuery).not.toHaveBeenCalledWith(
+      expect.stringContaining('DELETE FROM shipping_agency_inquiries'),
+      expect.anything(),
+    );
+  });
+
   it('hard-deletes a batch with set-based DELETE ANY and no per-row remove()', async () => {
     managerQuery
       .mockResolvedValueOnce([{ id: 7 }, { id: 8 }]) // groupIdsBySlug SELECT
+      .mockResolvedValueOnce([]) // locked EPDA guard SELECT
       .mockResolvedValueOnce([]) // field change logs delete
       .mockResolvedValueOnce([]) // idempotency keys delete
       .mockResolvedValueOnce([]) // notifications delete
@@ -232,7 +253,7 @@ describe('ServiceInquiryService user batch delete', () => {
     ]);
 
     await expect(
-      service.hardDeleteBatchByAdmin([7, 8], 'shipping-agency'),
+      service.hardDeleteBatch([7, 8], 'shipping-agency'),
     ).resolves.toEqual({ deletedCount: 2 });
 
     expect(documentService.removeMetadataByInquiryIds).toHaveBeenCalledWith(
@@ -240,15 +261,36 @@ describe('ServiceInquiryService user batch delete', () => {
       [7, 8],
       expect.anything(),
     );
-    const notificationDeletes = managerQuery.mock.calls.filter((call) =>
+    const managerCalls = managerQuery.mock.calls as Array<[string, unknown?]>;
+    const notificationDeletes = managerCalls.filter((call) =>
       String(call[0]).includes('DELETE FROM notifications'),
     );
     expect(notificationDeletes).toHaveLength(1);
-    expect(notificationDeletes[0][1]).toEqual([['7', '8'], 'shipping-agency']);
+    expect(notificationDeletes[0]?.[1]).toEqual([
+      ['7', '8'],
+      'shipping-agency',
+    ]);
     expect(shippingRepo.remove).not.toHaveBeenCalled();
     expect(documentService.deleteStoredObjectsBestEffort).toHaveBeenCalledWith([
       'obj-7',
       'obj-8',
     ]);
+  });
+
+  it('refuses to hard-delete a batch containing a locked EPDA', async () => {
+    managerQuery
+      .mockResolvedValueOnce([{ id: 7 }, { id: 8 }]) // groupIdsBySlug SELECT
+      .mockResolvedValueOnce([{ id: 8 }]); // locked EPDA guard SELECT
+
+    await expect(
+      service.hardDeleteBatch([7, 8], 'shipping-agency'),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    const managerCalls = managerQuery.mock.calls as Array<[string, unknown?]>;
+    expect(
+      managerCalls.some((call) =>
+        String(call[0]).includes('DELETE FROM shipping_agency_inquiries'),
+      ),
+    ).toBe(false);
   });
 });

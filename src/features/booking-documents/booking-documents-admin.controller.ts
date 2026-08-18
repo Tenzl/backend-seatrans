@@ -17,9 +17,9 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
-import { PermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
 import { AdminSection } from '../../shared/decorators/admin-section.decorator';
 import { ApiAdminOnly } from '../../shared/decorators/api-admin.decorator';
+import { SectionPermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
 import { BookingDocumentsService } from './booking-documents.service';
 import { BOOKING_DOCUMENT_SECTION } from './constants/booking-document.constants';
 import { BookingDocumentType } from './enums/booking-document-type.enum';
@@ -40,15 +40,11 @@ export class BookingDocumentsAdminController {
     type: BookingDocumentType,
     @Query('page') page = '0',
     @Query('size') size = '10',
-    @Query('archived') archived = 'active',
   ) {
-    const filter =
-      archived === 'archived' || archived === 'all' ? archived : 'active';
     return this.bookingDocuments.listRecords(
       type,
       this.toInteger(page, 0),
       this.toInteger(size, 10),
-      filter,
     );
   }
 
@@ -77,6 +73,35 @@ export class BookingDocumentsAdminController {
   @Get('bookings/:id/workflow')
   getWorkflow(@Param('id', ParseIntPipe) id: number) {
     return this.bookingDocuments.getWorkflow(id);
+  }
+
+  @Get('bookings/:id/copy-source')
+  getBookingCopySource(@Param('id', ParseIntPipe) id: number) {
+    return this.bookingDocuments.getBookingCopySource(id);
+  }
+
+  @Get('bl/hbl-duplicates')
+  checkBillOfLadingNumber(
+    @Query('number') number: string,
+    @Query('excludeId') rawExcludeId?: string,
+  ) {
+    const excludeId = rawExcludeId
+      ? this.toPositiveInteger(rawExcludeId, 'excludeId')
+      : undefined;
+    return this.bookingDocuments.checkBillOfLadingNumber(number, excludeId);
+  }
+
+  @Get(':type/number-duplicates')
+  checkDocumentNumber(
+    @Param('type', new ParseEnumPipe(BookingDocumentType))
+    type: BookingDocumentType,
+    @Query('number') number: string,
+    @Query('excludeId') rawExcludeId?: string,
+  ) {
+    const excludeId = rawExcludeId
+      ? this.toPositiveInteger(rawExcludeId, 'excludeId')
+      : undefined;
+    return this.bookingDocuments.checkDocumentNumber(type, number, excludeId);
   }
 
   @Post(':type/records')
@@ -144,54 +169,19 @@ export class BookingDocumentsAdminController {
     );
   }
 
-  /** Soft-archive for staff (and admin). */
+  /** Permanently delete an unlocked document. Available to section staff. */
   @Delete(':type/records/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async archiveRecord(
-    @Param('type', new ParseEnumPipe(BookingDocumentType))
-    type: BookingDocumentType,
-    @Param('id', ParseIntPipe) id: number,
-    @Query('expectedVersion', ParseIntPipe) expectedVersion: number,
-    @Req() request: AuthenticatedRequest,
-  ): Promise<void> {
-    await this.bookingDocuments.archiveRecord(
-      type,
-      id,
-      this.requireActorUserId(request),
-      expectedVersion,
-    );
-  }
-
-  /** Admin-only: restore a soft-archived record into the active history list. */
-  @Post(':type/records/:id/restore')
-  @ApiAdminOnly()
-  restoreRecord(
-    @Param('type', new ParseEnumPipe(BookingDocumentType))
-    type: BookingDocumentType,
-    @Param('id', ParseIntPipe) id: number,
-    @Body('expectedVersion', ParseIntPipe) expectedVersion: number,
-    @Req() request: AuthenticatedRequest,
-  ) {
-    return this.bookingDocuments.restoreRecord(
-      type,
-      id,
-      this.requireActorUserId(request),
-      expectedVersion,
-    );
-  }
-
-  @Delete(':type/records/:id/permanent')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @PermanentDelete({
+  @SectionPermanentDelete(BOOKING_DOCUMENT_SECTION, {
     resourceType: 'booking_document_record',
     idSource: { kind: 'param', key: 'id' },
   })
-  async permanentDeleteRecord(
+  async deleteRecord(
     @Param('type', new ParseEnumPipe(BookingDocumentType))
     type: BookingDocumentType,
     @Param('id', ParseIntPipe) id: number,
   ): Promise<void> {
-    await this.bookingDocuments.permanentDeleteRecord(type, id);
+    await this.bookingDocuments.deleteRecord(type, id);
   }
 
   @Post(':type/preview')
@@ -236,5 +226,16 @@ export class BookingDocumentsAdminController {
   private toInteger(value: string, fallback: number): number {
     const parsed = Number.parseInt(value, 10);
     return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  private toPositiveInteger(value: string, field: string): number {
+    if (!/^\d+$/.test(value)) {
+      throw new BadRequestException(`${field} must be a positive integer`);
+    }
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isSafeInteger(parsed) || parsed < 1) {
+      throw new BadRequestException(`${field} must be a positive integer`);
+    }
+    return parsed;
   }
 }

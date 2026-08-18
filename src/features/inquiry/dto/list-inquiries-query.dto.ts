@@ -2,7 +2,6 @@ import { Transform, Type, type TransformFnParams } from 'class-transformer';
 import {
   IsDateString,
   IsEnum,
-  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -88,16 +87,4 @@ export class ListInquiriesQueryDto {
   @IsOptional()
   @IsDateString()
   dateTo?: string;
-
-  /**
-   * Admin-only list filter:
-   * - active: only rows not archived
-   * - archived: only soft-deleted rows
-   * - all: both
-   *
-   * User-facing endpoints should ignore anything except the default "active".
-   */
-  @IsOptional()
-  @IsIn(['active', 'archived', 'all'])
-  archived?: InquiryArchivedFilter = 'active';
 }

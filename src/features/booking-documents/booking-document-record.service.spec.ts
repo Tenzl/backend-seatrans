@@ -205,7 +205,7 @@ describe('BookingDocumentRecordService lifecycle', () => {
     });
   });
 
-  it('creates drafts, updates, locks, unlocks, archives, and lists by type', async () => {
+  it('creates drafts, updates, locks, unlocks, and hard deletes by type', async () => {
     const created = await service.createRecord(
       BookingDocumentType.ARRIVAL_NOTICE,
       { anNumber: 'AN-100' },
@@ -260,40 +260,17 @@ describe('BookingDocumentRecordService lifecycle', () => {
       9,
       locked.version,
     );
-    const archived = await service.archiveRecord(
-      BookingDocumentType.ARRIVAL_NOTICE,
-      created.id,
-      9,
-      unlocked.version,
-    );
-    expect(archived.deletedAt).not.toBeNull();
+    expect(unlocked.lockedAt).toBeNull();
+
+    await service.deleteRecord(BookingDocumentType.ARRIVAL_NOTICE, created.id);
 
     const listed = await service.listRecords(
       BookingDocumentType.ARRIVAL_NOTICE,
     );
     expect(listed.totalElements).toBe(0);
-
-    const archivedList = await service.listRecords(
-      BookingDocumentType.ARRIVAL_NOTICE,
-      0,
-      10,
-      'archived',
-    );
-    expect(archivedList.totalElements).toBe(1);
-
-    const restored = await service.restoreRecord(
-      BookingDocumentType.ARRIVAL_NOTICE,
-      created.id,
-      10,
-      archived.version,
-    );
-    expect(restored.deletedAt).toBeNull();
-    expect(restored.deletedByUserId).toBeNull();
-
-    const activeAfterRestore = await service.listRecords(
-      BookingDocumentType.ARRIVAL_NOTICE,
-    );
-    expect(activeAfterRestore.totalElements).toBe(1);
+    await expect(
+      service.getRecord(BookingDocumentType.ARRIVAL_NOTICE, created.id),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('derives status on the server and rejects locking an incomplete document', async () => {
@@ -471,16 +448,23 @@ describe('BookingDocumentRecordService lifecycle', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('permanently deletes from only the selected table', async () => {
+  it('hard deletes from only the selected table', async () => {
     const record = await service.createRecord(
       BookingDocumentType.BILL_OF_LADING,
       { fblNumber: 'BL-DELETE' },
       4,
     );
-    await service.permanentDeleteRecord(
-      BookingDocumentType.BILL_OF_LADING,
-      record.id,
-    );
+    const stored = billOfLadingRepository.records.get(record.id);
+    if (!stored) throw new Error('Expected stored BL fixture');
+    stored.lockedAt = new Date('2026-08-18T01:00:00.000Z');
+
+    await expect(
+      service.deleteRecord(BookingDocumentType.BILL_OF_LADING, record.id),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(billOfLadingRepository.records.size).toBe(1);
+
+    stored.lockedAt = null;
+    await service.deleteRecord(BookingDocumentType.BILL_OF_LADING, record.id);
     expect(billOfLadingRepository.records.size).toBe(0);
   });
 });

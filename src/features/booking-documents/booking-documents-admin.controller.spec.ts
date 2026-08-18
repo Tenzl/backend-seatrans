@@ -82,7 +82,6 @@ describe('BookingDocumentsAdminController', () => {
       BookingDocumentType.BOOKING_CONFIRMATION,
       2,
       15,
-      'active',
     );
   });
 
@@ -99,20 +98,39 @@ describe('BookingDocumentsAdminController', () => {
     );
   });
 
-  it('updates, locks, unlocks, archives, restores, and permanently deletes records', async () => {
+  it('loads a booking copy source and checks duplicate HBL numbers', async () => {
+    const getBookingCopySource = jest.fn().mockResolvedValue({
+      sourceBookingId: 9,
+      bookingFlow: 'EXPORT',
+      payload: { bookingNumber: 'BK-9' },
+    });
+    const checkBillOfLadingNumber = jest.fn().mockResolvedValue({
+      number: 'HBL-9',
+      duplicate: true,
+      matches: [{ id: 7 }],
+    });
+    const controller = new BookingDocumentsAdminController({
+      getBookingCopySource,
+      checkBillOfLadingNumber,
+    } as unknown as BookingDocumentsService);
+
+    await controller.getBookingCopySource(9);
+    await controller.checkBillOfLadingNumber(' HBL-9 ', '7');
+
+    expect(getBookingCopySource).toHaveBeenCalledWith(9);
+    expect(checkBillOfLadingNumber).toHaveBeenCalledWith(' HBL-9 ', 7);
+  });
+
+  it('updates, locks, unlocks, and hard deletes records', async () => {
     const updateRecord = jest.fn().mockResolvedValue({ id: 3 });
     const lockRecord = jest.fn().mockResolvedValue({ id: 3, lockedAt: 'x' });
     const unlockRecord = jest.fn().mockResolvedValue({ id: 3, lockedAt: null });
-    const archiveRecord = jest.fn().mockResolvedValue(undefined);
-    const restoreRecord = jest.fn().mockResolvedValue({ id: 3 });
-    const permanentDeleteRecord = jest.fn().mockResolvedValue(undefined);
+    const deleteRecord = jest.fn().mockResolvedValue(undefined);
     const controller = new BookingDocumentsAdminController({
       updateRecord,
       lockRecord,
       unlockRecord,
-      archiveRecord,
-      restoreRecord,
-      permanentDeleteRecord,
+      deleteRecord,
     } as unknown as BookingDocumentsService);
 
     await controller.updateRecord(
@@ -127,16 +145,7 @@ describe('BookingDocumentsAdminController', () => {
     await controller.unlockRecord(BookingDocumentType.ARRIVAL_NOTICE, 3, 6, {
       user: { id: 2 },
     } as never);
-    await controller.archiveRecord(BookingDocumentType.ARRIVAL_NOTICE, 3, 7, {
-      user: { id: 2 },
-    } as never);
-    await controller.restoreRecord(BookingDocumentType.ARRIVAL_NOTICE, 3, 8, {
-      user: { id: 2 },
-    } as never);
-    await controller.permanentDeleteRecord(
-      BookingDocumentType.ARRIVAL_NOTICE,
-      3,
-    );
+    await controller.deleteRecord(BookingDocumentType.ARRIVAL_NOTICE, 3);
 
     expect(updateRecord).toHaveBeenCalledWith(
       BookingDocumentType.ARRIVAL_NOTICE,
@@ -156,19 +165,7 @@ describe('BookingDocumentsAdminController', () => {
       2,
       6,
     );
-    expect(archiveRecord).toHaveBeenCalledWith(
-      BookingDocumentType.ARRIVAL_NOTICE,
-      3,
-      2,
-      7,
-    );
-    expect(restoreRecord).toHaveBeenCalledWith(
-      BookingDocumentType.ARRIVAL_NOTICE,
-      3,
-      2,
-      8,
-    );
-    expect(permanentDeleteRecord).toHaveBeenCalledWith(
+    expect(deleteRecord).toHaveBeenCalledWith(
       BookingDocumentType.ARRIVAL_NOTICE,
       3,
     );
@@ -188,15 +185,14 @@ describe('BookingDocumentsAdminController', () => {
     expect(pathFor('listRecords')).toBe(':type/records');
     expect(pathFor('getRecord')).toBe(':type/records/:id');
     expect(pathFor('previewRecord')).toBe(':type/records/:id/preview');
+    expect(pathFor('getBookingCopySource')).toBe('bookings/:id/copy-source');
+    expect(pathFor('checkBillOfLadingNumber')).toBe('bl/hbl-duplicates');
+    expect(pathFor('checkDocumentNumber')).toBe(':type/number-duplicates');
     expect(pathFor('createRecord')).toBe(':type/records');
     expect(pathFor('updateRecord')).toBe(':type/records/:id');
     expect(pathFor('lockRecord')).toBe(':type/records/:id/lock');
     expect(pathFor('unlockRecord')).toBe(':type/records/:id/unlock');
-    expect(pathFor('archiveRecord')).toBe(':type/records/:id');
-    expect(pathFor('restoreRecord')).toBe(':type/records/:id/restore');
-    expect(pathFor('permanentDeleteRecord')).toBe(
-      ':type/records/:id/permanent',
-    );
+    expect(pathFor('deleteRecord')).toBe(':type/records/:id');
   });
 
   it('rejects unsupported document types with the route enum parser', async () => {

@@ -83,6 +83,60 @@ export class BookingDocumentsService {
     return this.recordService.getWorkflow(bookingId);
   }
 
+  async getBookingCopySource(bookingId: number) {
+    return this.recordService.getBookingCopySource(bookingId);
+  }
+
+  async checkBillOfLadingNumber(number: string, excludeId?: number) {
+    const normalizedNumber = number?.trim();
+    if (!normalizedNumber) {
+      throw new BadRequestException('HBL number is required');
+    }
+    if (normalizedNumber.length > 100) {
+      throw new BadRequestException(
+        'HBL number must contain no more than 100 characters',
+      );
+    }
+    const matches = await this.recordService.findBillOfLadingNumberDuplicates(
+      normalizedNumber,
+      excludeId,
+    );
+    return {
+      number: normalizedNumber,
+      duplicate: matches.length > 0,
+      matches,
+    };
+  }
+
+  async checkDocumentNumber(
+    type: BookingDocumentType,
+    number: string,
+    excludeId?: number,
+  ) {
+    const normalizedNumber = number?.trim();
+    if (!normalizedNumber) {
+      throw new BadRequestException('Document number is required');
+    }
+    const maximumLength =
+      type === BookingDocumentType.BOOKING_CONFIRMATION ? 200 : 100;
+    if (normalizedNumber.length > maximumLength) {
+      throw new BadRequestException(
+        `Document number must contain no more than ${maximumLength} characters`,
+      );
+    }
+    const matches = await this.recordService.findDocumentNumberDuplicates(
+      type,
+      normalizedNumber,
+      excludeId,
+    );
+    return {
+      documentType: type,
+      number: normalizedNumber,
+      duplicate: matches.length > 0,
+      matches,
+    };
+  }
+
   async updateRecord(
     type: BookingDocumentType,
     id: number,
@@ -148,35 +202,12 @@ export class BookingDocumentsService {
     return this.recordService.unlock(type, id, actorUserId, expectedVersion);
   }
 
-  async archiveRecord(
-    type: BookingDocumentType,
-    id: number,
-    actorUserId: number,
-    expectedVersion: number,
-  ) {
-    return this.recordService.archive(type, id, actorUserId, expectedVersion);
-  }
-
-  async restoreRecord(
-    type: BookingDocumentType,
-    id: number,
-    actorUserId: number,
-    expectedVersion: number,
-  ) {
-    return this.recordService.restore(type, id, actorUserId, expectedVersion);
-  }
-
-  async permanentDeleteRecord(type: BookingDocumentType, id: number) {
+  async deleteRecord(type: BookingDocumentType, id: number) {
     return this.recordService.hardDelete(type, id);
   }
 
-  listRecords(
-    type: BookingDocumentType,
-    page = 0,
-    size = 10,
-    archived: 'active' | 'archived' | 'all' = 'active',
-  ) {
-    return this.recordService.list(type, page, size, archived);
+  listRecords(type: BookingDocumentType, page = 0, size = 10) {
+    return this.recordService.list(type, page, size);
   }
 
   async createPreview(

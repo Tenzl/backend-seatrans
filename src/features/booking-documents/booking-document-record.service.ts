@@ -83,6 +83,41 @@ const REQUIRED_TEXT_FIELDS: Record<BookingDocumentType, string[]> = {
   ],
 };
 
+const PRIMARY_NUMBER_FIELDS: Record<
+  BookingDocumentType,
+  { alias: string; databaseColumn: string; payloadField: string }
+> = {
+  [BookingDocumentType.BOOKING_CONFIRMATION]: {
+    alias: 'booking',
+    databaseColumn: 'booking_number',
+    payloadField: 'bookingNumber',
+  },
+  [BookingDocumentType.ARRIVAL_NOTICE]: {
+    alias: 'an',
+    databaseColumn: 'an_number',
+    payloadField: 'anNumber',
+  },
+  [BookingDocumentType.DELIVERY_ORDER]: {
+    alias: 'deliveryOrder',
+    databaseColumn: 'do_number',
+    payloadField: 'doNumber',
+  },
+  [BookingDocumentType.BILL_OF_LADING]: {
+    alias: 'bl',
+    databaseColumn: 'fbl_number',
+    payloadField: 'fblNumber',
+  },
+};
+
+type DocumentNumberMatch = {
+  id: number;
+  documentType: BookingDocumentType;
+  bookingId: number | null;
+  bookingNumber: string | null;
+  number: string;
+  createdAt: string;
+};
+
 @Injectable()
 export class BookingDocumentRecordService {
   constructor(
@@ -206,6 +241,53 @@ export class BookingDocumentRecordService {
     };
   }
 
+  async getBookingCopySource(bookingId: number) {
+    const booking = (await this.findActiveOrFail(
+      BookingDocumentType.BOOKING_CONFIRMATION,
+      bookingId,
+      false,
+    )) as BookingRecord;
+
+    return {
+      sourceBookingId: Number(booking.id),
+      bookingFlow: booking.bookingFlow,
+      payload: this.clonePayload(booking.payload),
+    };
+  }
+
+  async findBillOfLadingNumberDuplicates(number: string, excludeId?: number) {
+    return this.findPrimaryNumberDuplicates(
+      BookingDocumentType.BILL_OF_LADING,
+      number,
+      excludeId,
+    );
+  }
+
+  async findDocumentNumberDuplicates(
+    currentType: BookingDocumentType,
+    number: string,
+    excludeId?: number,
+  ): Promise<DocumentNumberMatch[]> {
+    const matchGroups = await Promise.all(
+      Object.values(BookingDocumentType).map((type) =>
+        this.findPrimaryNumberDuplicates(
+          type,
+          number,
+          type === currentType ? excludeId : undefined,
+        ),
+      ),
+    );
+
+    return matchGroups
+      .flat()
+      .sort((left, right) => {
+        const createdDifference =
+          Date.parse(right.createdAt) - Date.parse(left.createdAt);
+        return createdDifference || right.id - left.id;
+      })
+      .slice(0, 10);
+  }
+
   async update(
     type: BookingDocumentType,
     id: number,
@@ -286,81 +368,25 @@ export class BookingDocumentRecordService {
     );
   }
 
-  async archive(
-    type: BookingDocumentType,
-    id: number,
-    actorUserId: number,
-    expectedVersion: number,
-    manager?: EntityManager,
-  ) {
-    const record = await this.findActiveOrFail(type, id, false, manager);
-    return this.casUpdate(
-      type,
-      record,
-      expectedVersion,
-      {
-        deletedAt: new Date(),
-        deletedByUserId: actorUserId,
-        updatedByUserId: actorUserId,
-      },
-      manager,
-      'deleted_at IS NULL',
-    );
-  }
-
-  async restore(
-    type: BookingDocumentType,
-    id: number,
-    actorUserId: number,
-    expectedVersion: number,
-    manager?: EntityManager,
-  ) {
-    const record = await this.findAnyOrFail(type, id, false, manager);
-    if (!record.deletedAt) {
-      throw new ConflictException('Document record is not archived');
-    }
-    return this.casUpdate(
-      type,
-      record,
-      expectedVersion,
-      {
-        deletedAt: null,
-        deletedByUserId: null,
-        updatedByUserId: actorUserId,
-      },
-      manager,
-      'deleted_at IS NOT NULL',
-      { requireActive: false },
-    );
-  }
-
   async hardDelete(
     type: BookingDocumentType,
     id: number,
     manager?: EntityManager,
   ): Promise<void> {
     const repository = this.repository(type, manager);
-    const record = await repository.findOne({ where: { id } });
+    const record = (await repository.findOne({
+      where: { id, deletedAt: IsNull() },
+    })) as DocumentRecord | null;
     if (!record) throw new NotFoundException('Document record not found');
+    await this.assertDeletable(type, record, manager);
     await repository.remove(record);
   }
 
-  async list(
-    type: BookingDocumentType,
-    page = 0,
-    size = 10,
-    archived: 'active' | 'archived' | 'all' = 'active',
-  ) {
+  async list(type: BookingDocumentType, page = 0, size = 10) {
     const safePage = Math.max(0, page);
     const safeSize = Math.min(50, Math.max(1, size));
-    const where =
-      archived === 'archived'
-        ? ({ deletedAt: Not(IsNull()) } as never)
-        : archived === 'all'
-          ? ({} as never)
-          : ({ deletedAt: IsNull() } as never);
     const [records, totalElements] = await this.repository(type).findAndCount({
-      where,
+      where: { deletedAt: IsNull() },
       relations: { createdBy: true },
       order: { createdAt: 'DESC', id: 'DESC' },
       skip: safePage * safeSize,
@@ -374,6 +400,67 @@ export class BookingDocumentRecordService {
       size: safeSize,
       number: safePage,
     };
+  }
+
+  private async findPrimaryNumberDuplicates(
+    type: BookingDocumentType,
+    number: string,
+    excludeId?: number,
+  ): Promise<DocumentNumberMatch[]> {
+    const normalizedNumber = number.trim();
+    if (!normalizedNumber) return [];
+
+    const { alias, databaseColumn, payloadField } = PRIMARY_NUMBER_FIELDS[type];
+    let query = this.repository(type)
+      .createQueryBuilder(alias)
+      .where(
+        `LOWER(BTRIM(${alias}.${databaseColumn})) = LOWER(BTRIM(:number))`,
+        { number: normalizedNumber },
+      )
+      .andWhere(`${alias}.deleted_at IS NULL`);
+    if (type !== BookingDocumentType.BOOKING_CONFIRMATION) {
+      query = query.leftJoinAndSelect(`${alias}.booking`, 'booking');
+    }
+    if (excludeId != null) {
+      query = query.andWhere(`${alias}.id <> :excludeId`, { excludeId });
+    }
+
+    const records = await query
+      .orderBy(`${alias}.createdAt`, 'DESC')
+      .addOrderBy(`${alias}.id`, 'DESC')
+      .take(10)
+      .getMany();
+
+    return records.map((record) => {
+      const child = record as ChildRecord;
+      const bookingNumber =
+        type === BookingDocumentType.BOOKING_CONFIRMATION
+          ? this.payloadText(record, 'bookingNumber')
+          : child.booking?.bookingNumber?.trim() || null;
+      const bookingId =
+        type === BookingDocumentType.BOOKING_CONFIRMATION
+          ? Number(record.id)
+          : child.bookingId == null
+            ? null
+            : Number(child.bookingId);
+
+      return {
+        id: Number(record.id),
+        documentType: type,
+        bookingId,
+        bookingNumber,
+        number: this.payloadText(record, payloadField) ?? normalizedNumber,
+        createdAt: record.createdAt.toISOString(),
+      };
+    });
+  }
+
+  private payloadText(
+    record: BookingDocumentRecordBase,
+    field: string,
+  ): string | null {
+    const value = record.payload[field];
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
   }
 
   private repository(
@@ -418,18 +505,55 @@ export class BookingDocumentRecordService {
     return record as DocumentRecord;
   }
 
-  private async findAnyOrFail(
+  private async assertDeletable(
     type: BookingDocumentType,
-    id: number,
-    withCreator = false,
+    record: DocumentRecord,
     manager?: EntityManager,
-  ): Promise<DocumentRecord> {
-    const record = await this.repository(type, manager).findOne({
-      where: { id },
-      relations: withCreator ? { createdBy: true } : undefined,
-    });
-    if (!record) throw new NotFoundException('Document record not found');
-    return record as DocumentRecord;
+  ): Promise<void> {
+    if (record.lockedAt) {
+      throw new ConflictException(
+        'Locked document records cannot be deleted; an administrator must unlock edit first',
+      );
+    }
+
+    if (type === BookingDocumentType.BOOKING_CONFIRMATION) {
+      const childTypes = [
+        BookingDocumentType.ARRIVAL_NOTICE,
+        BookingDocumentType.DELIVERY_ORDER,
+        BookingDocumentType.BILL_OF_LADING,
+      ];
+      const lockedChildren = await Promise.all(
+        childTypes.map((childType) =>
+          this.repository(childType, manager).findOne({
+            where: {
+              bookingId: Number(record.id),
+              lockedAt: Not(IsNull()),
+              deletedAt: IsNull(),
+            } as never,
+          }),
+        ),
+      );
+      if (lockedChildren.some(Boolean)) {
+        throw new ConflictException(
+          'Booking workflow contains a locked document and cannot be deleted; an administrator must unlock edit first',
+        );
+      }
+      return;
+    }
+
+    const bookingId = (record as ChildRecord).bookingId;
+    if (!bookingId) return;
+    const booking = await this.findActiveOrFail(
+      BookingDocumentType.BOOKING_CONFIRMATION,
+      bookingId,
+      false,
+      manager,
+    );
+    if (booking.lockedAt) {
+      throw new ConflictException(
+        'Locked booking workflows cannot be deleted; an administrator must unlock edit first',
+      );
+    }
   }
 
   private async assertMutable(
@@ -440,11 +564,6 @@ export class BookingDocumentRecordService {
     if (record.lockedAt) {
       throw new ConflictException(
         'Document record is locked and cannot be edited',
-      );
-    }
-    if (record.deletedAt) {
-      throw new ConflictException(
-        'Document record is archived and cannot be edited',
       );
     }
     if (type !== BookingDocumentType.BOOKING_CONFIRMATION) {
@@ -576,14 +695,12 @@ export class BookingDocumentRecordService {
     changes: Record<string, unknown>,
     manager?: EntityManager,
     statePredicate?: string,
-    options?: { requireActive?: boolean },
   ) {
     if (Number(record.version ?? 1) !== expectedVersion) {
       throw new ConflictException(
         'Document record was modified concurrently; reload and retry',
       );
     }
-    const requireActive = options?.requireActive !== false;
     let query = this.repository(type, manager)
       .createQueryBuilder()
       .update()
@@ -593,10 +710,7 @@ export class BookingDocumentRecordService {
       })
       .where('id = :id', { id: Number(record.id) })
       .andWhere('version = :expectedVersion', { expectedVersion });
-    // Active rows only — except restore, which must match archived rows.
-    if (requireActive) {
-      query = query.andWhere('deleted_at IS NULL');
-    }
+    query = query.andWhere('deleted_at IS NULL');
     if (statePredicate) query = query.andWhere(statePredicate);
     const result = await query.execute();
     if (result.affected !== 1) {
