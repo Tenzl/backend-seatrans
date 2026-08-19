@@ -1,4 +1,5 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ValidationPipe } from '@nestjs/common';
+import { UpsertEpdaParameterSetDto } from './dto/upsert-epda-parameter-set.dto';
 import {
   isEmptyEpdaOverride,
   validateEpdaParameterValues,
@@ -79,15 +80,66 @@ describe('validateEpdaParameterValues', () => {
     ).not.toThrow();
   });
 
-  it('rejects duplicate cargo codes case-insensitively', () => {
+  it('accepts authoritative Type ID cargo rates with a historical name snapshot', () => {
     expect(() =>
       validateEpdaParameterValues({
         cargoAgencyRates: [
-          { code: 'IN_BULK', label: 'Bulk', rate: 0.05 },
-          { code: 'in_bulk', label: 'Bulk duplicate', rate: 0.06 },
+          {
+            commodityTypeId: 101,
+            typeNameSnapshot: 'Project and breakbulk cargo',
+            label: 'Cargo agency fee',
+            rate: 0.05,
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects duplicate cargo rates by authoritative Type ID', () => {
+    expect(() =>
+      validateEpdaParameterValues({
+        cargoAgencyRates: [
+          {
+            commodityTypeId: 101,
+            typeNameSnapshot: 'Bulk',
+            label: 'Bulk',
+            rate: 0.05,
+          },
+          {
+            commodityTypeId: 101,
+            typeNameSnapshot: 'Renamed bulk',
+            label: 'Bulk duplicate',
+            rate: 0.06,
+          },
+        ],
+      }),
+    ).toThrow('duplicate commodityTypeId 101');
+  });
+
+  it.each([
+    { commodityTypeId: 0, typeNameSnapshot: 'Bulk' },
+    { commodityTypeId: 1.5, typeNameSnapshot: 'Bulk' },
+    { commodityTypeId: 101, typeNameSnapshot: '   ' },
+  ])('rejects invalid Type identity rate metadata: %p', (identity) => {
+    expect(() =>
+      validateEpdaParameterValues({
+        cargoAgencyRates: [
+          {
+            ...identity,
+            label: 'Bulk',
+            rate: 0.05,
+          },
         ],
       }),
     ).toThrow(BadRequestException);
+  });
+
+  it('rejects a new legacy code-only cargo rate write', () => {
+    expect(() =>
+      validateEpdaParameterValues({
+        cargoAgencyRates: [{ code: 'IN_BULK', label: 'Bulk', rate: 0.05 }],
+      }),
+    ).toThrow('commodityTypeId must be a positive integer');
   });
 
   it('rejects oversized JSONB payloads', () => {
@@ -98,12 +150,54 @@ describe('validateEpdaParameterValues', () => {
         },
         cargoAgencyRates: [
           {
-            code: 'OVERSIZED',
+            commodityTypeId: 101,
+            typeNameSnapshot: 'Bulk',
             label: 'x'.repeat(300_000),
             rate: 1,
           },
         ],
       }),
     ).toThrow('must not exceed');
+  });
+});
+
+describe('EPDA cargo rate write DTO boundary', () => {
+  const pipe = new ValidationPipe({
+    transform: true,
+    whitelist: true,
+    forbidNonWhitelisted: true,
+  });
+
+  it('accepts Type ID and name snapshot writes', async () => {
+    await expect(
+      pipe.transform(
+        {
+          values: {
+            cargoAgencyRates: [
+              {
+                commodityTypeId: 101,
+                typeNameSnapshot: 'Bulk',
+                label: 'Bulk',
+                rate: 0.05,
+              },
+            ],
+          },
+        },
+        { type: 'body', metatype: UpsertEpdaParameterSetDto },
+      ),
+    ).resolves.toBeInstanceOf(UpsertEpdaParameterSetDto);
+  });
+
+  it('rejects code-only legacy keys on new writes', async () => {
+    await expect(
+      pipe.transform(
+        {
+          values: {
+            cargoAgencyRates: [{ code: 'IN_BULK', label: 'Bulk', rate: 0.05 }],
+          },
+        },
+        { type: 'body', metatype: UpsertEpdaParameterSetDto },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

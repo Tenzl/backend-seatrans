@@ -84,8 +84,32 @@ export class UpdateShippingAgencyEpdaDto {
   cargoType?: string | null;
 
   @IsOptional()
+  @Transform(({ value }: TransformFnParams) => {
+    const input: unknown = value;
+    if (input === null || input === '') return null;
+    const parsed = Number(input);
+    return Number.isInteger(parsed) ? parsed : input;
+  })
+  @ValidateIf((_, value) => value !== null)
+  @IsInt()
+  @Min(1)
+  commodityTypeId?: number | null;
+
+  @IsOptional()
   @IsString()
   cargoName?: string | null;
+
+  @IsOptional()
+  @Transform(({ value }: TransformFnParams) => {
+    const input: unknown = value;
+    if (input === null || input === '') return null;
+    const parsed = Number(input);
+    return Number.isInteger(parsed) ? parsed : input;
+  })
+  @ValidateIf((_, value) => value !== null)
+  @IsInt()
+  @Min(1)
+  commodityId?: number | null;
 
   @IsOptional()
   @IsString()

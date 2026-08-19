@@ -17,9 +17,10 @@ import {
 /** Drop legacy PS→port miles so older clients do not trip forbidNonWhitelisted. */
 function stripLegacyPilotageMiles(value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-  const hours = value as Record<string, unknown>;
-  const { pilotageThirdMiles: _a, qnPilotageMiles: _b, ...rest } = hours;
-  return rest;
+  const sanitized = { ...(value as Record<string, unknown>) };
+  delete sanitized.pilotageThirdMiles;
+  delete sanitized.qnPilotageMiles;
+  return sanitized;
 }
 
 class HoursDto {
@@ -79,7 +80,16 @@ class LoaTierDto {
 }
 
 class CargoAgencyRateDto {
-  @IsString() @IsNotEmpty() @MaxLength(50) code!: string;
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  commodityTypeId!: number;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  typeNameSnapshot!: string;
+
   @IsString() @IsNotEmpty() @MaxLength(100) label!: string;
   @IsNumber() @Min(0) rate!: number;
 }

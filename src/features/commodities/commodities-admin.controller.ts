@@ -13,35 +13,19 @@ import {
 import { ApiAdmin } from '../../shared/decorators/api-admin.decorator';
 import { AdminSection } from '../../shared/decorators/admin-section.decorator';
 import { SectionPermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
-import { LimitQueryDto } from '../../shared/dto/list-query.dto';
-import { BOOKING_DOCUMENT_SECTION } from '../booking-documents/constants/booking-document.constants';
-import { CommodityGroupsService } from './commodity-groups.service';
 import { CommoditiesService } from './commodities.service';
-import { BookingCommodityOptionDto } from './dto/booking-commodity-option.dto';
 import { CommodityDto } from './dto/commodity.dto';
 import { CreateCommodityDto } from './dto/create-commodity.dto';
+import { ListCommoditiesQueryDto } from './dto/list-commodities-query.dto';
 
 @Controller('v1/admin/commodities')
 export class CommoditiesAdminController {
-  constructor(
-    private readonly commoditiesService: CommoditiesService,
-    private readonly commodityGroupsService: CommodityGroupsService,
-  ) {}
-
-  /**
-   * Freight-forwarding commodity picker for booking forms.
-   * Uses booking-documents section (same pattern as PIC options).
-   */
-  @AdminSection(BOOKING_DOCUMENT_SECTION)
-  @Get('booking-options')
-  listBookingOptions(): Promise<BookingCommodityOptionDto[]> {
-    return this.commodityGroupsService.listBookingOptions();
-  }
+  constructor(private readonly commoditiesService: CommoditiesService) {}
 
   @AdminSection('data-commodities')
   @Get()
-  list(@Query() query: LimitQueryDto): Promise<CommodityDto[]> {
-    return this.commoditiesService.list({ limit: query.limit });
+  list(@Query() query: ListCommoditiesQueryDto): Promise<CommodityDto[]> {
+    return this.commoditiesService.list(query);
   }
 
   @AdminSection('data-commodities')

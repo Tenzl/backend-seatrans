@@ -98,8 +98,8 @@ export function validateEpdaParameterValues(
   // PS→port miles belong on the EPDA inquiry form, not parameter sets.
   if (values.hours) {
     const hours = values.hours as Record<string, unknown>;
-    const { pilotageThirdMiles: _a, qnPilotageMiles: _b, ...rest } = hours;
-    values.hours = rest as PartialEpdaParameterValues['hours'];
+    delete hours.pilotageThirdMiles;
+    delete hours.qnPilotageMiles;
   }
   validateObjectNumbers(values.hours, 'hours');
   validateObjectNumbers(values.garbage, 'garbage');
@@ -114,18 +114,33 @@ export function validateEpdaParameterValues(
     if (values.cargoAgencyRates.length > MAX_TIER_ROWS) {
       fail(`cargoAgencyRates must contain at most ${MAX_TIER_ROWS} rows`);
     }
-    const codes = new Set<string>();
+    const commodityTypeIds = new Set<number>();
     values.cargoAgencyRates.forEach((rate, index) => {
-      const code = rate.code.trim().toUpperCase();
-      if (!code || code.length > 50) {
+      if (
+        !Number.isInteger(rate.commodityTypeId) ||
+        (rate.commodityTypeId ?? 0) <= 0
+      ) {
         fail(
-          `cargoAgencyRates[${index}].code must contain between 1 and 50 characters`,
+          `cargoAgencyRates[${index}].commodityTypeId must be a positive integer`,
         );
       }
-      if (codes.has(code)) {
-        fail(`cargoAgencyRates contains duplicate code ${code}`);
+      const commodityTypeId = rate.commodityTypeId as number;
+      if (commodityTypeIds.has(commodityTypeId)) {
+        fail(
+          `cargoAgencyRates contains duplicate commodityTypeId ${commodityTypeId}`,
+        );
       }
-      codes.add(code);
+      commodityTypeIds.add(commodityTypeId);
+      const typeNameSnapshot = rate.typeNameSnapshot;
+      if (
+        typeof typeNameSnapshot !== 'string' ||
+        !typeNameSnapshot.trim() ||
+        typeNameSnapshot.length > 200
+      ) {
+        fail(
+          `cargoAgencyRates[${index}].typeNameSnapshot must contain between 1 and 200 characters`,
+        );
+      }
       validateLabel(rate.label, `cargoAgencyRates[${index}]`);
       assertFiniteNonNegative(rate.rate, `cargoAgencyRates[${index}].rate`);
     });

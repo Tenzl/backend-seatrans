@@ -3,6 +3,8 @@ import { BaseInquiry } from './base-inquiry.entity';
 import { User } from '../../auth/entities/user.entity';
 import { Port } from '../../ports/entities/port.entity';
 import type { AgencyOtherExpense } from '../dto/agency-other-expense.dto';
+import { Commodity } from '../../commodities/entities/commodity.entity';
+import { CommodityType } from '../../commodities/entities/commodity-type.entity';
 
 @Entity('shipping_agency_inquiries')
 export class ShippingAgencyInquiryEntity extends BaseInquiry {
@@ -43,6 +45,20 @@ export class ShippingAgencyInquiryEntity extends BaseInquiry {
     nullable: true,
   })
   cargoNameOther!: string | null;
+
+  @Column({ name: 'commodity_type_id', type: 'int', nullable: true })
+  commodityTypeId!: number | null;
+
+  @ManyToOne(() => CommodityType, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'commodity_type_id' })
+  commodityType!: CommodityType | null;
+
+  @Column({ name: 'commodity_id', type: 'int', nullable: true })
+  commodityId!: number | null;
+
+  @ManyToOne(() => Commodity, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'commodity_id' })
+  commodity!: Commodity | null;
 
   @Column({
     name: 'cargo_quantity',

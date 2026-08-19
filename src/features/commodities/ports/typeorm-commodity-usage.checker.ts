@@ -5,10 +5,10 @@ import { GalleryImage } from '../../gallery/entities/gallery-image.entity';
 import { FreightForwardingInquiryEntity } from '../../inquiry/entities/freight-forwarding-inquiry.entity';
 import { ShippingAgencyInquiryEntity } from '../../inquiry/entities/shipping-agency-inquiry.entity';
 import { TotalLogisticsInquiryEntity } from '../../inquiry/entities/total-logistics-inquiry.entity';
-import { formatCommodityInGroupLabel } from '../commodity-display-label';
 import type {
   CommodityUsageChecker,
   CommodityUsageIdentity,
+  CommodityTypeUsageIdentity,
 } from './commodity-usage.checker';
 
 /**
@@ -76,25 +76,57 @@ export class TypeOrmCommodityUsageChecker implements CommodityUsageChecker {
     return logisticsCount > 0;
   }
 
+  async isTypeInUse(
+    commodityType: CommodityTypeUsageIdentity,
+  ): Promise<boolean> {
+    for (const table of BOOKING_PAYLOAD_TABLES) {
+      const rows: unknown = await this.dataSource.query(
+        `
+        SELECT 1
+        FROM ${table}
+        WHERE (
+            (
+              (payload->>'commodityTypeId') ~ '^[0-9]+$'
+              AND (payload->>'commodityTypeId')::int = $1
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements(
+                CASE
+                  WHEN jsonb_typeof(payload->'containers') = 'array'
+                    THEN payload->'containers'
+                  ELSE '[]'::jsonb
+                END
+              ) AS container
+              WHERE lower(
+                regexp_replace(
+                  btrim(coalesce(container->>'packageType', '')),
+                  '[[:space:]]+',
+                  ' ',
+                  'g'
+                )
+              ) = $2
+            )
+          )
+        LIMIT 1
+        `,
+        [commodityType.id, commodityType.name.trim().toLowerCase()],
+      );
+      if (Array.isArray(rows) && rows.length > 0) return true;
+    }
+    return false;
+  }
+
   private async isReferencedInBookingPayloads(
     commodity: CommodityUsageIdentity,
   ): Promise<boolean> {
     const nameKeys = this.usageNameKeys(commodity);
-    const commodityLabel = commodity.displayName || commodity.name;
-    const displayLabel = commodity.groupName
-      ? formatCommodityInGroupLabel(
-          commodityLabel,
-          commodity.groupName,
-        ).toLowerCase()
-      : '';
-
     for (const table of BOOKING_PAYLOAD_TABLES) {
-      const rows = await this.dataSource.query(
+      const rows: unknown = await this.dataSource.query(
         `
         SELECT 1
         FROM ${table}
-        WHERE deleted_at IS NULL
-          AND (
+        WHERE (
             (payload->>'commodityId') ~ '^[0-9]+$'
               AND (payload->>'commodityId')::int = $1
             OR (
@@ -103,20 +135,34 @@ export class TypeOrmCommodityUsageChecker implements CommodityUsageChecker {
             )
             OR (
               cardinality($2::text[]) > 0
+              AND LOWER(COALESCE(payload->>'commodityName', '')) = ANY($2::text[])
+            )
+            OR (
+              cardinality($2::text[]) > 0
               AND LOWER(COALESCE(payload->>'descriptionOfGoods', '')) = ANY($2::text[])
             )
             OR (
-              $3 <> ''
-              AND LOWER(COALESCE(payload->>'commodity', '')) = $3
+              cardinality($2::text[]) > 0
+              AND EXISTS (
+                SELECT 1
+                FROM unnest($2::text[]) AS candidate(name)
+                WHERE LOWER(COALESCE(payload->>'commodity', ''))
+                  LIKE candidate.name || ' in %'
+              )
             )
             OR (
-              $3 <> ''
-              AND LOWER(COALESCE(payload->>'descriptionOfGoods', '')) = $3
+              cardinality($2::text[]) > 0
+              AND EXISTS (
+                SELECT 1
+                FROM unnest($2::text[]) AS candidate(name)
+                WHERE LOWER(COALESCE(payload->>'descriptionOfGoods', ''))
+                  LIKE candidate.name || ' in %'
+              )
             )
           )
         LIMIT 1
         `,
-        [commodity.id, nameKeys, displayLabel],
+        [commodity.id, nameKeys],
       );
       if (Array.isArray(rows) && rows.length > 0) {
         return true;

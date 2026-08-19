@@ -82,6 +82,28 @@ describe('BookingDocumentsAdminController', () => {
       BookingDocumentType.BOOKING_CONFIRMATION,
       2,
       15,
+      '',
+    );
+  });
+
+  it('forwards the Booking No. search to the record list', async () => {
+    const listRecords = jest.fn().mockResolvedValue({ content: [] });
+    const controller = new BookingDocumentsAdminController({
+      listRecords,
+    } as unknown as BookingDocumentsService);
+
+    await controller.listRecords(
+      BookingDocumentType.BOOKING_CONFIRMATION,
+      '0',
+      '10',
+      'BK-2026',
+    );
+
+    expect(listRecords).toHaveBeenCalledWith(
+      BookingDocumentType.BOOKING_CONFIRMATION,
+      0,
+      10,
+      'BK-2026',
     );
   });
 

@@ -43,11 +43,12 @@ export class ArrivalNoticePreviewDto {
   @PreviewText(200) serviceMode?: string;
   @PreviewText(2_000) note?: string;
   @PreviewText(2_000) marks?: string;
-  /**
-   * Optional FF commodity id. When set (and description empty), validation
-   * fills descriptionOfGoods as `{commodityName} IN {groupName}`.
-   */
-  @IsOptional() @IsInt() @Min(1) commodityId?: number;
+  /** Independent Freight Forwarding catalog identities. */
+  @IsOptional() @IsInt() @Min(1) commodityTypeId?: number | null;
+  @IsOptional() @IsInt() @Min(1) commodityId?: number | null;
+  /** Stable catalog snapshots; never refresh these on historical reads. */
+  @PreviewText(300) commodityType?: string;
+  @PreviewText(300) commodityName?: string;
   /** Shipment-level goods description (PDF cargo “Description of Goods”). */
   @PreviewText(4_000) descriptionOfGoods?: string;
   @PreviewText(300) volume?: string;

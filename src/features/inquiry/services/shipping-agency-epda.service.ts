@@ -23,7 +23,7 @@ import { InquiryFieldChangeAction } from '../entities/inquiry-field-change-log.e
 import { InquiryFieldChangeService } from './inquiry-field-change.service';
 import { Port } from '../../ports/entities/port.entity';
 import { Commodity } from '../../commodities/entities/commodity.entity';
-import { CommoditiesService } from '../../commodities/commodities.service';
+import { CommodityType } from '../../commodities/entities/commodity-type.entity';
 import type { EpdaParameterValues } from '../../epda-parameters/entities/epda-parameter-set.entity';
 import { normalizeProvinceAreaCode } from '../../provinces/province-area';
 import {
@@ -52,7 +52,6 @@ export class ShippingAgencyEpdaService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(Port)
     private readonly portRepository: Repository<Port>,
-    private readonly commoditiesService: CommoditiesService,
     private readonly fieldChangeService: InquiryFieldChangeService,
     private readonly snapshotService: ShippingAgencyEpdaSnapshotService,
     private readonly codeAllocator: InquiryCodeAllocator,
@@ -88,6 +87,12 @@ export class ShippingAgencyEpdaService {
         repository,
         prefix,
       );
+      const catalog = await this.resolveCatalogSelection(
+        dto.commodityTypeId,
+        dto.commodityId,
+        serviceType.id,
+        manager,
+      );
 
       const row = repository.create({
         serviceType,
@@ -111,8 +116,11 @@ export class ShippingAgencyEpdaService {
         dwt: this.toNumericString(dto.dwt),
         loa: this.toNumericString(dto.loa),
         eta: this.toDateOnly(dto.eta),
-        cargoType: this.trimToNull(dto.cargoType),
-        cargoName: this.trimToNull(dto.cargoName),
+        commodityTypeId: dto.commodityTypeId ?? null,
+        commodityId: dto.commodityId ?? null,
+        cargoType:
+          catalog.commodityType?.name ?? this.trimToNull(dto.cargoType),
+        cargoName: catalog.commodity?.name ?? this.trimToNull(dto.cargoName),
         cargoNameOther: this.trimToNull(dto.cargoNameOther),
         cargoQuantity: this.toNumericString(dto.quantityTons),
         frtTaxType: this.trimToNull(dto.frtTaxType),
@@ -155,7 +163,7 @@ export class ShippingAgencyEpdaService {
         ),
       });
 
-      row.status = await this.epdaStatus(row, manager);
+      row.status = this.epdaStatus(row);
 
       const saved = await repository.save(row);
       // Audit: record the initial EPDA values (previous = empty) atomically.
@@ -214,6 +222,7 @@ export class ShippingAgencyEpdaService {
     );
     const before = epdaFieldSnapshot(row);
     this.applyCustomerVisibleUpdates(row, dto);
+    await this.applyCatalogSelectionUpdate(row, dto, manager);
     if (canonicalPort) row.portOfCall = canonicalPort.portOfCall;
 
     if (dto.quoteForm != null) {
@@ -283,7 +292,7 @@ export class ShippingAgencyEpdaService {
       previousWorkingParams,
       manager,
     );
-    row.status = await this.epdaStatus(row, manager);
+    row.status = this.epdaStatus(row);
 
     await this.touchProcessedBy(row, actorUserId, manager);
     const saved = await repository.save(row);
@@ -356,7 +365,7 @@ export class ShippingAgencyEpdaService {
     if (row.epdaLockedAt) {
       throw new ConflictException('EPDA is already locked');
     }
-    const missingFields = await this.missingCompleteFields(row, manager);
+    const missingFields = this.missingCompleteFields(row);
     if (missingFields.length > 0) {
       throw new BadRequestException(
         `Cannot lock incomplete EPDA. Missing: ${missingFields.join(', ')}`,
@@ -618,6 +627,72 @@ export class ShippingAgencyEpdaService {
     return serviceType;
   }
 
+  private async resolveCatalogSelection(
+    commodityTypeId: number | null | undefined,
+    commodityId: number | null | undefined,
+    serviceTypeId: number,
+    manager: EntityManager,
+  ): Promise<{
+    commodityType: CommodityType | null;
+    commodity: Commodity | null;
+  }> {
+    const commodityType =
+      commodityTypeId == null
+        ? null
+        : await manager.getRepository(CommodityType).findOne({
+            where: { id: commodityTypeId },
+          });
+    if (
+      commodityTypeId != null &&
+      (!commodityType || commodityType.serviceTypeId !== serviceTypeId)
+    ) {
+      throw new BadRequestException(
+        'Commodity Type does not belong to Shipping Agency Service',
+      );
+    }
+
+    const commodity =
+      commodityId == null
+        ? null
+        : await manager.getRepository(Commodity).findOne({
+            where: { id: commodityId },
+          });
+    if (
+      commodityId != null &&
+      (!commodity || commodity.serviceTypeId !== serviceTypeId)
+    ) {
+      throw new BadRequestException(
+        'Commodity does not belong to Shipping Agency Service',
+      );
+    }
+
+    return { commodityType, commodity };
+  }
+
+  private async applyCatalogSelectionUpdate(
+    row: ShippingAgencyInquiryEntity,
+    dto: UpdateShippingAgencyEpdaDto,
+    manager: EntityManager,
+  ): Promise<void> {
+    if (dto.commodityTypeId === undefined && dto.commodityId === undefined) {
+      return;
+    }
+    const catalog = await this.resolveCatalogSelection(
+      dto.commodityTypeId,
+      dto.commodityId,
+      row.serviceType.id,
+      manager,
+    );
+    if (dto.commodityTypeId !== undefined) {
+      row.commodityTypeId = dto.commodityTypeId;
+      if (catalog.commodityType) row.cargoType = catalog.commodityType.name;
+    }
+    if (dto.commodityId !== undefined) {
+      row.commodityId = dto.commodityId;
+      if (catalog.commodity) row.cargoName = catalog.commodity.name;
+    }
+  }
+
   private async touchProcessedBy(
     row: ShippingAgencyInquiryEntity,
     actorUserId: number,
@@ -787,19 +862,13 @@ export class ShippingAgencyEpdaService {
         );
   }
 
-  private async epdaStatus(
-    row: ShippingAgencyInquiryEntity,
-    manager: EntityManager,
-  ): Promise<InquiryStatus> {
-    return (await this.missingCompleteFields(row, manager)).length === 0
+  private epdaStatus(row: ShippingAgencyInquiryEntity): InquiryStatus {
+    return this.missingCompleteFields(row).length === 0
       ? InquiryStatus.COMPLETED
       : InquiryStatus.PROCESSING;
   }
 
-  private async missingCompleteFields(
-    row: ShippingAgencyInquiryEntity,
-    manager: EntityManager,
-  ): Promise<string[]> {
+  private missingCompleteFields(row: ShippingAgencyInquiryEntity): string[] {
     const requiredFields: Array<[string, unknown]> = [
       ['shipownerTo', row.toName],
       ['vesselName', row.mv],
@@ -813,18 +882,7 @@ export class ShippingAgencyEpdaService {
       ['portId', row.portId],
     ];
     const cargoName = this.trimToNull(row.cargoName ?? row.cargoNameOther);
-    if (
-      !cargoName &&
-      row.cargoType &&
-      (await manager.getRepository(Commodity).exists({
-        where: {
-          serviceTypeId: row.serviceType.id,
-          cargoType: this.commoditiesService.normalizeCargoTypePublic(
-            row.cargoType,
-          ),
-        },
-      }))
-    ) {
+    if (!cargoName && row.commodityId != null) {
       requiredFields.push(['cargoName', null]);
     }
     const purpose = this.normalizeOptionCode(row.purposeOfCalling);

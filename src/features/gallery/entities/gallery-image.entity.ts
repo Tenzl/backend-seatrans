@@ -10,6 +10,7 @@ import {
 import { Province } from '../../provinces/entities/province.entity';
 import { Port } from '../../ports/entities/port.entity';
 import { Commodity } from '../../commodities/entities/commodity.entity';
+import { CommodityType } from '../../commodities/entities/commodity-type.entity';
 
 @Entity('gallery_images')
 export class GalleryImage {
@@ -36,6 +37,13 @@ export class GalleryImage {
   @ManyToOne(() => Commodity, { nullable: false })
   @JoinColumn({ name: 'commodity_id' })
   commodity!: Commodity;
+
+  @Column({ name: 'commodity_type_id', type: 'int', nullable: true })
+  commodityTypeId!: number | null;
+
+  @ManyToOne(() => CommodityType, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'commodity_type_id' })
+  commodityType!: CommodityType | null;
 
   @ManyToOne(() => Province, { nullable: true })
   @JoinColumn({ name: 'province_id' })

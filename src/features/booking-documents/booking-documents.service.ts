@@ -206,8 +206,8 @@ export class BookingDocumentsService {
     return this.recordService.hardDelete(type, id);
   }
 
-  listRecords(type: BookingDocumentType, page = 0, size = 10) {
-    return this.recordService.list(type, page, size);
+  listRecords(type: BookingDocumentType, page = 0, size = 10, bookingNo = '') {
+    return this.recordService.list(type, page, size, bookingNo);
   }
 
   async createPreview(

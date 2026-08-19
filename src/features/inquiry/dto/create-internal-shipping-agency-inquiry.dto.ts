@@ -69,8 +69,20 @@ export class CreateInternalShippingAgencyInquiryDto {
   cargoType?: string;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  commodityTypeId?: number | null;
+
+  @IsOptional()
   @IsString()
   cargoName?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  commodityId?: number | null;
 
   @IsOptional()
   @IsString()

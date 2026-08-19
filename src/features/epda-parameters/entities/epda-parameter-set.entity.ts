@@ -24,10 +24,17 @@ export interface LoaTier {
   label: string;
 }
 
-/** Agency fee on cargo (BB section) keyed by cargo type code, USD/MT. */
+/** Agency fee on cargo (BB section) keyed by immutable Commodity Type ID. */
 export interface CargoAgencyRate {
-  /** Normalized cargo type code (e.g. IN_BULK, EQUIPMENT). */
-  code: string;
+  /** Authoritative identity for all migrated and newly written rows. */
+  commodityTypeId?: number;
+  /** Historical display/audit text; renaming the catalog Type must not rewrite it. */
+  typeNameSnapshot?: string;
+  /**
+   * Transition-only historical key. Runtime may read this only through the
+   * explicit legacy fallback; the write DTO does not accept it.
+   */
+  code?: string;
   label: string;
   rate: number;
 }
@@ -73,7 +80,7 @@ export interface EpdaParameterValues {
   moorUnmoorBerthTiers: GrtTier[];
   moorUnmoorBuoyTiers: GrtTier[];
   tugTiers: LoaTier[];
-  /** Per-cargo-type agency fee on cargo. Falls back to coeff bag/equip/bulk rates. */
+  /** Per-Type agency fee on cargo. Missing Types have no inferred/default rate. */
   cargoAgencyRates: CargoAgencyRate[];
 }
 

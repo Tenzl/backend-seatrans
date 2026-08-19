@@ -4,7 +4,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DeepPartial, EntityManager, IsNull, Not, Repository } from 'typeorm';
+import {
+  DeepPartial,
+  EntityManager,
+  ILike,
+  IsNull,
+  Not,
+  Repository,
+} from 'typeorm';
 import { saveWithOptimisticLock } from '../../shared/utils/optimistic-lock';
 import { containerRowHasCargo } from './an-container';
 import { BookingDocumentPayload } from './booking-document.types';
@@ -382,11 +389,19 @@ export class BookingDocumentRecordService {
     await repository.remove(record);
   }
 
-  async list(type: BookingDocumentType, page = 0, size = 10) {
+  async list(type: BookingDocumentType, page = 0, size = 10, bookingNo = '') {
     const safePage = Math.max(0, page);
     const safeSize = Math.min(50, Math.max(1, size));
+    const normalizedBookingNo = bookingNo.trim();
+    const where =
+      type === BookingDocumentType.BOOKING_CONFIRMATION && normalizedBookingNo
+        ? {
+            deletedAt: IsNull(),
+            bookingNumber: ILike(`%${normalizedBookingNo}%`),
+          }
+        : { deletedAt: IsNull() };
     const [records, totalElements] = await this.repository(type).findAndCount({
-      where: { deletedAt: IsNull() },
+      where,
       relations: { createdBy: true },
       order: { createdAt: 'DESC', id: 'DESC' },
       skip: safePage * safeSize,

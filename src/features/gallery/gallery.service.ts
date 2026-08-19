@@ -4,15 +4,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { GalleryImage } from './entities/gallery-image.entity';
 import { Commodity } from '../commodities/entities/commodity.entity';
+import { CommodityType } from '../commodities/entities/commodity-type.entity';
 import { Province } from '../provinces/entities/province.entity';
 import { Port } from '../ports/entities/port.entity';
-import { GalleryImageDto } from './dto/gallery-image.dto';
-import { CreateGalleryImageDto } from './dto/create-gallery-image.dto';
-import { UpdateGalleryImageDto } from './dto/update-gallery-image.dto';
-import { GalleryListQueryDto } from './dto/gallery-list-query.dto';
+import {
+  CreateGalleryImageWithTypeDto,
+  GalleryImageDto,
+  GalleryListWithTypeQueryDto,
+  UpdateGalleryImageWithTypeDto,
+} from './dto/gallery-image.dto';
 import { GalleryCountsQueryDto } from './dto/gallery-counts-query.dto';
 import { GalleryCommodityCountDto } from './dto/gallery-commodity-count.dto';
 import { CloudinaryService } from '../../shared/services/cloudinary.service';
@@ -36,12 +39,15 @@ export class GalleryService {
     'gallery.uploadedById',
     'gallery.serviceTypeId',
     'gallery.commodityId',
+    'gallery.commodityTypeId',
     'gallery.provinceCode',
     'gallery.createdAt',
     'gallery.updatedAt',
     'commodity.id',
     'commodity.displayName',
     'commodity.name',
+    'commodityType.id',
+    'commodityType.name',
     'province.id',
     'province.displayName',
     'province.name',
@@ -60,9 +66,10 @@ export class GalleryService {
     @InjectRepository(Port)
     private readonly portRepository: Repository<Port>,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly dataSource: DataSource,
   ) {}
 
-  async getPublicPaged(query: GalleryListQueryDto) {
+  async getPublicPaged(query: GalleryListWithTypeQueryDto) {
     const page = Math.max(0, Number(query.page ?? 0));
     const size = this.sanitizeLimit(
       Number(query.size ?? GalleryService.DEFAULT_LIMIT),
@@ -71,6 +78,7 @@ export class GalleryService {
     const qb = this.galleryRepository
       .createQueryBuilder('gallery')
       .leftJoin('gallery.commodity', 'commodity')
+      .leftJoin('gallery.commodityType', 'commodityType')
       .leftJoin('gallery.province', 'province')
       .leftJoin('gallery.port', 'port')
       .select([...GalleryService.LIST_SELECT])
@@ -85,6 +93,11 @@ export class GalleryService {
     if (query.commodityId) {
       qb.andWhere('commodity.id = :commodityId', {
         commodityId: query.commodityId,
+      });
+    }
+    if (query.commodityTypeId) {
+      qb.andWhere('gallery.commodity_type_id = :commodityTypeId', {
+        commodityTypeId: query.commodityTypeId,
       });
     }
     if (query.provinceId) {
@@ -116,6 +129,7 @@ export class GalleryService {
     const rows = await this.galleryRepository
       .createQueryBuilder('gallery')
       .leftJoin('gallery.commodity', 'commodity')
+      .leftJoin('gallery.commodityType', 'commodityType')
       .leftJoin('gallery.province', 'province')
       .leftJoin('gallery.port', 'port')
       .select([...GalleryService.LIST_SELECT])
@@ -126,7 +140,7 @@ export class GalleryService {
     return rows.map((item) => this.toDto(item));
   }
 
-  async getAdminImages(query: GalleryListQueryDto) {
+  async getAdminImages(query: GalleryListWithTypeQueryDto) {
     return this.getPublicPaged(query);
   }
 
@@ -176,7 +190,12 @@ export class GalleryService {
   async getById(id: number): Promise<GalleryImageDto> {
     const image = await this.galleryRepository.findOne({
       where: { id },
-      relations: { commodity: true, province: true, port: true },
+      relations: {
+        commodity: true,
+        commodityType: true,
+        province: true,
+        port: true,
+      },
     });
     if (!image) {
       throw new NotFoundException('Gallery image not found');
@@ -185,7 +204,7 @@ export class GalleryService {
   }
 
   async saveImageFromUrl(
-    dto: CreateGalleryImageDto,
+    dto: CreateGalleryImageWithTypeDto,
     uploadedById: number,
   ): Promise<GalleryImageDto> {
     if (!dto.imageUrl?.trim()) {
@@ -198,6 +217,7 @@ export class GalleryService {
       uploadedById,
       dto.serviceTypeId,
       dto.commodityId,
+      dto.commodityTypeId ?? null,
       dto.provinceId,
       dto.portId,
     );
@@ -207,7 +227,7 @@ export class GalleryService {
 
   async uploadSingle(
     file: Express.Multer.File | { buffer?: Buffer; path?: string },
-    payload: CreateGalleryImageDto,
+    payload: CreateGalleryImageWithTypeDto,
     uploadedById: number,
   ): Promise<GalleryImageDto> {
     if (!file) {
@@ -229,7 +249,7 @@ export class GalleryService {
 
   async uploadMultiple(
     files: Array<Express.Multer.File | { buffer?: Buffer; path?: string }>,
-    payload: CreateGalleryImageDto,
+    payload: CreateGalleryImageWithTypeDto,
     uploadedById: number,
   ): Promise<GalleryImageDto[]> {
     if (!files?.length) {
@@ -239,38 +259,63 @@ export class GalleryService {
     // Resolve FK metadata once for the whole batch (PERF-02).
     const refs = await this.resolveUploadRefs(payload);
 
-    return mapWithConcurrency(files, GALLERY_UPLOAD_CONCURRENCY, async (file) => {
-      const upload = await this.cloudinaryService.uploadImage(file, 'gallery');
-      const image = await this.createRecordWithRefs(
-        upload.secureUrl,
-        upload.publicId,
-        uploadedById,
-        payload.serviceTypeId,
-        refs,
-      );
-      return this.toDto(image);
-    });
+    return mapWithConcurrency(
+      files,
+      GALLERY_UPLOAD_CONCURRENCY,
+      async (file) => {
+        const upload = await this.cloudinaryService.uploadImage(
+          file,
+          'gallery',
+        );
+        const image = await this.createRecordWithRefs(
+          upload.secureUrl,
+          upload.publicId,
+          uploadedById,
+          payload.serviceTypeId,
+          refs,
+        );
+        return this.toDto(image);
+      },
+    );
   }
 
   async update(
     id: number,
-    dto: UpdateGalleryImageDto,
+    dto: UpdateGalleryImageWithTypeDto,
   ): Promise<GalleryImageDto> {
     const image = await this.galleryRepository.findOne({
       where: { id },
-      relations: { commodity: true, province: true, port: true },
+      relations: {
+        commodity: true,
+        commodityType: true,
+        province: true,
+        port: true,
+      },
     });
     if (!image) {
       throw new NotFoundException('Gallery image not found');
     }
 
-    if (dto.serviceTypeId !== undefined) {
-      image.serviceTypeId = dto.serviceTypeId;
-    }
-    if (dto.commodityId !== undefined) {
-      image.commodity = await this.requireCommodity(dto.commodityId);
+    const serviceTypeId = dto.serviceTypeId ?? image.serviceTypeId;
+    if (dto.serviceTypeId !== undefined || dto.commodityId !== undefined) {
+      image.commodity = await this.requireCommodity(
+        dto.commodityId ?? image.commodityId,
+        serviceTypeId,
+      );
       image.commodityId = image.commodity.id;
     }
+    if (dto.serviceTypeId !== undefined || dto.commodityTypeId !== undefined) {
+      const commodityTypeId =
+        dto.commodityTypeId === undefined
+          ? image.commodityTypeId
+          : dto.commodityTypeId;
+      image.commodityType =
+        commodityTypeId == null
+          ? null
+          : await this.requireCommodityType(commodityTypeId, serviceTypeId);
+      image.commodityTypeId = image.commodityType?.id ?? null;
+    }
+    image.serviceTypeId = serviceTypeId;
     if (dto.provinceId !== undefined) {
       image.province = await this.requireProvince(dto.provinceId);
     }
@@ -300,13 +345,16 @@ export class GalleryService {
     uploadedById: number,
     serviceTypeId: number,
     commodityId: number,
+    commodityTypeId: number | null,
     provinceId: number,
     portId: number,
   ): Promise<GalleryImage> {
     const refs = await this.resolveUploadRefs({
       commodityId,
+      commodityTypeId,
       provinceId,
       portId,
+      serviceTypeId,
     });
     return this.createRecordWithRefs(
       imageUrl,
@@ -319,15 +367,28 @@ export class GalleryService {
 
   private async resolveUploadRefs(payload: {
     commodityId: number;
+    commodityTypeId?: number | null;
     provinceId: number;
     portId: number;
-  }): Promise<{ commodity: Commodity; province: Province; port: Port }> {
-    const [commodity, province, port] = await Promise.all([
-      this.requireCommodity(payload.commodityId),
+    serviceTypeId: number;
+  }): Promise<{
+    commodity: Commodity;
+    commodityType: CommodityType | null;
+    province: Province;
+    port: Port;
+  }> {
+    const [commodity, commodityType, province, port] = await Promise.all([
+      this.requireCommodity(payload.commodityId, payload.serviceTypeId),
+      payload.commodityTypeId == null
+        ? null
+        : this.requireCommodityType(
+            payload.commodityTypeId,
+            payload.serviceTypeId,
+          ),
       this.requireProvince(payload.provinceId),
       this.requirePort(payload.portId),
     ]);
-    return { commodity, province, port };
+    return { commodity, commodityType, province, port };
   }
 
   private async createRecordWithRefs(
@@ -335,7 +396,12 @@ export class GalleryService {
     cloudinaryPublicId: string | null,
     uploadedById: number,
     serviceTypeId: number,
-    refs: { commodity: Commodity; province: Province; port: Port },
+    refs: {
+      commodity: Commodity;
+      commodityType: CommodityType | null;
+      province: Province;
+      port: Port;
+    },
   ): Promise<GalleryImage> {
     const image = this.galleryRepository.create({
       imageUrl,
@@ -344,6 +410,8 @@ export class GalleryService {
       serviceTypeId,
       commodity: refs.commodity,
       commodityId: refs.commodity.id,
+      commodityType: refs.commodityType,
+      commodityTypeId: refs.commodityType?.id ?? null,
       province: refs.province,
       port: refs.port,
       provinceCode:
@@ -353,14 +421,40 @@ export class GalleryService {
     return this.galleryRepository.save(image);
   }
 
-  private async requireCommodity(id: number): Promise<Commodity> {
+  private async requireCommodity(
+    id: number,
+    serviceTypeId: number,
+  ): Promise<Commodity> {
     const commodity = await this.commodityRepository.findOne({
       where: { id },
     });
     if (!commodity) {
       throw new BadRequestException('Commodity not found');
     }
+    if (commodity.serviceTypeId !== serviceTypeId) {
+      throw new BadRequestException(
+        'Commodity does not belong to the submitted Service',
+      );
+    }
     return commodity;
+  }
+
+  private async requireCommodityType(
+    id: number,
+    serviceTypeId: number,
+  ): Promise<CommodityType> {
+    const commodityType = await this.dataSource
+      .getRepository(CommodityType)
+      .findOne({ where: { id } });
+    if (!commodityType) {
+      throw new BadRequestException('Commodity Type not found');
+    }
+    if (commodityType.serviceTypeId !== serviceTypeId) {
+      throw new BadRequestException(
+        'Commodity Type does not belong to the submitted Service',
+      );
+    }
+    return commodityType;
   }
 
   private async requireProvince(id: number): Promise<Province> {
@@ -390,6 +484,8 @@ export class GalleryService {
       commodityId: item.commodity?.id ?? item.commodityId ?? 0,
       commodityName:
         item.commodity?.displayName ?? item.commodity?.name ?? 'Unknown',
+      commodityTypeId: item.commodityType?.id ?? item.commodityTypeId ?? null,
+      commodityTypeName: item.commodityType?.name ?? null,
       provinceId: item.province?.id ?? null,
       provinceName: item.province?.displayName ?? item.province?.name ?? null,
       portId: item.port?.id ?? null,

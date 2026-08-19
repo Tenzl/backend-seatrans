@@ -20,9 +20,11 @@ import type { Request } from 'express';
 import { AdminSection } from '../../shared/decorators/admin-section.decorator';
 import { PermanentDelete } from '../../shared/decorators/permanent-delete.decorator';
 import { GalleryService } from './gallery.service';
-import { CreateGalleryImageDto } from './dto/create-gallery-image.dto';
-import { UpdateGalleryImageDto } from './dto/update-gallery-image.dto';
-import { GalleryListQueryDto } from './dto/gallery-list-query.dto';
+import {
+  CreateGalleryImageWithTypeDto,
+  GalleryListWithTypeQueryDto,
+  UpdateGalleryImageWithTypeDto,
+} from './dto/gallery-image.dto';
 import { GalleryCountsQueryDto } from './dto/gallery-counts-query.dto';
 import { GalleryMultipartFieldsDto } from './dto/gallery-multipart-fields.dto';
 import { validateDto } from '../../shared/utils/validate-dto.util';
@@ -100,14 +102,24 @@ export class GalleryAdminController {
     const src = { ...body, ...query } as Record<string, unknown>;
     const parseId = (camel: string, snake: string): number =>
       Number(src[camel] ?? src[snake]);
-    const dto: CreateGalleryImageDto = {
+    const rawCommodityTypeId =
+      src.commodityTypeId ?? src.commodity_type_id ?? null;
+    const dto: CreateGalleryImageWithTypeDto = {
       provinceId: parseId('provinceId', 'province_id'),
       portId: parseId('portId', 'port_id'),
       serviceTypeId: parseId('serviceTypeId', 'service_type_id'),
       commodityId: parseId('commodityId', 'commodity_id'),
+      commodityTypeId:
+        rawCommodityTypeId == null || rawCommodityTypeId === ''
+          ? null
+          : Number(rawCommodityTypeId),
     };
     const invalid = Object.entries(dto)
-      .filter(([, v]) => !Number.isInteger(v) || v < 1)
+      .filter(
+        ([field, v]) =>
+          !(field === 'commodityTypeId' && v == null) &&
+          (!Number.isInteger(v) || Number(v) < 1),
+      )
       .map(([field]) => ({
         field,
         message: `${field} must be a positive integer`,
@@ -127,7 +139,7 @@ export class GalleryAdminController {
   @Post('from-url')
   @HttpCode(HttpStatus.CREATED)
   saveFromUrl(
-    @Body() dto: CreateGalleryImageDto,
+    @Body() dto: CreateGalleryImageWithTypeDto,
     @Req() req: Request & { user?: { id?: number } },
   ) {
     const uploaderUserId = req.user?.id;
@@ -137,7 +149,7 @@ export class GalleryAdminController {
   }
 
   @Get()
-  list(@Query() query: GalleryListQueryDto) {
+  list(@Query() query: GalleryListWithTypeQueryDto) {
     if (query.unpaged) {
       return this.galleryService.getAdminImagesAll(query.size);
     }
@@ -156,7 +168,7 @@ export class GalleryAdminController {
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateGalleryImageDto) {
+  update(@Param('id') id: string, @Body() dto: UpdateGalleryImageWithTypeDto) {
     return this.galleryService.update(Number(id), dto);
   }
 

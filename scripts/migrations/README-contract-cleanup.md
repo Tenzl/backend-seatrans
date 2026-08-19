@@ -5,6 +5,50 @@ dropped during an expand/data rollout. Each item needs a fresh backup, a
 read-only production preflight, an application release with zero references,
 and a separately approved contract migration.
 
+## Commodity catalog contract (approved, not automatically applied)
+
+`2026-08-19_commodity_groups_contract.sql` is limited to these four approved
+removals:
+
+1. `commodities.group_id`
+2. `commodities.required_image_count`
+3. `commodities.cargo_type`
+4. `commodity_groups`
+
+It also creates the replacement normalized unique index on Commodity name per
+Service. It must not alter or drop `cargo_types` or `package_types`.
+
+Run static verification without connecting to a database:
+
+```powershell
+node scripts/run-independent-commodity-catalog-migration.mjs `
+  --phase=contract --verify-static
+```
+
+Before apply, first test the exact backup restoration on a production-like
+copy. Apply then requires the exact database name, a fresh provider backup
+reference, the approved observation-window reference, the restore-test
+reference, and a new absolute logical-export path outside `backend2.0`:
+
+```powershell
+node scripts/run-independent-commodity-catalog-migration.mjs `
+  --phase=contract --apply `
+  --target-db=<exact-database-name> `
+  --backup-reference=<fresh-provider-backup> `
+  --observation-reference=<approved-observation> `
+  --restore-test-reference=<production-copy-restore-test> `
+  --logical-export=<new-absolute-external-json-path> `
+  --confirm=APPLY_COMMODITY_GROUPS_CONTRACT_20260819
+```
+
+The runner refuses an existing export path. Before any DDL it writes and
+re-reads a checksummed recovery envelope containing every `commodity_groups`
+row, the three legacy Commodity values keyed by ID, and the relevant column,
+constraint, and index metadata. The ledger records the export checksum and all
+three external evidence references. A checksum mismatch, stale successful
+ledger with legacy schema, duplicate independent Commodity key, unexpected
+foreign-key dependent, or change to the protected catalogs aborts the run.
+
 ## Confirmed future column drop
 
 ### `epda_parameter_set.member_port_ids`

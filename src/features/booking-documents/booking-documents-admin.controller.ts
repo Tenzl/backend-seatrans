@@ -40,11 +40,13 @@ export class BookingDocumentsAdminController {
     type: BookingDocumentType,
     @Query('page') page = '0',
     @Query('size') size = '10',
+    @Query('bookingNo') bookingNo = '',
   ) {
     return this.bookingDocuments.listRecords(
       type,
       this.toInteger(page, 0),
       this.toInteger(size, 10),
+      bookingNo,
     );
   }
 

@@ -2,12 +2,63 @@ import { normalizeProvinceAreaCode } from '../provinces/province-area';
 import type { Port } from '../ports/entities/port.entity';
 import type { EpdaParameterGroupMember } from './entities/epda-parameter-group-member.entity';
 import type {
+  CargoAgencyRate,
   EpdaParameterSet,
   EpdaParameterValues,
   PartialEpdaParameterValues,
 } from './entities/epda-parameter-set.entity';
 
 export type EpdaAreaKey = '1' | '2' | '3';
+
+export type CargoAgencyRateResolution =
+  | { source: 'TYPE_ID' | 'LEGACY_CODE'; rate: CargoAgencyRate }
+  | { source: 'MISSING'; rate: null };
+
+export interface CargoAgencyRateLookup {
+  commodityTypeId?: number | null;
+  /** Historical inquiry/rate key, not a Type name. */
+  legacyCode?: string | null;
+  /** Must be opted into by a caller that knows it is reading legacy storage. */
+  allowLegacyCodeFallback?: boolean;
+}
+
+/**
+ * Resolve a configured cargo rate by immutable Type ID. Code matching exists
+ * only as an explicit compatibility path for historical, ID-less JSON rows.
+ * Mutable Type names and coefficient defaults are intentionally never used.
+ */
+export function resolveCargoAgencyRate(
+  rates: readonly CargoAgencyRate[],
+  lookup: CargoAgencyRateLookup,
+): CargoAgencyRateResolution {
+  if (
+    Number.isInteger(lookup.commodityTypeId) &&
+    (lookup.commodityTypeId ?? 0) > 0
+  ) {
+    const byTypeId = rates.find(
+      (rate) => rate.commodityTypeId === lookup.commodityTypeId,
+    );
+    if (byTypeId) return { source: 'TYPE_ID', rate: byTypeId };
+  }
+
+  if (!lookup.allowLegacyCodeFallback) {
+    return { source: 'MISSING', rate: null };
+  }
+  const legacyCode = normalizeLegacyCargoRateCode(lookup.legacyCode);
+  if (!legacyCode) return { source: 'MISSING', rate: null };
+  const byLegacyCode = rates.find(
+    (rate) =>
+      rate.commodityTypeId == null &&
+      normalizeLegacyCargoRateCode(rate.code) === legacyCode,
+  );
+  return byLegacyCode
+    ? { source: 'LEGACY_CODE', rate: byLegacyCode }
+    : { source: 'MISSING', rate: null };
+}
+
+function normalizeLegacyCargoRateCode(value?: string | null): string {
+  return typeof value === 'string' ? value.trim().toUpperCase() : '';
+}
 
 const AGENCY_FEE_TIERS = [
   { maxGrt: 1000, amount: 0, label: '0 - 1,000' },
@@ -121,12 +172,12 @@ export function defaultValuesForArea(
 /** PS→port miles live on the EPDA form, not on tariff parameter sets. */
 export function sanitizeEpdaHours(
   hours?:
-    | (Partial<EpdaParameterValues['hours']> & Record<string, unknown>)
-    | null,
+    (Partial<EpdaParameterValues['hours']> & Record<string, unknown>) | null,
 ): Partial<EpdaParameterValues['hours']> | undefined {
   if (!hours || typeof hours !== 'object') return undefined;
   const next: Partial<EpdaParameterValues['hours']> = {};
-  if (hours.berthHours !== undefined) next.berthHours = Number(hours.berthHours);
+  if (hours.berthHours !== undefined)
+    next.berthHours = Number(hours.berthHours);
   if (hours.anchorageHours !== undefined) {
     next.anchorageHours = Number(hours.anchorageHours);
   }

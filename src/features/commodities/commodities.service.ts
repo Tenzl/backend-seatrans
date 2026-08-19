@@ -40,7 +40,6 @@ export class CommoditiesService {
     if (search) {
       const qb = this.commodityRepository
         .createQueryBuilder('commodity')
-        .leftJoinAndSelect('commodity.group', 'grp')
         .where(
           '(LOWER(commodity.name) LIKE :query OR LOWER(commodity.display_name) LIKE :query)',
           { query: `%${search.toLowerCase()}%` },
@@ -58,19 +57,22 @@ export class CommoditiesService {
 
     const commodities = await this.commodityRepository.find({
       where: serviceTypeId != null ? { serviceTypeId } : {},
-      relations: { group: true },
       order: { name: 'ASC' },
     });
 
     return commodities
-      .slice(0, this.sanitizeLimit(query.limit ?? CommoditiesService.DEFAULT_LIST_LIMIT))
+      .slice(
+        0,
+        this.sanitizeLimit(
+          query.limit ?? CommoditiesService.DEFAULT_LIST_LIMIT,
+        ),
+      )
       .map((item) => this.toDto(item));
   }
 
   async getById(id: number): Promise<CommodityDto> {
     const commodity = await this.commodityRepository.findOne({
       where: { id },
-      relations: { group: true },
     });
     if (!commodity) {
       throw new NotFoundException('Commodity not found');
@@ -79,114 +81,62 @@ export class CommoditiesService {
   }
 
   async create(dto: CreateCommodityDto): Promise<CommodityDto> {
-    const normalizedName = dto.name?.trim();
-    const normalizedDisplayName = dto.displayName?.trim();
-    if (!normalizedName || !normalizedDisplayName) {
+    const normalizedDisplayName = this.normalizeDisplayName(dto.displayName);
+    if (!normalizedDisplayName) {
+      throw new BadRequestException('Commodity displayName is required');
+    }
+    const normalizedName = dto.name?.trim()
+      ? this.normalizeName(dto.name)
+      : this.generateName(normalizedDisplayName);
+    if (!normalizedName) {
       throw new BadRequestException(
-        'Commodity name and displayName are required',
+        'Commodity name cannot be generated from displayName',
       );
     }
 
-    const cargoType = this.normalizeCargoType(dto.cargoType);
-    const duplicate = await this.commodityRepository.findOne({
-      where: {
-        serviceTypeId: dto.serviceTypeId,
-        cargoType,
-        name: normalizedName,
-      },
-    });
-
-    if (duplicate) {
-      throw new ConflictException(
-        'Commodity already exists in this service type and cargo type',
-      );
-    }
+    await this.assertUniqueName(dto.serviceTypeId, normalizedName);
 
     const commodity = this.commodityRepository.create({
       serviceTypeId: dto.serviceTypeId,
       name: normalizedName,
       displayName: normalizedDisplayName,
       description: dto.description?.trim() || null,
-      requiredImageCount: dto.requiredImageCount ?? 18,
-      cargoType,
-      groupId: null,
     });
 
-    const saved = await this.commodityRepository.save(commodity);
+    const saved = await this.saveOrConflict(commodity);
     return this.toDto(saved);
   }
 
   async update(id: number, dto: CreateCommodityDto): Promise<CommodityDto> {
     const commodity = await this.commodityRepository.findOne({
       where: { id },
-      relations: { group: true },
     });
     if (!commodity) {
       throw new NotFoundException('Commodity not found');
     }
 
-    const normalizedName = dto.name?.trim();
-    const normalizedDisplayName = dto.displayName?.trim();
-    if (!normalizedName || !normalizedDisplayName) {
-      throw new BadRequestException(
-        'Commodity name and displayName are required',
-      );
+    const normalizedDisplayName = this.normalizeDisplayName(dto.displayName);
+    if (!normalizedDisplayName) {
+      throw new BadRequestException('Commodity displayName is required');
     }
+    const normalizedName = dto.name?.trim()
+      ? this.normalizeName(dto.name)
+      : commodity.name;
 
-    // Only re-validate when a cargo type is explicitly sent. Editing a legacy
-    // commodity (junk stored type) without touching it keeps its value as-is
-    // rather than failing the save.
-    const cargoType =
-      dto.cargoType !== undefined
-        ? this.normalizeCargoType(dto.cargoType)
-        : commodity.cargoType;
-
-    if (commodity.groupId != null) {
-      const duplicateInGroup = await this.commodityRepository.findOne({
-        where: {
-          groupId: commodity.groupId,
-          name: normalizedName,
-        },
-      });
-      if (duplicateInGroup && duplicateInGroup.id !== id) {
-        throw new ConflictException(
-          'Commodity already exists in this group',
-        );
-      }
-    } else {
-      const duplicate = await this.commodityRepository.findOne({
-        where: {
-          serviceTypeId: dto.serviceTypeId,
-          cargoType,
-          name: normalizedName,
-        },
-      });
-
-      if (duplicate && duplicate.id !== id) {
-        throw new ConflictException(
-          'Commodity already exists in this service type and cargo type',
-        );
-      }
-    }
+    await this.assertUniqueName(dto.serviceTypeId, normalizedName, id);
 
     commodity.serviceTypeId = dto.serviceTypeId;
     commodity.name = normalizedName;
     commodity.displayName = normalizedDisplayName;
     commodity.description = dto.description?.trim() || null;
-    commodity.requiredImageCount =
-      dto.requiredImageCount ?? commodity.requiredImageCount;
-    if (dto.cargoType !== undefined) {
-      commodity.cargoType = cargoType;
-    }
 
-    const updated = await this.commodityRepository.save(commodity);
+    const updated = await this.saveOrConflict(commodity);
     return this.toDto(updated);
   }
 
   async delete(id: number): Promise<void> {
     const commodity = await this.commodityRepository.findOne({
       where: { id },
-      relations: { group: true },
     });
     if (!commodity) {
       throw new NotFoundException('Commodity not found');
@@ -197,7 +147,6 @@ export class CommoditiesService {
         id: commodity.id,
         name: commodity.name,
         displayName: commodity.displayName,
-        groupName: commodity.group?.name ?? null,
       })
     ) {
       throw new ConflictException(CommoditiesService.IN_USE_MESSAGE);
@@ -215,59 +164,78 @@ export class CommoditiesService {
     }
   }
 
-  /** Shared with CommodityGroupsService for consistent cargo-type validation. */
-  normalizeCargoTypePublic(value?: string): string {
-    return this.normalizeCargoType(value);
-  }
-
   toDto(item: Commodity): CommodityDto {
     return {
       id: item.id,
       serviceTypeId: item.serviceTypeId,
-      groupId: item.groupId ?? item.group?.id ?? null,
-      groupName: item.group?.name ?? null,
       name: item.name,
       displayName: item.displayName,
       description: item.description,
-      requiredImageCount: item.requiredImageCount,
-      cargoType: item.cargoType,
+      createdAt: item.createdAt.toISOString(),
+      updatedAt: item.updatedAt.toISOString(),
     };
   }
 
-  /** Cargo types are a FIXED set — anything else is rejected (no more junk types). */
-  private static readonly ALLOWED_CARGO_TYPES = [
-    'IN_BULK',
-    'IN_BAG_PACK',
-    'IN_EQUIPMENT',
-  ];
+  private normalizeName(value: string): string {
+    return value?.trim().replace(/\s+/g, ' ') ?? '';
+  }
 
-  /**
-   * Canonicalize a cargo type to one of the three allowed codes. Common legacy
-   * variants are mapped; anything outside the set is rejected so values like
-   * "BREAK BULK" / "PROJECT CARGO" can never be persisted again.
-   */
-  private normalizeCargoType(value?: string): string {
-    const raw = value?.trim();
-    if (!raw) return 'IN_BULK';
+  private normalizeDisplayName(value: string): string {
+    return value?.trim().replace(/\s+/g, ' ') ?? '';
+  }
 
-    const key = raw.toUpperCase().replace(/[\s-]+/g, '_');
-    const mapped =
-      key === 'BULK' || key === 'INBULK'
-        ? 'IN_BULK'
-        : key === 'EQUIPMENT' || key === 'INEQUIPMENT'
-          ? 'IN_EQUIPMENT'
-          : ['IN_BAGS', 'INBAGS', 'BAG_PACK', 'BAGPACK', 'INBAGPACK'].includes(
-                key,
-              )
-            ? 'IN_BAG_PACK'
-            : key;
+  private generateName(displayName: string): string {
+    return displayName
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[đĐ]/g, (value) => (value === 'đ' ? 'd' : 'D'))
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 100)
+      .replace(/_+$/g, '');
+  }
 
-    if (!CommoditiesService.ALLOWED_CARGO_TYPES.includes(mapped)) {
-      throw new BadRequestException(
-        `Invalid cargo type "${value}". Allowed: ${CommoditiesService.ALLOWED_CARGO_TYPES.join(', ')}`,
+  private normalizedNameKey(value: string): string {
+    return this.normalizeName(value)
+      .replace(/[\s_/-]+/g, ' ')
+      .toLocaleLowerCase('en-US');
+  }
+
+  private async assertUniqueName(
+    serviceTypeId: number,
+    name: string,
+    excludeId?: number,
+  ): Promise<void> {
+    const rows = await this.commodityRepository.find({
+      where: { serviceTypeId },
+    });
+    const key = this.normalizedNameKey(name);
+    if (
+      rows.some(
+        (row) =>
+          row.id !== excludeId && this.normalizedNameKey(row.name) === key,
+      )
+    ) {
+      throw new ConflictException(
+        'Commodity name already exists for this Service',
       );
     }
-    return mapped;
+  }
+
+  private async saveOrConflict(commodity: Commodity): Promise<Commodity> {
+    try {
+      return await this.commodityRepository.save(commodity);
+    } catch (error) {
+      const databaseCode = (error as { driverError?: { code?: string } } | null)
+        ?.driverError?.code;
+      if (databaseCode === '23505') {
+        throw new ConflictException(
+          'Commodity name already exists for this Service',
+        );
+      }
+      throw error;
+    }
   }
 
   private sanitizeLimit(limit: number): number {

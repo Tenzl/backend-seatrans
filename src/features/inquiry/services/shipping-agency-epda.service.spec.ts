@@ -6,6 +6,7 @@ import { User } from '../../auth/entities/user.entity';
 import { ServiceType } from '../../logistics/entities/service-type.entity';
 import { Port } from '../../ports/entities/port.entity';
 import { Commodity } from '../../commodities/entities/commodity.entity';
+import { CommodityType } from '../../commodities/entities/commodity-type.entity';
 import { ShippingAgencyEpdaSnapshotService } from './shipping-agency-epda-snapshot.service';
 import { InquiryCodeAllocator } from './inquiry-code-allocator';
 import { InquiryRepositoryRegistry } from './inquiry-repository.registry';
@@ -102,6 +103,9 @@ describe('ShippingAgencyEpdaService increment 1', () => {
         if (entity === Commodity) {
           return commodityRepository;
         }
+        if (entity === CommodityType) {
+          return commodityTypeRepository;
+        }
         throw new Error('Unexpected transaction repository');
       }),
       query: jest.fn().mockResolvedValue(undefined),
@@ -151,6 +155,36 @@ describe('ShippingAgencyEpdaService increment 1', () => {
     };
     const commodityRepository = {
       exists: jest.fn().mockResolvedValue(true),
+      findOne: jest
+        .fn()
+        .mockImplementation(({ where }: { where: { id: number } }) =>
+          Promise.resolve(
+            where.id === 202
+              ? {
+                  id: 202,
+                  serviceTypeId: serviceType.id,
+                  name: 'RICE',
+                  displayName: 'Rice',
+                }
+              : null,
+          ),
+        ),
+    };
+    const commodityTypeRepository = {
+      findOne: jest
+        .fn()
+        .mockImplementation(({ where }: { where: { id: number } }) =>
+          Promise.resolve(
+            where.id === 101
+              ? {
+                  id: 101,
+                  serviceTypeId: serviceType.id,
+                  code: 'IN_BULK',
+                  name: 'In bulk',
+                }
+              : null,
+          ),
+        ),
     };
     const effectiveParameters = {
       hours: { berthHours: 64 },
@@ -158,9 +192,6 @@ describe('ShippingAgencyEpdaService increment 1', () => {
     };
     const epdaParametersService = {
       getEffective: jest.fn().mockResolvedValue(effectiveParameters),
-    };
-    const commoditiesService = {
-      normalizeCargoTypePublic: jest.fn((value: string) => value),
     };
     const repositories = new InquiryRepositoryRegistry(
       inquiryRepository as unknown as Repository<ShippingAgencyInquiryEntity>,
@@ -174,7 +205,6 @@ describe('ShippingAgencyEpdaService increment 1', () => {
       serviceTypeRepository as never,
       userRepository as never,
       portRepository as never,
-      commoditiesService as never,
       fieldChangeService as never,
       new ShippingAgencyEpdaSnapshotService(epdaParametersService as never),
       new InquiryCodeAllocator(),
@@ -188,6 +218,7 @@ describe('ShippingAgencyEpdaService increment 1', () => {
       transaction,
       portRepository,
       commodityRepository,
+      commodityTypeRepository,
       userRepository,
       fieldChangeService,
       transactionManager,
@@ -217,7 +248,7 @@ describe('ShippingAgencyEpdaService increment 1', () => {
         dwt: 10000,
         grt: 8000,
         loa: 150,
-        cargoType: 'IN_BULK',
+        cargoType: 'In bulk',
         cargoNameOther: 'Project cargo',
         purposeOfCalling: 'MUC_DICH_KHAC',
         quantityTons: 1250,
@@ -247,6 +278,205 @@ describe('ShippingAgencyEpdaService increment 1', () => {
       }),
     );
     expect(inquiryRepository.create).not.toHaveBeenCalled();
+  });
+
+  it('resolves independent same-Service Type and Commodity IDs into name snapshots', async () => {
+    const {
+      service,
+      transactionalRepository,
+      commodityTypeRepository,
+      commodityRepository,
+    } = setup();
+
+    const result = await service.createInternalInquiry(
+      {
+        portId: 21,
+        commodityTypeId: 101,
+        commodityId: 202,
+      },
+      actor.id,
+    );
+
+    expect(commodityTypeRepository.findOne).toHaveBeenCalledWith({
+      where: { id: 101 },
+    });
+    expect(commodityRepository.findOne).toHaveBeenCalledWith({
+      where: { id: 202 },
+    });
+    expect(transactionalRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        commodityTypeId: 101,
+        commodityId: 202,
+        cargoType: 'In bulk',
+        cargoName: 'RICE',
+      }),
+    );
+    expect(result).toMatchObject({ commodityTypeId: 101, commodityId: 202 });
+  });
+
+  it('uses the selected Type ID and snapshots its current name even when its legacy code is stale', async () => {
+    const { service, commodityTypeRepository, transactionalRepository } =
+      setup();
+    commodityTypeRepository.findOne.mockResolvedValue({
+      id: 101,
+      serviceTypeId: serviceType.id,
+      code: 'IN_BULK',
+      name: 'Project and breakbulk cargo',
+    });
+
+    await service.createInternalInquiry(
+      {
+        portId: 21,
+        commodityTypeId: 101,
+        cargoType: 'IN_BULK',
+      },
+      actor.id,
+    );
+
+    expect(transactionalRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        commodityTypeId: 101,
+        cargoType: 'Project and breakbulk cargo',
+      }),
+    );
+  });
+
+  it('preserves a backfilled inquiry legacy cargo_type snapshot on unrelated updates', async () => {
+    const existing = {
+      id: 1,
+      serviceType,
+      serviceTypeId: serviceType.id,
+      user: customer,
+      userId: customer.id,
+      processedById: actor.id,
+      epdaLockedAt: null,
+      status: InquiryStatus.PROCESSING,
+      cargoType: 'IN_BULK',
+      cargoName: 'RICE',
+      commodityTypeId: 101,
+      commodityId: 202,
+      toName: 'Legacy owner',
+    };
+    const { service, commodityTypeRepository, transactionalRepository } =
+      setup(existing);
+
+    const result = await service.updateEpda(
+      1,
+      { shipownerTo: 'Updated owner' },
+      actor.id,
+    );
+
+    expect(commodityTypeRepository.findOne).not.toHaveBeenCalled();
+    expect(transactionalRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        commodityTypeId: 101,
+        cargoType: 'IN_BULK',
+        toName: 'Updated owner',
+      }),
+    );
+    expect(result).toMatchObject({
+      commodityTypeId: 101,
+      cargoType: 'IN_BULK',
+    });
+  });
+
+  it('preserves legacy string-only OTHER handling without catalog lookups', async () => {
+    const {
+      service,
+      transactionalRepository,
+      commodityTypeRepository,
+      commodityRepository,
+    } = setup();
+
+    await service.createInternalInquiry(
+      {
+        portId: 21,
+        cargoType: 'IN_EQUIPMENT',
+        cargoName: 'OTHER',
+        cargoNameOther: 'Project cargo',
+      },
+      actor.id,
+    );
+
+    expect(commodityTypeRepository.findOne).not.toHaveBeenCalled();
+    expect(commodityRepository.findOne).not.toHaveBeenCalled();
+    expect(transactionalRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        commodityTypeId: null,
+        commodityId: null,
+        cargoType: 'IN_EQUIPMENT',
+        cargoName: 'OTHER',
+        cargoNameOther: 'Project cargo',
+      }),
+    );
+  });
+
+  it('rejects a Commodity Type from another Service independently', async () => {
+    const { service, commodityTypeRepository, transactionalRepository } =
+      setup();
+    commodityTypeRepository.findOne.mockResolvedValue({
+      id: 101,
+      serviceTypeId: 88,
+      code: 'IN_BULK',
+      name: 'In bulk',
+    });
+
+    await expect(
+      service.createInternalInquiry(
+        { portId: 21, commodityTypeId: 101 },
+        actor.id,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(transactionalRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects a Commodity from another Service independently', async () => {
+    const { service, commodityRepository, transactionalRepository } = setup();
+    commodityRepository.findOne.mockResolvedValue({
+      id: 202,
+      serviceTypeId: 88,
+      name: 'RICE',
+      displayName: 'Rice',
+    });
+
+    await expect(
+      service.createInternalInquiry({ portId: 21, commodityId: 202 }, actor.id),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(transactionalRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('updates independent IDs without requiring a Type-Commodity pairing', async () => {
+    const existing = {
+      id: 1,
+      serviceType,
+      serviceTypeId: serviceType.id,
+      user: customer,
+      userId: customer.id,
+      processedById: actor.id,
+      epdaLockedAt: null,
+      status: InquiryStatus.PROCESSING,
+      cargoType: 'LEGACY TYPE',
+      cargoName: 'LEGACY CARGO',
+      commodityTypeId: null,
+      commodityId: null,
+    };
+    const { service, transactionalRepository } = setup(existing);
+
+    const result = await service.updateEpda(
+      1,
+      { commodityTypeId: 101, commodityId: 202 },
+      actor.id,
+    );
+
+    expect(transactionalRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        commodityTypeId: 101,
+        commodityId: 202,
+        cargoType: 'In bulk',
+        cargoName: 'RICE',
+      }),
+    );
+    expect(result).toMatchObject({ commodityTypeId: 101, commodityId: 202 });
   });
 
   it('persists a partial create as PROCESSING with nullable vessel fields', async () => {

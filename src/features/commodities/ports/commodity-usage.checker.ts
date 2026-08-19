@@ -4,8 +4,11 @@ export type CommodityUsageIdentity = {
   id: number;
   name: string;
   displayName: string;
-  /** Optional group name for matching booking displayLabel / AN description. */
-  groupName?: string | null;
+};
+
+export type CommodityTypeUsageIdentity = {
+  id: number;
+  name: string;
 };
 
 /**
@@ -14,4 +17,5 @@ export type CommodityUsageIdentity = {
  */
 export interface CommodityUsageChecker {
   isInUse(commodity: CommodityUsageIdentity): Promise<boolean>;
+  isTypeInUse?(commodityType: CommodityTypeUsageIdentity): Promise<boolean>;
 }

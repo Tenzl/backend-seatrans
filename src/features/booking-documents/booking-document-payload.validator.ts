@@ -6,7 +6,7 @@ import { In, IsNull, Repository } from 'typeorm';
 import { BookingPartner } from '../booking/entities/booking-partner.entity';
 import { CustomerType } from '../booking/enums/customer-type.enum';
 import { PartnerAdditionType } from '../booking/enums/partner-addition-type.enum';
-import { CommodityGroupsService } from '../commodities/commodity-groups.service';
+import { CommodityTypesService } from '../commodities/commodity-types.service';
 import { validationFailedException } from '../../shared/utils/validate-dto.util';
 import {
   anContainersToBlCargoTextFields,
@@ -60,7 +60,7 @@ export class BookingDocumentPayloadValidator {
     @InjectRepository(BookingPartner)
     private readonly partnerRepository?: Repository<BookingPartner>,
     @Optional()
-    private readonly commodityGroupsService?: CommodityGroupsService,
+    private readonly commodityTypesService?: CommodityTypesService,
   ) {}
 
   async validate(
@@ -77,9 +77,7 @@ export class BookingDocumentPayloadValidator {
 
     const body =
       type === BookingDocumentType.BILL_OF_LADING
-        ? this.foldLegacyBillOfLadingVoyage(
-            payload as Record<string, unknown>,
-          )
+        ? this.foldLegacyBillOfLadingVoyage(payload as Record<string, unknown>)
         : payload;
 
     const dto = plainToInstance(DTO_BY_TYPE[type], body, {
@@ -95,22 +93,18 @@ export class BookingDocumentPayloadValidator {
       throw validationFailedException(errors);
     }
     if (type === BookingDocumentType.BOOKING_CONFIRMATION) {
-      await this.resolveBookingCommodityLabel(
-        dto as BookingConfirmationPreviewDto,
-      );
-      this.normalizeBookingVolumes(dto as BookingConfirmationPreviewDto);
+      await this.resolveBookingCommodityLabel(dto);
+      this.normalizeBookingVolumes(dto);
     }
     if (type === BookingDocumentType.ARRIVAL_NOTICE) {
-      await this.resolveArrivalNoticeDescriptionFromCommodity(
-        dto as ArrivalNoticePreviewDto,
-      );
-      this.normalizeArrivalNoticeContainers(dto as ArrivalNoticePreviewDto);
+      await this.resolveArrivalNoticeDescriptionFromCommodity(dto);
+      this.normalizeArrivalNoticeContainers(dto);
     }
     if (type === BookingDocumentType.BILL_OF_LADING) {
-      this.normalizeBillOfLadingContainers(dto as BillOfLadingPreviewDto);
+      this.normalizeBillOfLadingContainers(dto);
     }
     if (type === BookingDocumentType.DELIVERY_ORDER) {
-      this.normalizeDeliveryOrderContainers(dto as DeliveryOrderPreviewDto);
+      this.normalizeDeliveryOrderContainers(dto);
     }
     await this.validateAndNormalizeParties(type, dto);
     return dto;
@@ -125,50 +119,85 @@ export class BookingDocumentPayloadValidator {
     dto.volume = normalized.volume;
   }
 
-  /**
-   * Map FF commodity picker → booking `commodity` display string
-   * (`{commodityName} IN {groupName}`).
-   */
+  /** Resolve each FF catalog ID independently and persist stable text snapshots. */
   private async resolveBookingCommodityLabel(
     dto: BookingConfirmationPreviewDto,
   ): Promise<void> {
-    if (dto.commodityId == null || !this.commodityGroupsService) return;
-    const label = await this.commodityGroupsService.resolveDisplayLabel(
-      dto.commodityId,
-    );
-    if (!label) {
+    if (this.commodityTypesService) {
+      const selection =
+        await this.commodityTypesService.resolveFreightForwardingSelection(
+          dto.commodityTypeId,
+          dto.commodityId,
+        );
+      dto.commodityType =
+        this.trimmed(dto.commodityType) ??
+        selection.commodityTypeName ??
+        undefined;
+      dto.commodityName =
+        this.trimmed(dto.commodityName) ?? selection.commodityName ?? undefined;
+      if (!this.trimmed(dto.commodity)) {
+        dto.commodity = this.formatCommodityDescription(
+          dto.commodityName,
+          dto.commodityType,
+        );
+      }
+      return;
+    }
+    if (dto.commodityTypeId != null || dto.commodityId != null) {
       throw new BadRequestException(
-        `Unknown commodityId ${dto.commodityId}`,
+        'Freight Forwarding Commodity catalogs are not configured',
       );
     }
-    dto.commodity = label;
   }
 
-  /**
-   * When AN omits descriptionOfGoods but sends commodityId, fill description
-   * with the same `{commodity} IN {group}` label used on booking.
-   */
+  /** Preserve stored descriptions; generate only when the snapshot is empty. */
   private async resolveArrivalNoticeDescriptionFromCommodity(
     dto: ArrivalNoticePreviewDto,
   ): Promise<void> {
-    if (dto.commodityId == null || !this.commodityGroupsService) return;
-    const existing = (dto.descriptionOfGoods ?? '').trim();
-    if (existing) return;
-    const label = await this.commodityGroupsService.resolveDisplayLabel(
-      dto.commodityId,
-    );
-    if (!label) {
+    if (this.commodityTypesService) {
+      const selection =
+        await this.commodityTypesService.resolveFreightForwardingSelection(
+          dto.commodityTypeId,
+          dto.commodityId,
+        );
+      dto.commodityType =
+        this.trimmed(dto.commodityType) ??
+        selection.commodityTypeName ??
+        undefined;
+      dto.commodityName =
+        this.trimmed(dto.commodityName) ?? selection.commodityName ?? undefined;
+      if (!this.trimmed(dto.descriptionOfGoods)) {
+        dto.descriptionOfGoods = this.formatCommodityDescription(
+          dto.commodityName,
+          dto.commodityType,
+        );
+      }
+      return;
+    }
+    if (dto.commodityTypeId != null || dto.commodityId != null) {
       throw new BadRequestException(
-        `Unknown commodityId ${dto.commodityId}`,
+        'Freight Forwarding Commodity catalogs are not configured',
       );
     }
-    dto.descriptionOfGoods = label;
+  }
+
+  private formatCommodityDescription(
+    commodityName?: string,
+    commodityType?: string,
+  ): string | undefined {
+    const commodity = this.trimmed(commodityName);
+    const type = this.trimmed(commodityType);
+    if (commodity && type) return `${commodity} IN ${type}`;
+    return commodity ?? type;
+  }
+
+  private trimmed(value?: string): string | undefined {
+    const normalized = value?.trim();
+    return normalized ? normalized : undefined;
   }
 
   /** Prefer containers; migrate legacy cargoRows; derive cargoRows + volume for PDF. */
-  private normalizeArrivalNoticeContainers(
-    dto: ArrivalNoticePreviewDto,
-  ): void {
+  private normalizeArrivalNoticeContainers(dto: ArrivalNoticePreviewDto): void {
     const containers = normalizeAnContainersPayload({
       containers: dto.containers,
       cargoRows: dto.cargoRows,
@@ -178,10 +207,7 @@ export class BookingDocumentPayloadValidator {
       descriptionOfGoods: dto.descriptionOfGoods,
       containers,
     });
-    dto.cargoRows = anContainersToCargoRows(
-      containers,
-      dto.descriptionOfGoods,
-    );
+    dto.cargoRows = anContainersToCargoRows(containers, dto.descriptionOfGoods);
     const derivedVolume = anContainersToVolumeText(containers);
     if (derivedVolume) {
       dto.volume = derivedVolume;

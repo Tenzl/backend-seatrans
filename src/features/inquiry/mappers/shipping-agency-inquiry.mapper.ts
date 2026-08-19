@@ -38,6 +38,8 @@ function shippingAgencyInternalEpdaFields(
   row: ShippingAgencyInquiryEntity,
 ): Record<string, unknown> {
   return {
+    commodityTypeId: row.commodityTypeId,
+    commodityId: row.commodityId,
     employeeInCharge: userSummary(row.processedBy),
     clientSubmittedBy:
       row.createdSource === InquiryCreatedSource.CUSTOMER_PORTAL

@@ -1,216 +1,279 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
+import { validate } from 'class-validator';
+import type { Repository } from 'typeorm';
+import { CommoditiesAdminController } from './commodities-admin.controller';
 import { CommoditiesService } from './commodities.service';
+import { CreateCommodityDto } from './dto/create-commodity.dto';
+import { Commodity } from './entities/commodity.entity';
 import type { CommodityUsageChecker } from './ports/commodity-usage.checker';
 
-function createService(overrides: {
-  commodity?: Record<string, unknown> | null;
-  duplicate?: Record<string, unknown> | null;
-  inUse?: boolean;
-  deleteError?: unknown;
-}) {
-  const findOneResults: Array<Record<string, unknown> | null> = [];
-  if (overrides.commodity !== undefined) {
-    findOneResults.push(overrides.commodity);
-  }
-  if (overrides.duplicate !== undefined) {
-    findOneResults.push(overrides.duplicate);
-  }
+const legacyRow: Commodity = {
+  id: 9,
+  serviceTypeId: 1,
+  name: 'WOOD_CHIPS',
+  displayName: 'Wood Chips',
+  description: null,
+  createdAt: new Date('2026-08-01T00:00:00.000Z'),
+  updatedAt: new Date('2026-08-02T00:00:00.000Z'),
+};
 
-  const commodityRepository = {
-    findOne: jest.fn().mockImplementation(async () => {
-      if (findOneResults.length > 0) {
-        return findOneResults.shift() ?? null;
-      }
-      return overrides.commodity ?? null;
-    }),
-    create: jest.fn().mockImplementation((value) => value),
-    save: jest.fn().mockImplementation(async (value) => ({
-      id: value.id ?? 42,
-      ...value,
-    })),
-    delete: jest.fn().mockImplementation(async () => {
-      if (overrides.deleteError) throw overrides.deleteError;
-    }),
+function createSubject(
+  options: {
+    rows?: Commodity[];
+    current?: Commodity | null;
+    inUse?: boolean;
+    deleteError?: unknown;
+  } = {},
+) {
+  const rows = options.rows ?? [];
+  const current = options.current === undefined ? legacyRow : options.current;
+  const repository = {
+    find: jest
+      .fn()
+      .mockImplementation(
+        (args: { where?: { serviceTypeId?: number } }): Promise<Commodity[]> =>
+          Promise.resolve(
+            args.where?.serviceTypeId == null
+              ? rows
+              : rows.filter(
+                  (row) => row.serviceTypeId === args.where?.serviceTypeId,
+                ),
+          ),
+      ),
+    findOne: jest
+      .fn()
+      .mockImplementation(
+        (args: { where: { id: number } }): Promise<Commodity | null> =>
+          Promise.resolve(current?.id === args.where.id ? current : null),
+      ),
+    createQueryBuilder: jest.fn(),
+    create: jest
+      .fn()
+      .mockImplementation(
+        (value: Partial<Commodity>): Commodity => value as Commodity,
+      ),
+    save: jest.fn().mockImplementation((value: Commodity): Promise<Commodity> =>
+      Promise.resolve({
+        createdAt: new Date('2026-08-19T00:00:00.000Z'),
+        updatedAt: new Date('2026-08-19T00:00:00.000Z'),
+        id: value.id ?? 42,
+        ...value,
+      }),
+    ),
+    delete: options.deleteError
+      ? jest.fn().mockRejectedValue(options.deleteError)
+      : jest.fn().mockResolvedValue({ affected: 1 }),
   };
-
-  const usageChecker: CommodityUsageChecker = {
-    isInUse: jest.fn().mockResolvedValue(overrides.inUse ?? false),
-  };
-
+  const isInUse = jest.fn().mockResolvedValue(options.inUse ?? false);
+  const usageChecker: CommodityUsageChecker = { isInUse };
   const service = new CommoditiesService(
-    commodityRepository as never,
+    repository as unknown as Repository<Commodity>,
     usageChecker,
   );
-
   return {
     service,
-    commodityRepository,
+    repository,
     usageChecker,
+    isInUse,
+    controller: new CommoditiesAdminController(service),
   };
 }
 
-describe('CommoditiesService.create', () => {
-  it('rejects duplicate name within the same service type and cargo type', async () => {
-    const { service, commodityRepository } = createService({
-      duplicate: {
-        id: 1,
-        name: 'WOOD_CHIPS',
-        cargoType: 'IN_BULK',
-        serviceTypeId: 1,
-      },
-    });
-
-    await expect(
-      service.create({
+describe('CommoditiesService independent admin contract', () => {
+  it('reads an independent Commodity row', async () => {
+    const { service } = createSubject({ rows: [legacyRow] });
+    const result = await service.list({ serviceTypeId: 1 });
+    expect(result).toEqual([
+      {
+        id: 9,
         serviceTypeId: 1,
         name: 'WOOD_CHIPS',
         displayName: 'Wood Chips',
-        cargoType: 'IN_BULK',
+        description: null,
+        createdAt: '2026-08-01T00:00:00.000Z',
+        updatedAt: '2026-08-02T00:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('rejects a normalized duplicate name within one Service', async () => {
+    const { service, repository } = createSubject({ rows: [legacyRow] });
+    await expect(
+      service.create({
+        serviceTypeId: 1,
+        name: ' wood   chips ',
+        displayName: 'Wood Chips',
       }),
     ).rejects.toBeInstanceOf(ConflictException);
-
-    expect(commodityRepository.findOne).toHaveBeenCalledWith({
-      where: {
-        serviceTypeId: 1,
-        cargoType: 'IN_BULK',
-        name: 'WOOD_CHIPS',
-      },
-    });
-    expect(commodityRepository.save).not.toHaveBeenCalled();
+    expect(repository.save).not.toHaveBeenCalled();
   });
 
-  it('allows the same name under a different cargo type', async () => {
-    const { service, commodityRepository } = createService({
-      duplicate: null,
+  it('allows the same normalized name in another Service', async () => {
+    const { service, repository } = createSubject({ rows: [legacyRow] });
+    const result = await service.create({
+      serviceTypeId: 4,
+      name: ' wood   chips ',
+      displayName: ' Logistics Wood Chips ',
     });
+    expect(repository.create).toHaveBeenCalledWith({
+      serviceTypeId: 4,
+      name: 'wood chips',
+      displayName: 'Logistics Wood Chips',
+      description: null,
+    });
+    expect(result.serviceTypeId).toBe(4);
+  });
 
-    const created = await service.create({
+  it('generates the internal name from displayName when code is omitted', async () => {
+    const { service, repository } = createSubject({ rows: [] });
+    const result = await service.create({
       serviceTypeId: 1,
-      name: 'WOOD_CHIPS',
-      displayName: 'Wood Chips',
-      cargoType: 'IN_BAG_PACK',
+      displayName: '  Wood chips & biomass  ',
+      description: ' Renewable fuel ',
     });
 
-    expect(commodityRepository.findOne).toHaveBeenCalledWith({
-      where: {
-        serviceTypeId: 1,
-        cargoType: 'IN_BAG_PACK',
-        name: 'WOOD_CHIPS',
-      },
+    expect(repository.create).toHaveBeenCalledWith({
+      serviceTypeId: 1,
+      name: 'WOOD_CHIPS_BIOMASS',
+      displayName: 'Wood chips & biomass',
+      description: 'Renewable fuel',
     });
-    expect(created.name).toBe('WOOD_CHIPS');
-    expect(created.cargoType).toBe('IN_BAG_PACK');
+    expect(result.name).toBe('WOOD_CHIPS_BIOMASS');
   });
-});
 
-describe('CommoditiesService.update', () => {
-  const existing = {
-    id: 9,
-    name: 'WOOD_CHIPS',
-    displayName: 'Wood Chips',
-    serviceTypeId: 1,
-    cargoType: 'IN_BULK',
-    requiredImageCount: 18,
-    description: null,
-  };
+  it('updates only independent fields', async () => {
+    const current = { ...legacyRow };
+    const { service, repository } = createSubject({ current, rows: [] });
+    const result = await service.update(9, {
+      serviceTypeId: 1,
+      name: ' BIOMASS ',
+      displayName: ' Biomass ',
+      description: ' Renewable fuel ',
+    });
+    expect(repository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'BIOMASS',
+        displayName: 'Biomass',
+        description: 'Renewable fuel',
+      }),
+    );
+    expect(result).not.toHaveProperty('cargoType');
+    expect(result).not.toHaveProperty('requiredImageCount');
+  });
 
-  it('rejects rename that collides within the same cargo type', async () => {
-    const { service, commodityRepository } = createService({
-      commodity: existing,
-      duplicate: {
-        id: 3,
-        name: 'COAL',
-        cargoType: 'IN_BULK',
-        serviceTypeId: 1,
-      },
+  it('preserves the internal name when an update omits code', async () => {
+    const current = { ...legacyRow };
+    const { service, repository } = createSubject({ current, rows: [] });
+
+    await service.update(9, {
+      serviceTypeId: 1,
+      displayName: 'Biomass cargo',
+      description: 'Renamed in Admin',
     });
 
+    expect(repository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'WOOD_CHIPS',
+        displayName: 'Biomass cargo',
+        description: 'Renamed in Admin',
+      }),
+    );
+  });
+
+  it('rejects a normalized duplicate during update', async () => {
+    const duplicate = { ...legacyRow, id: 2, name: ' coal ' };
+    const { service } = createSubject({
+      current: legacyRow,
+      rows: [legacyRow, duplicate],
+    });
     await expect(
       service.update(9, {
         serviceTypeId: 1,
         name: 'COAL',
         displayName: 'Coal',
-        cargoType: 'IN_BULK',
       }),
     ).rejects.toBeInstanceOf(ConflictException);
-
-    expect(commodityRepository.findOne).toHaveBeenNthCalledWith(2, {
-      where: {
-        serviceTypeId: 1,
-        cargoType: 'IN_BULK',
-        name: 'COAL',
-      },
-    });
-    expect(commodityRepository.save).not.toHaveBeenCalled();
   });
 
-  it('allows rename to a name that only exists under another cargo type', async () => {
-    const { service, commodityRepository } = createService({
-      commodity: existing,
-      duplicate: null,
-    });
-
-    const updated = await service.update(9, {
-      serviceTypeId: 1,
-      name: 'COAL',
-      displayName: 'Coal',
-      cargoType: 'IN_BULK',
-    });
-
-    expect(commodityRepository.findOne).toHaveBeenNthCalledWith(2, {
-      where: {
+  it('maps database uniqueness races to a conflict', async () => {
+    const { service, repository } = createSubject({ rows: [] });
+    repository.save.mockRejectedValueOnce({ driverError: { code: '23505' } });
+    await expect(
+      service.create({
         serviceTypeId: 1,
-        cargoType: 'IN_BULK',
         name: 'COAL',
-      },
-    });
-    expect(updated.name).toBe('COAL');
-    expect(commodityRepository.save).toHaveBeenCalled();
+        displayName: 'Coal',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 });
 
-describe('CommoditiesService.delete', () => {
-  const commodity = {
-    id: 9,
-    name: 'WOOD_CHIPS',
-    displayName: 'Wood Chips',
-    serviceTypeId: 1,
-  };
+describe('CreateCommodityDto', () => {
+  it('allows the internal name to be omitted for automatic generation', async () => {
+    const dto = Object.assign(new CreateCommodityDto(), {
+      serviceTypeId: 1,
+      displayName: 'Wood Chips',
+    });
 
-  it('hard-deletes when the commodity is unused', async () => {
-    const { service, commodityRepository } = createService({ commodity });
+    await expect(
+      validate(dto, { whitelist: true, forbidNonWhitelisted: true }),
+    ).resolves.toEqual([]);
+  });
 
+  it('forbids Group, Type, cargoType and quota request fields', async () => {
+    const dto = Object.assign(new CreateCommodityDto(), {
+      serviceTypeId: 1,
+      name: 'COAL',
+      displayName: 'Coal',
+      groupId: 1,
+      commodityTypeId: 2,
+      cargoType: 'IN_BULK',
+      requiredImageCount: 18,
+    });
+    const errors = await validate(dto, {
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    });
+    expect(errors.map((error) => error.property).sort()).toEqual([
+      'cargoType',
+      'commodityTypeId',
+      'groupId',
+      'requiredImageCount',
+    ]);
+  });
+});
+
+describe('CommoditiesService delete compatibility', () => {
+  it('passes independent identity data to the usage guard', async () => {
+    const { service, isInUse } = createSubject({ current: legacyRow });
     await service.delete(9);
-
-    expect(commodityRepository.delete).toHaveBeenCalledWith(9);
-  });
-
-  it('404s when the commodity does not exist', async () => {
-    const { service } = createService({ commodity: null });
-
-    await expect(service.delete(9)).rejects.toBeInstanceOf(NotFoundException);
-  });
-
-  it('blocks delete when usage checker reports in-use', async () => {
-    const { service, commodityRepository } = createService({
-      commodity,
-      inUse: true,
+    expect(isInUse).toHaveBeenCalledWith({
+      id: 9,
+      name: 'WOOD_CHIPS',
+      displayName: 'Wood Chips',
     });
-
-    await expect(service.delete(9)).rejects.toThrow(
-      CommoditiesService.IN_USE_MESSAGE,
-    );
-    expect(commodityRepository.delete).not.toHaveBeenCalled();
   });
 
-  it('maps FK violations to a conflict in-use message', async () => {
-    const { service } = createService({
-      commodity,
-      deleteError: { driverError: { code: '23503' } },
-    });
+  it('404s missing rows and maps FK references to conflict', async () => {
+    await expect(
+      createSubject({ current: null }).service.delete(9),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      createSubject({
+        current: legacyRow,
+        deleteError: { driverError: { code: '23503' } },
+      }).service.delete(9),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+});
 
-    await expect(service.delete(9)).rejects.toThrow(
-      CommoditiesService.IN_USE_MESSAGE,
-    );
+describe('CommoditiesAdminController', () => {
+  it('passes the Service-scoped list query through unchanged', async () => {
+    const { controller, service } = createSubject();
+    const listSpy = jest.spyOn(service, 'list').mockResolvedValue([]);
+    await expect(
+      controller.list({ serviceTypeId: 4, limit: 25 }),
+    ).resolves.toEqual([]);
+    expect(listSpy).toHaveBeenCalledWith({ serviceTypeId: 4, limit: 25 });
   });
 });

@@ -3,6 +3,7 @@ import {
   defaultValuesForArea,
   hydrateEpdaParameterRows,
   normalizeEpdaAreaKey,
+  resolveCargoAgencyRate,
   resolveEpdaParameterValues,
 } from './epda-parameter-resolution';
 import type { EpdaParameterGroupMember } from './entities/epda-parameter-group-member.entity';
@@ -99,5 +100,68 @@ describe('EPDA parameter resolution', () => {
   it('accepts only canonical area keys', () => {
     expect(normalizeEpdaAreaKey(' 3 ')).toBe('3');
     expect(normalizeEpdaAreaKey('MIDDLE')).toBeNull();
+  });
+
+  it('resolves renamed and custom cargo Types by immutable Type ID', () => {
+    const rates = [
+      {
+        commodityTypeId: 101,
+        typeNameSnapshot: 'Old catalog name',
+        code: 'IN_BULK',
+        label: 'Bulk fee',
+        rate: 0.05,
+      },
+      {
+        commodityTypeId: 999,
+        typeNameSnapshot: 'Custom project cargo',
+        label: 'Custom fee',
+        rate: 0.12,
+      },
+    ];
+
+    expect(
+      resolveCargoAgencyRate(rates, { commodityTypeId: 101 }),
+    ).toMatchObject({ source: 'TYPE_ID', rate: { rate: 0.05 } });
+    expect(
+      resolveCargoAgencyRate(rates, { commodityTypeId: 999 }),
+    ).toMatchObject({ source: 'TYPE_ID', rate: { rate: 0.12 } });
+  });
+
+  it('uses a documented code fallback only for historical rate JSON', () => {
+    const legacyRates = [{ code: 'IN_BULK', label: 'Bulk fee', rate: 0.05 }];
+
+    expect(
+      resolveCargoAgencyRate(legacyRates, {
+        commodityTypeId: 101,
+        legacyCode: 'IN_BULK',
+        allowLegacyCodeFallback: true,
+      }),
+    ).toEqual({ source: 'LEGACY_CODE', rate: legacyRates[0] });
+    expect(
+      resolveCargoAgencyRate(legacyRates, {
+        commodityTypeId: 101,
+        legacyCode: 'IN_BULK',
+      }),
+    ).toEqual({ source: 'MISSING', rate: null });
+  });
+
+  it('returns an explicit missing result without name inference or defaults', () => {
+    expect(
+      resolveCargoAgencyRate(
+        [
+          {
+            commodityTypeId: 101,
+            typeNameSnapshot: 'Bulk',
+            label: 'Bulk fee',
+            rate: 0.05,
+          },
+        ],
+        {
+          commodityTypeId: 999,
+          legacyCode: 'Custom project cargo',
+          allowLegacyCodeFallback: true,
+        },
+      ),
+    ).toEqual({ source: 'MISSING', rate: null });
   });
 });

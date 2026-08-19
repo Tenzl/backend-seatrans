@@ -5,13 +5,13 @@ import { FreightForwardingInquiryEntity } from '../inquiry/entities/freight-forw
 import { ShippingAgencyInquiryEntity } from '../inquiry/entities/shipping-agency-inquiry.entity';
 import { TotalLogisticsInquiryEntity } from '../inquiry/entities/total-logistics-inquiry.entity';
 import { ServiceType } from '../logistics/entities/service-type.entity';
-import { CommodityGroup } from './entities/commodity-group.entity';
+import { CommodityType } from './entities/commodity-type.entity';
 import { Commodity } from './entities/commodity.entity';
 import { CommoditiesService } from './commodities.service';
-import { CommodityGroupsService } from './commodity-groups.service';
+import { CommodityTypesService } from './commodity-types.service';
 import { CommoditiesController } from './commodities.controller';
 import { CommoditiesAdminController } from './commodities-admin.controller';
-import { CommodityGroupsAdminController } from './commodity-groups-admin.controller';
+import { CommodityTypesAdminController } from './commodity-types-admin.controller';
 import { COMMODITY_USAGE_CHECKER } from './ports/commodity-usage.checker';
 import { TypeOrmCommodityUsageChecker } from './ports/typeorm-commodity-usage.checker';
 
@@ -19,7 +19,7 @@ import { TypeOrmCommodityUsageChecker } from './ports/typeorm-commodity-usage.ch
   imports: [
     TypeOrmModule.forFeature([
       Commodity,
-      CommodityGroup,
+      CommodityType,
       ServiceType,
       GalleryImage,
       ShippingAgencyInquiryEntity,
@@ -34,13 +34,13 @@ import { TypeOrmCommodityUsageChecker } from './ports/typeorm-commodity-usage.ch
       useExisting: TypeOrmCommodityUsageChecker,
     },
     CommoditiesService,
-    CommodityGroupsService,
+    CommodityTypesService,
   ],
   controllers: [
     CommoditiesController,
     CommoditiesAdminController,
-    CommodityGroupsAdminController,
+    CommodityTypesAdminController,
   ],
-  exports: [CommoditiesService, CommodityGroupsService],
+  exports: [CommoditiesService, CommodityTypesService],
 })
 export class CommoditiesModule {}

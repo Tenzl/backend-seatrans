@@ -1,6 +1,7 @@
 import { Transform, Type, type TransformFnParams } from 'class-transformer';
 import { IsInt, Min } from 'class-validator';
-import { CreateGalleryImageDto } from './create-gallery-image.dto';
+import { IsOptional } from 'class-validator';
+import { CreateGalleryImageWithTypeDto } from './gallery-image.dto';
 
 function readMultipartField(
   source: unknown,
@@ -51,12 +52,27 @@ export class GalleryMultipartFieldsDto {
   @Min(1)
   commodityId!: number;
 
-  toCreateDto(): CreateGalleryImageDto {
+  @Transform(({ obj }: TransformFnParams) => {
+    const value = readMultipartField(
+      obj as unknown,
+      'commodityTypeId',
+      'commodity_type_id',
+    );
+    return value == null || value === '' ? null : Number(value);
+  })
+  @Type(() => Number)
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  commodityTypeId?: number | null;
+
+  toCreateDto(): CreateGalleryImageWithTypeDto {
     return {
       provinceId: this.provinceId,
       portId: this.portId,
       serviceTypeId: this.serviceTypeId,
       commodityId: this.commodityId,
+      commodityTypeId: this.commodityTypeId ?? null,
     };
   }
 }

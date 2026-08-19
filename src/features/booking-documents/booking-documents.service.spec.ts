@@ -441,6 +441,31 @@ describe('BookingDocumentsService', () => {
     });
   });
 
+  it('filters booking history by a partial, case-insensitive Booking No.', async () => {
+    let findOptions: unknown;
+    recordRepository.findAndCount.mockImplementation((options: unknown) => {
+      findOptions = options;
+      return Promise.resolve([[], 0]);
+    });
+
+    await service.listRecords(
+      BookingDocumentType.BOOKING_CONFIRMATION,
+      0,
+      10,
+      ' BK-2026 ',
+    );
+
+    const bookingNumber = (
+      findOptions as {
+        where?: { bookingNumber?: { _type?: string; _value?: string } };
+      }
+    ).where?.bookingNumber;
+    expect(bookingNumber).toMatchObject({
+      _type: 'ilike',
+      _value: '%BK-2026%',
+    });
+  });
+
   it.each([
     [BookingDocumentType.ARRIVAL_NOTICE, 'AN-preview.pdf'],
     [BookingDocumentType.BOOKING_CONFIRMATION, 'BOOKING-preview.pdf'],
