@@ -869,6 +869,12 @@ export class ShippingAgencyEpdaService {
   }
 
   private missingCompleteFields(row: ShippingAgencyInquiryEntity): string[] {
+    const positiveNumericFields = new Set([
+      'dwt',
+      'grt',
+      'loa',
+      'quantityTons',
+    ]);
     const requiredFields: Array<[string, unknown]> = [
       ['shipownerTo', row.toName],
       ['vesselName', row.mv],
@@ -890,8 +896,12 @@ export class ShippingAgencyEpdaService {
       requiredFields.push(['frtTaxType', row.frtTaxType]);
     }
     return requiredFields
-      .filter(([, value]) => {
+      .filter(([field, value]) => {
         if (value == null) return true;
+        if (positiveNumericFields.has(field)) {
+          const numeric = Number(value);
+          return !Number.isFinite(numeric) || numeric <= 0;
+        }
         if (typeof value === 'string') return value.trim() === '';
         if (typeof value === 'number') return !Number.isFinite(value);
         return false;

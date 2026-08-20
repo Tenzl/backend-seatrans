@@ -810,6 +810,36 @@ describe('ShippingAgencyEpdaService increment 1', () => {
     expect(transactionalRepository.save).not.toHaveBeenCalled();
   });
 
+  it.each(['dwt', 'grt', 'loa', 'cargoQuantity'] as const)(
+    'rejects locking an EPDA when required positive field %s is zero',
+    async (field) => {
+      const existing = {
+        ...completeEpdaFields,
+        [field]: '0',
+        id: 1,
+        serviceType,
+        user: customer,
+        userId: customer.id,
+        processedById: actor.id,
+        portId: 21,
+        epdaSnapshot: null,
+        epdaLockedAt: null,
+        status: InquiryStatus.COMPLETED,
+      };
+      const { service, transactionalRepository, effectiveParameters } =
+        setup(existing);
+
+      await expect(
+        service.lockEpda(
+          1,
+          { epdaSnapshot: { params: effectiveParameters } },
+          actor.id,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(transactionalRepository.save).not.toHaveBeenCalled();
+    },
+  );
+
   it('serializes lock attempts behind a pessimistic row lock', async () => {
     const existing = {
       ...completeEpdaFields,
