@@ -12,6 +12,8 @@ import { BookingDocumentPdfRenderer } from './rendering/booking-document-pdf.ren
 import { BookingPartner } from '../booking/entities/booking-partner.entity';
 import { CommoditiesModule } from '../commodities/commodities.module';
 import { User } from '../auth/entities/user.entity';
+import { BookingDocumentsV2Controller } from './booking-documents-v2.controller';
+import { BookingDocumentsV2Service } from './booking-documents-v2.service';
 
 @Module({
   imports: [
@@ -25,12 +27,13 @@ import { User } from '../auth/entities/user.entity';
     ]),
     CommoditiesModule,
   ],
-  controllers: [BookingDocumentsAdminController],
+  controllers: [BookingDocumentsAdminController, BookingDocumentsV2Controller],
   providers: [
     BookingDocumentRecordService,
     BookingDocumentPayloadValidator,
     BookingDocumentPdfRenderer,
     BookingDocumentsService,
+    BookingDocumentsV2Service,
   ],
 })
 export class BookingDocumentsModule {}

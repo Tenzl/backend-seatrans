@@ -20,6 +20,12 @@ export class Port {
   @Column({ length: 100 })
   name!: string;
 
+  @Column({ name: 'sub_name_1', type: 'varchar', length: 100, nullable: true })
+  subName1!: string | null;
+
+  @Column({ name: 'sub_name_2', type: 'varchar', length: 100, nullable: true })
+  subName2!: string | null;
+
   @Column({ name: 'port_of_call', length: 100 })
   portOfCall!: string;
 

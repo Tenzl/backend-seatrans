@@ -18,6 +18,16 @@ export class CreatePortDto {
   @IsOptional()
   @IsString()
   @MaxLength(100)
+  subName1?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  subName2?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
   portOfCall?: string;
 
   @IsOptional()

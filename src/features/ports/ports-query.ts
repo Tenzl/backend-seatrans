@@ -28,7 +28,7 @@ export class PortsQuery {
   private static readonly DEFAULT_OPTIONS_LIMIT = 30;
   private static readonly MAX_OPTIONS_LIMIT = 50;
   private static readonly NAME_OR_CODE_LIKE =
-    "(LOWER(port.name) LIKE :q OR LOWER(COALESCE(port.code, '')) LIKE :q)";
+    "(LOWER(port.name) LIKE :q OR LOWER(COALESCE(port.sub_name_1, '')) LIKE :q OR LOWER(COALESCE(port.sub_name_2, '')) LIKE :q OR LOWER(COALESCE(port.code, '')) LIKE :q)";
 
   constructor(private readonly portRepository: Repository<Port>) {}
 
@@ -103,6 +103,8 @@ export class PortsQuery {
     return rows.map((port) => ({
       id: port.id,
       name: port.name,
+      subName1: port.subName1 ?? null,
+      subName2: port.subName2 ?? null,
       provinceName: port.province?.name ?? null,
       code: port.code ?? null,
       countryCode: port.countryCode ?? null,
@@ -273,9 +275,9 @@ export class PortsQuery {
           `(LOWER(COALESCE(province.name, '')) LIKE $${values.length - 1} OR LOWER(COALESCE(province.display_name, '')) LIKE $${values.length})`,
         );
       } else if (searchIn === 'name') {
-        values.push(term, term);
+        values.push(term, term, term, term);
         conditions.push(
-          `(LOWER(COALESCE(port.name, '')) LIKE $${values.length - 1} OR LOWER(COALESCE(port.code, '')) LIKE $${values.length})`,
+          `(LOWER(COALESCE(port.name, '')) LIKE $${values.length - 3} OR LOWER(COALESCE(port.sub_name_1, '')) LIKE $${values.length - 2} OR LOWER(COALESCE(port.sub_name_2, '')) LIKE $${values.length - 1} OR LOWER(COALESCE(port.code, '')) LIKE $${values.length})`,
         );
       } else {
         const columnBySearchIn: Record<

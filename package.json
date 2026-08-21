@@ -31,6 +31,7 @@
     "db:migrate:booking-workflows": "node scripts/apply-booking-workflows.mjs",
     "db:migrate:booking-document-split": "node scripts/run-booking-document-table-split.mjs",
     "db:migrate:booking-agents": "node scripts/run-booking-agent-import.mjs",
+    "db:migrate:booking-relational": "node scripts/run-booking-documents-relational-migration.mjs",
     "db:seed:import-export-forms": "node scripts/seed-import-export-booking-forms.mjs"
   },
   "dependencies": {

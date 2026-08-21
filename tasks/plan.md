@@ -389,3 +389,201 @@ deployment and observation evidence.
 - The old Freight Forwarding `PALLETS` Type and its document snapshots are
   removed while booking `cargoVolumes` and document `containers` remain exact.
 - The separate Package Type API/runtime and `package_types` table are removed.
+
+## 2026-08-20 Booking document relational identity columns
+
+### Overview
+
+Promote stable Booking-document identity references from JSONB into nullable,
+indexed relational columns while keeping document text, cargo/container arrays
+and PDF-only fields in `payload`. The API contract remains unchanged: clients
+continue sending and receiving the same camelCase IDs, while the backend stores
+their canonical values in columns and reconstructs them at the boundary.
+
+### Architecture decisions
+
+- Keep the four existing document tables and the JSONB payload for flexible
+  form content.
+- Add only scalar IDs with proven FK/query value: Booking
+  `clientPartyId`, `picUserId`, `commodityTypeId`, `commodityId`; AN
+  `shipperPartyId`, `consigneePartyId`, `notifyPartyId`, `commodityTypeId`,
+  `commodityId`; BL `shipperPartyId`, `consigneePartyId`, `notifyPartyId`; DO
+  `consigneePartyId`, `notifyPartyId`.
+- Existing generated/indexed document numbers and Vessel/Voyage remain the
+  reporting columns; no additional text fields are promoted without a concrete
+  query or constraint.
+- Use expand/backfill/runtime/contract phases. Old payload IDs remain readable
+  until the relational runtime has been deployed and verified.
+
+### Task list
+
+#### Phase K — Inventory and expand
+
+35. Add a read-only preflight reporting malformed, orphaned and mismatched IDs.
+36. Add nullable columns, partial indexes and NOT VALID foreign keys through a
+    guarded forward-only expand migration.
+37. Map the new scalar columns on the four TypeORM record entities.
+
+#### Checkpoint K
+
+- Existing row and payload checksums are unchanged.
+- Every non-null payload ID is a positive integer resolving to its target.
+- Expand is rerunnable and old application code remains compatible.
+
+#### Phase L — Backfill and runtime cutover
+
+38. Backfill columns from JSONB with strict equality/orphan postflight checks.
+39. Store IDs only in columns on new writes and reconstruct the unchanged API
+    payload on reads; retain legacy JSON fallback during observation.
+40. Move partner/commodity usage checks and reporting filters from JSON scans to
+    indexed columns.
+
+#### Checkpoint L
+
+- Create/update/copy/prefill preserve every ID across all five workflow forms.
+- Relational columns and API payloads agree for all active and deleted records.
+- No runtime query depends exclusively on JSONB identity keys.
+
+#### Phase M — Contract and verification
+
+41. Remove migrated identity keys from JSONB only after compatible deployment,
+    observation and a checksummed backup; columns remain the source of truth.
+42. Run full migration, backend, Dashboard and recovery gates, then apply only
+    with explicit target confirmation.
+
+### Risks and mitigations
+
+| Risk | Impact | Mitigation |
+| --- | --- | --- |
+| Historical payload contains string/decimal IDs | High | Preflight classifies and aborts; never cast silently |
+| JSON and column values diverge during mixed deployment | High | Dual-read verification and equality postflight before contract |
+| Partner/commodity deletion breaks history | High | Nullable FK columns with `ON DELETE RESTRICT`; keep text snapshots in JSONB |
+| Adding indexes blocks writes | Medium | Create partial indexes concurrently outside the DDL transaction |
+| Contract removes data before consumers deploy | High | Separate contract confirmation, backup, deployment and observation evidence |
+
+### Approval gate
+
+The user's 2026-08-20 instruction approves implementation of Tasks 35–42.
+Live database apply remains a separate operator gate after offline tests,
+read-only preflight and backup/recovery evidence.
+
+## 2026-08-20 FreightEK per-container extraction and BL migration
+
+### Overview
+
+Build an isolated tool under `tools/freightek-container-import` that reads the
+310 canonical Shipment ID → Booking No. mappings, opens each authenticated
+FreightEK shipment instruction page, extracts the live per-container values,
+normalizes them to the current `AnContainer` contract and produces a complete
+audit report before any database write. A separately guarded migration phase
+will update only the matching Bill of Lading `payload.containers` records.
+
+### Findings from the supplied page
+
+- The sample uses an Element UI table and reports three container rows.
+- The copied `outerHTML` contains no `value="..."` attributes. Current values
+  live in DOM input properties, so parsing the pasted HTML cannot recover the
+  container data reliably.
+- Element UI renders hidden/fixed duplicate table fragments. Extraction must
+  select visible body rows only and verify them against the displayed total.
+- FreightEK exposes 14 container fields: Type, Container No., Seal No., Gross
+  Weight, Measurement, Tare, Package type, No of Pkgs, Over Weight, Net
+  Weight, Max Gross Weight, VGM, Note and Method. The current Seatrans
+  `AnContainer` contract supports all except Over Weight, Net Weight, Max Gross
+  Weight and VGM.
+
+### Architecture decisions
+
+1. Use the filtered workbook as the authoritative input manifest. Shipment ID
+   builds the source URL; canonical Booking No. (including `-1`/`-2`) resolves
+   the target Booking and its unique active BL.
+2. Use an unpacked Manifest V3 Chrome extension in the Chrome profile that is
+   already logged in to FreightEK. Its background worker reuses one selected
+   FreightEK tab and replaces only the Shipment ID segment through
+   `chrome.tabs.update`; it does not open 310 tabs and does not use Playwright.
+3. A content script reads live `HTMLInputElement.value` properties from the
+   visible Element UI table after the page becomes stable, never copied HTML
+   attributes. The extension does not read, export or persist credentials,
+   tokens or cookies; Chrome owns the existing authenticated session.
+4. Run sequentially with bounded retries and jitter. Persist the queue, current
+   index, results and checksums in `chrome.storage.local`, so a rerun skips
+   checksum-verified successes. A login redirect pauses the queue for the user
+   to authenticate in the same tab and explicitly resume.
+5. Save immutable raw evidence per Shipment ID plus normalized NDJSON, a
+   checksummed manifest and CSV reports for success, empty rows, auth failure,
+   selector drift and mapping conflicts.
+6. Normalize container type punctuation (`45’RF` → `45'RF`) and trim values,
+   while preserving original strings in raw evidence. Gross Weight and
+   Measurement remain per-container strings; Booking `grossWeight` is never
+   changed.
+7. Auto-map only when source row count/type multiset matches the current BL
+   placeholders. Match existing nonblank Container No. first, otherwise match
+   by Type bucket and stable row order. Any ambiguity skips the whole Shipment
+   and enters the conflict report.
+8. Capture all 14 FreightEK fields. Until the extra-field contract is approved,
+   migrate only the ten existing `AnContainer` fields and retain Over Weight,
+   Net Weight, Max Gross Weight and VGM in the raw/normalized audit output.
+9. Before apply, require a targeted checksummed backup of all 310 Booking/BL
+   rows, exact target DB confirmation and a clean dry-run. Do not overwrite a BL
+   that has conflicting nonblank user-entered container data.
+10. Apply in one guarded transaction with row locks, optimistic version
+    increment, migration-ledger evidence and postflight payload/checksum checks.
+
+### Dependency graph
+
+```text
+Current authenticated Chrome tab probe
+  └─ Live-DOM contract + stable visible-row selectors
+      └─ 310-row input manifest + Manifest V3 extension
+          └─ One-tab resumable navigator/extractor
+              └─ Normalizer + mapping validator
+                  └─ Extraction report (no DB writes)
+                      └─ DB dry-run + targeted backup
+                          └─ Explicit approval → apply → postflight
+```
+
+### Ordered task index
+
+43. Probe the current authenticated FreightEK tab and freeze the live-DOM
+    extraction contract.
+44. Scaffold the isolated Manifest V3 extension and the 310-row input manifest.
+45. Implement one-tab URL navigation, live-DOM extraction, persistent resume
+    state and raw evidence without Playwright.
+46. Normalize container fields and validate deterministic Shipment/Booking/BL
+    mapping.
+47. Run the resumable 310-shipment collection and produce exception reports.
+48. Implement a read-only database preflight, targeted backup and dry-run
+    migration plan.
+49. Apply only approved conflict-free rows and run checksum/postflight gates.
+
+### Checkpoints
+
+- After Tasks 43–44: sample extraction is proven in the already-open Chrome,
+  visible-DOM selectors are frozen and no secret is committed.
+- After Tasks 45–47: all 310 Shipment IDs are classified as success or explicit
+  failure; no database connection is required.
+- After Task 48: human reviews counts, conflicts, extra fields and recovery
+  evidence before any write.
+- After Task 49: container totals, type multisets and protected Booking/BL fields
+  match the preflight; rerun produces zero additional changes.
+
+### Risks and mitigations
+
+| Risk | Impact | Mitigation |
+| --- | --- | --- |
+| DOM outerHTML omits input values | High | Read live DOM properties from the content script |
+| Element UI duplicates hidden/fixed rows | High | Extract visible body only and reconcile displayed total |
+| Session expires mid-run | High | Detect login redirect, persist state, pause and resume in the same Chrome tab |
+| Site throttles or changes selectors | Medium | Sequential requests, jitter, bounded retry and selector-drift report |
+| MV3 service worker is suspended | Medium | Persist queue/results in `chrome.storage.local` and resume from tab/content-script events |
+| Duplicate Booking No. aliases | High | Use the canonical `-1`/`-2` mapping keyed by unique Shipment ID |
+| Source/container counts differ | High | No inference; skip shipment and report the exact mismatch |
+| Existing BL was edited by staff | High | Compare nonblank target values/baseline and refuse conflicting overwrite |
+| Four source fields have no target contract | Medium | Capture them losslessly; migrate only after an explicit schema/UI decision |
+
+### Approval gate
+
+The plan authorizes read-only probing and extension implementation after human
+review. Bulk collection uses the user's current authenticated Chrome tab and
+never exports its session. Database apply remains a separate explicit gate after
+the extraction report, backup and dry-run are reviewed.

@@ -105,18 +105,22 @@ describe('BookingDocumentsService', () => {
       9,
     );
 
-    expect(recordRepository.create).toHaveBeenCalledWith({
-      bookingId: null,
-      payload: {
-        anNumber: 'AN-001',
-        containers: [],
-        cargoRows: [],
-        descriptionOfGoods: '',
-      },
-      status: 'PROCESSING',
-      createdByUserId: 9,
-      updatedByUserId: 9,
-    });
+    expect(recordRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: null,
+        payload: {
+          anNumber: 'AN-001',
+          containers: [],
+          cargoRows: [],
+          descriptionOfGoods: '',
+        },
+        status: 'PROCESSING',
+        createdByUserId: 9,
+        updatedByUserId: 9,
+        documentNumberV2: 'AN-001',
+        presentationSchemaVersion: 1,
+      }),
+    );
     expect(result).toMatchObject({
       id: 41,
       documentType: BookingDocumentType.ARRIVAL_NOTICE,

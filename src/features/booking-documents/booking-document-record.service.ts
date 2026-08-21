@@ -8,13 +8,14 @@ import {
   DeepPartial,
   EntityManager,
   ILike,
+  In,
   IsNull,
   Not,
   Repository,
 } from 'typeorm';
 import { saveWithOptimisticLock } from '../../shared/utils/optimistic-lock';
-import { containerRowHasCargo } from './an-container';
 import { BookingDocumentPayload } from './booking-document.types';
+import { missingRequiredDocumentFields } from './booking-document-requirements';
 import { ArrivalNoticePreviewDto } from './dto/arrival-notice-preview.dto';
 import { BillOfLadingPreviewDto } from './dto/bill-of-lading-preview.dto';
 import { BookingConfirmationPreviewDto } from './dto/booking-confirmation-preview.dto';
@@ -27,6 +28,12 @@ import { DeliveryOrderRecord } from './entities/delivery-order-record.entity';
 import { BookingDocumentStatus } from './enums/booking-document-status.enum';
 import { BookingDocumentType } from './enums/booking-document-type.enum';
 import { BookingFlow } from './enums/booking-flow.enum';
+import {
+  nonBlankCargoVolumes,
+  nonBlankContainers,
+  parseReportNumber,
+  projectRelationalFields,
+} from './booking-document-relational-projector';
 
 const WORKFLOW_TYPES: Record<BookingFlow, BookingDocumentType[]> = {
   [BookingFlow.EXPORT]: [
@@ -46,48 +53,6 @@ type DocumentRecord = BookingRecord | ChildRecord;
 type WorkflowFields = {
   bookingFlow?: BookingFlow;
   bookingId?: number;
-};
-
-const REQUIRED_TEXT_FIELDS: Record<BookingDocumentType, string[]> = {
-  [BookingDocumentType.BOOKING_CONFIRMATION]: [
-    'bookingNumber',
-    'to',
-    'vesselVoyage',
-    'portOfLoading',
-    'portOfDischarge',
-    'commodity',
-    'pic',
-  ],
-  [BookingDocumentType.ARRIVAL_NOTICE]: [
-    'anNumber',
-    'date',
-    'agent',
-    'shipper',
-    'consignee',
-    'vesselVoyage',
-    'eta',
-    'portOfDischarge',
-    'descriptionOfGoods',
-  ],
-  [BookingDocumentType.BILL_OF_LADING]: [
-    'fblNumber',
-    'consignor',
-    'consignedToOrderOf',
-    'oceanVessel',
-    'portOfLoading',
-    'portOfDischarge',
-    'descriptionOfGoods',
-    'placeOfIssue',
-    'dateOfIssue',
-  ],
-  [BookingDocumentType.DELIVERY_ORDER]: [
-    'doNumber',
-    'date',
-    'deliverTo',
-    'vesselVoyage',
-    'portOfDischarge',
-    'descriptionOfGoods',
-  ],
 };
 
 const PRIMARY_NUMBER_FIELDS: Record<
@@ -154,6 +119,7 @@ export class BookingDocumentRecordService {
     const repository = this.repository(type, manager);
     const record = repository.create({
       payload: snapshot,
+      ...projectRelationalFields(type, snapshot),
       status: this.statusFor(type, snapshot),
       createdByUserId,
       updatedByUserId: createdByUserId,
@@ -161,13 +127,13 @@ export class BookingDocumentRecordService {
     } as DeepPartial<BookingDocumentRecordBase>);
 
     try {
-      return this.toResponse(
-        type,
-        await saveWithOptimisticLock(
-          () => repository.save(record),
-          'Document record was modified concurrently; reload and retry',
-        ),
+      const saved = await saveWithOptimisticLock(
+        () => repository.save(record),
+        'Document record was modified concurrently; reload and retry',
       );
+      if (manager)
+        await this.syncRepeatedRows(type, Number(saved.id), snapshot, manager);
+      return this.toResponse(type, saved);
     } catch (error) {
       const databaseCode = (error as { driverError?: { code?: string } } | null)
         ?.driverError?.code;
@@ -244,6 +210,7 @@ export class BookingDocumentRecordService {
     return {
       id: Number(booking.id),
       flow: booking.bookingFlow,
+      status: this.workflowStatusFor(booking.bookingFlow, documents),
       documents,
     };
   }
@@ -312,6 +279,7 @@ export class BookingDocumentRecordService {
       expectedVersion,
       {
         payload: snapshot,
+        ...projectRelationalFields(type, snapshot),
         status: this.statusFor(type, snapshot),
         updatedByUserId: actorUserId,
       },
@@ -408,8 +376,15 @@ export class BookingDocumentRecordService {
       take: safeSize,
     });
 
+    const workflowStatuses =
+      type === BookingDocumentType.BOOKING_CONFIRMATION
+        ? await this.workflowStatusesForBookings(records as BookingRecord[])
+        : new Map<number, BookingDocumentStatus>();
+
     return {
-      content: records.map((record) => this.toResponse(type, record)),
+      content: records.map((record) =>
+        this.toResponse(type, record, workflowStatuses.get(Number(record.id))),
+      ),
       totalElements,
       totalPages: totalElements === 0 ? 0 : Math.ceil(totalElements / safeSize),
       size: safeSize,
@@ -668,7 +643,7 @@ export class BookingDocumentRecordService {
     type: BookingDocumentType,
     payload: Record<string, unknown>,
   ): BookingDocumentStatus {
-    return this.missingRequiredFields(type, payload).length === 0
+    return missingRequiredDocumentFields(type, payload).length === 0
       ? BookingDocumentStatus.COMPLETED
       : BookingDocumentStatus.PROCESSING;
   }
@@ -677,30 +652,71 @@ export class BookingDocumentRecordService {
     type: BookingDocumentType,
     payload: Record<string, unknown>,
   ): string[] {
-    const missing = REQUIRED_TEXT_FIELDS[type].filter(
-      (field) =>
-        typeof payload[field] !== 'string' ||
-        payload[field].trim().length === 0,
+    return missingRequiredDocumentFields(type, payload);
+  }
+
+  private workflowStatusFor(
+    flow: BookingFlow,
+    documents: Partial<
+      Record<BookingDocumentType, { status: BookingDocumentStatus }>
+    >,
+  ): BookingDocumentStatus {
+    return WORKFLOW_TYPES[flow].every(
+      (documentType) =>
+        documents[documentType]?.status === BookingDocumentStatus.COMPLETED,
+    )
+      ? BookingDocumentStatus.COMPLETED
+      : BookingDocumentStatus.PROCESSING;
+  }
+
+  private async workflowStatusesForBookings(
+    bookings: BookingRecord[],
+  ): Promise<Map<number, BookingDocumentStatus>> {
+    const ids = bookings.map((booking) => Number(booking.id));
+    if (ids.length === 0) return new Map();
+    const childTypes = [
+      BookingDocumentType.BILL_OF_LADING,
+      BookingDocumentType.ARRIVAL_NOTICE,
+      BookingDocumentType.DELIVERY_ORDER,
+    ] as const;
+    const childGroups = await Promise.all(
+      childTypes.map(async (type) => ({
+        type,
+        records: (await this.repository(type).find({
+          where: { bookingId: In(ids), deletedAt: IsNull() } as never,
+        })) as ChildRecord[],
+      })),
     );
-    if (type === BookingDocumentType.BOOKING_CONFIRMATION) {
-      const volumes = payload.cargoVolumes;
-      const hasVolume =
-        (typeof payload.volume === 'string' && payload.volume.trim() !== '') ||
-        (typeof volumes === 'object' &&
-          volumes !== null &&
-          Object.values(volumes).some(
-            (value) => typeof value === 'number' && value > 0,
-          ));
-      if (!hasVolume) missing.push('cargoVolumes');
-    } else {
-      const containers = Array.isArray(payload.containers)
-        ? payload.containers
-        : [];
-      if (!containers.some((row) => containerRowHasCargo(row as never))) {
-        missing.push('containers');
+    const documentsByBooking = new Map<
+      number,
+      Partial<Record<BookingDocumentType, { status: BookingDocumentStatus }>>
+    >();
+    for (const booking of bookings) {
+      documentsByBooking.set(Number(booking.id), {
+        [BookingDocumentType.BOOKING_CONFIRMATION]: {
+          status: booking.status,
+        },
+      });
+    }
+    for (const group of childGroups) {
+      for (const record of group.records) {
+        if (record.bookingId == null) continue;
+        const documents = documentsByBooking.get(Number(record.bookingId));
+        if (documents) documents[group.type] = { status: record.status };
       }
     }
-    return missing;
+    return new Map(
+      bookings.map((booking) => {
+        const id = Number(booking.id);
+        return [
+          id,
+          this.workflowStatusFor(
+            booking.bookingFlow,
+            documentsByBooking.get(id) ?? {},
+          ),
+        ];
+      }),
+    );
   }
 
   private async casUpdate(
@@ -737,7 +753,119 @@ export class BookingDocumentRecordService {
       where: { id: Number(record.id) },
     });
     if (!updated) throw new NotFoundException('Document record not found');
+    if (manager && changes.payload && typeof changes.payload === 'object') {
+      await this.syncRepeatedRows(
+        type,
+        Number(record.id),
+        changes.payload as Record<string, unknown>,
+        manager,
+      );
+    }
     return this.toResponse(type, updated);
+  }
+
+  /** Dual-write repeated rows during the expand phase. No placeholder row is persisted. */
+  private async syncRepeatedRows(
+    type: BookingDocumentType,
+    documentId: number,
+    payload: Record<string, unknown>,
+    manager: EntityManager,
+  ): Promise<void> {
+    if (type === BookingDocumentType.BOOKING_CONFIRMATION) {
+      await manager.query(
+        'DELETE FROM booking_cargo_volumes WHERE booking_id = $1',
+        [documentId],
+      );
+      for (const row of nonBlankCargoVolumes(payload)) {
+        await manager.query(
+          'INSERT INTO booking_cargo_volumes (booking_id, row_order, container_type_code, quantity) VALUES ($1,$2,$3,$4)',
+          [documentId, row.rowOrder, row.containerTypeCode, row.quantity],
+        );
+      }
+      return;
+    }
+
+    const table = {
+      [BookingDocumentType.ARRIVAL_NOTICE]: 'arrival_notice_containers',
+      [BookingDocumentType.DELIVERY_ORDER]: 'delivery_order_containers',
+      [BookingDocumentType.BILL_OF_LADING]: 'bill_of_lading_containers',
+    }[type];
+    await manager.query(`DELETE FROM ${table} WHERE document_id = $1`, [
+      documentId,
+    ]);
+    for (const [rowOrder, source] of nonBlankContainers(payload).entries()) {
+      const row = source;
+      const gross = parseReportNumber(row.grossWeight);
+      const measurement = parseReportNumber(row.measurement);
+      const tare = parseReportNumber(row.tare);
+      const packages = parseReportNumber(row.noOfPkgs);
+      const packageTypeId = await this.resolvePackageTypeId(row, manager);
+      const packageCount =
+        packages.numeric && /^\d+$/.test(packages.numeric)
+          ? Number(packages.numeric)
+          : null;
+      await manager.query(
+        `INSERT INTO ${table} (
+          document_id,row_order,container_type_code,container_no,seal_no,
+          gross_weight_kg,gross_weight_raw,measurement_cbm,measurement_raw,
+          tare_kg,tare_raw,package_type_id,package_type_snapshot,
+          number_of_packages,number_of_packages_raw,method,presentation_payload
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb)`,
+        [
+          documentId,
+          rowOrder,
+          this.optionalText(row.type),
+          this.optionalText(row.containerNo),
+          this.optionalText(row.sealNo),
+          gross.numeric,
+          gross.raw,
+          measurement.numeric,
+          measurement.raw,
+          tare.numeric,
+          tare.raw,
+          packageTypeId,
+          this.optionalText(row.packageType),
+          packageCount,
+          packages.raw,
+          this.optionalText(row.method),
+          JSON.stringify(
+            this.optionalText(row.note)
+              ? { note: this.optionalText(row.note) }
+              : {},
+          ),
+        ],
+      );
+    }
+  }
+
+  private optionalText(value: unknown): string | null {
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+  }
+
+  private positiveId(value: unknown): number | null {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  private async resolvePackageTypeId(
+    row: Record<string, unknown>,
+    manager: EntityManager,
+  ): Promise<number | null> {
+    const explicit = this.positiveId(row.packageTypeId);
+    if (explicit) return explicit;
+    const snapshot = this.optionalText(row.packageType);
+    if (!snapshot) return null;
+    const matches: Array<{ id: number }> = await manager.query(
+      `SELECT type.id FROM commodity_types type
+        JOIN service_types service ON service.id = type.service_type_id
+          AND UPPER(BTRIM(service.name)) = 'FREIGHT FORWARDING'
+        WHERE TRUE
+          AND LOWER(REGEXP_REPLACE(BTRIM(name), '\\s+', ' ', 'g')) =
+              LOWER(REGEXP_REPLACE(BTRIM($1), '\\s+', ' ', 'g'))
+        ORDER BY id LIMIT 2`,
+      [snapshot],
+    );
+    return matches.length === 1 ? Number(matches[0].id) : null;
   }
 
   private referenceNumber(
@@ -765,6 +893,7 @@ export class BookingDocumentRecordService {
   private toResponse(
     type: BookingDocumentType,
     record: BookingDocumentRecordBase,
+    workflowStatus?: BookingDocumentStatus,
   ) {
     const bookingFlow =
       type === BookingDocumentType.BOOKING_CONFIRMATION
@@ -783,6 +912,7 @@ export class BookingDocumentRecordService {
       referenceNumber: this.referenceNumber(type, record.payload),
       payload: record.payload,
       status: record.status,
+      ...(workflowStatus ? { workflowStatus } : {}),
       version: Number(record.version ?? 1),
       createdByUserId: record.createdByUserId,
       createdAt: record.createdAt.toISOString(),

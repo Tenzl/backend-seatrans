@@ -29,13 +29,15 @@ describe('PortsQuery', () => {
 
     expect(query).toHaveBeenNthCalledWith(
       1,
-      expect.stringMatching(/COUNT\(\*\)::int[\s\S]*port\.code/),
-      [true, 3, 2, '%da%', '%da%'],
+      expect.stringMatching(
+        /COUNT\(\*\)::int[\s\S]*sub_name_1[\s\S]*sub_name_2[\s\S]*port\.code/,
+      ),
+      [true, 3, 2, '%da%', '%da%', '%da%', '%da%'],
     );
     expect(query).toHaveBeenNthCalledWith(
       2,
       expect.stringContaining('SELECT port.id'),
-      [true, 3, 2, '%da%', '%da%', 2, 2],
+      [true, 3, 2, '%da%', '%da%', '%da%', '%da%', 2, 2],
     );
     expect(queryBuilder.where).toHaveBeenCalledWith('port.id IN (:...ids)', {
       ids: [2, 1],
@@ -70,7 +72,7 @@ describe('PortsQuery', () => {
     expect(query).toHaveBeenNthCalledWith(
       1,
       expect.stringMatching(/port\.code/),
-      [true, '%vniuh%', '%vniuh%'],
+      [true, '%vniuh%', '%vniuh%', '%vniuh%', '%vniuh%'],
     );
     expect(page.content).toMatchObject([{ id: 7, code: 'VNIUH' }]);
   });
@@ -106,10 +108,16 @@ function createQueryBuilder(ports: Port[]) {
   };
 }
 
-function createPort(id: number, name: string, code: string | null = null): Port {
+function createPort(
+  id: number,
+  name: string,
+  code: string | null = null,
+): Port {
   return {
     id,
     name,
+    subName1: null,
+    subName2: null,
     portOfCall: name.toUpperCase(),
     province: null,
     zoneCode: null,

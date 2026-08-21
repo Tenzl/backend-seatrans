@@ -10,12 +10,21 @@ export class BookingConfirmationPreviewDto {
   @PreviewText(100) etd?: string;
   @PreviewText(100) eta?: string;
   @PreviewText(300) placeOfReceipt?: string;
+  @IsOptional() @IsInt() @Min(1) placeOfReceiptPortId?: number | null;
   @PreviewText(300) portOfLoading?: string;
+  @IsOptional() @IsInt() @Min(1) portOfLoadingPortId?: number | null;
+  /** Independent B/L issuing place; never infer from the cargo route. */
+  @PreviewText(300) placeOfIssue?: string;
+  @IsOptional() @IsInt() @Min(1) placeOfIssuePortId?: number | null;
   @PreviewText(100) pickupDate?: string;
   @PreviewText(300) pickupPlace?: string;
+  @IsOptional() @IsInt() @Min(1) pickupPlacePortId?: number | null;
   @PreviewText(300) portOfDischarge?: string;
+  @IsOptional() @IsInt() @Min(1) portOfDischargePortId?: number | null;
   @PreviewText(300) placeOfDelivery?: string;
+  @IsOptional() @IsInt() @Min(1) placeOfDeliveryPortId?: number | null;
   @PreviewText(300) dropoffPlace?: string;
+  @IsOptional() @IsInt() @Min(1) dropoffPlacePortId?: number | null;
   @PreviewText(100) closingTime?: string;
   @PreviewText(100) siCutoff?: string;
   @PreviewText(100) vgmCutoff?: string;
@@ -40,6 +49,7 @@ export class BookingConfirmationPreviewDto {
   @PreviewText(300) grossWeight?: string;
   @PreviewText(300) measurement?: string;
   @PreviewText(300) transitPort?: string;
+  @IsOptional() @IsInt() @Min(1) transitPortId?: number | null;
   @PreviewText(2_000) specialRemark?: string;
   @PreviewText(300) motherVessel?: string;
   @PreviewText(300) motherVoyage?: string;

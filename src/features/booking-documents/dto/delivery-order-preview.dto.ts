@@ -26,10 +26,15 @@ export class DeliveryOrderPreviewDto {
   @PreviewText(200) shipmentNumber?: string;
   @PreviewText(300) vesselVoyage?: string;
   @PreviewText(300) placeOfReceipt?: string;
+  @IsOptional() @IsInt() @Min(1) placeOfReceiptPortId?: number | null;
   @PreviewText(300) portOfLoading?: string;
+  @IsOptional() @IsInt() @Min(1) portOfLoadingPortId?: number | null;
   @PreviewText(300) portOfDischarge?: string;
+  @IsOptional() @IsInt() @Min(1) portOfDischargePortId?: number | null;
   @PreviewText(300) placeOfDelivery?: string;
+  @IsOptional() @IsInt() @Min(1) placeOfDeliveryPortId?: number | null;
   @PreviewText(300) finalDestination?: string;
+  @IsOptional() @IsInt() @Min(1) finalDestinationPortId?: number | null;
   /**
    * AN service mode (e.g. `FCL/FCL - CY/CY`). Synced from Arrival Notice;
    * not edited on DO.

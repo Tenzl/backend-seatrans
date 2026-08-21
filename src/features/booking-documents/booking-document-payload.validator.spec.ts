@@ -48,6 +48,38 @@ describe('BookingDocumentPayloadValidator independent catalogs', () => {
     });
   });
 
+  it('accepts an independent B/L place of issue on Booking', async () => {
+    const { validator } = subject();
+
+    const result = await validator.validate(
+      BookingDocumentType.BOOKING_CONFIRMATION,
+      { placeOfIssue: 'QUI NHON, VN (VNUIH)' },
+    );
+
+    expect(result).toMatchObject({ placeOfIssue: 'QUI NHON, VN (VNUIH)' });
+  });
+
+  it('whitelists route Port identities beside their display snapshots', async () => {
+    const { validator } = subject();
+
+    const result = await validator.validate(
+      BookingDocumentType.BOOKING_CONFIRMATION,
+      {
+        placeOfReceipt: 'QUY NHON (VNUIH)',
+        placeOfReceiptPortId: 42,
+        portOfLoading: 'CAT LAI (VNSGN)',
+        portOfLoadingPortId: 51,
+      },
+    );
+
+    expect(result).toMatchObject({
+      placeOfReceipt: 'QUY NHON (VNUIH)',
+      placeOfReceiptPortId: 42,
+      portOfLoading: 'CAT LAI (VNSGN)',
+      portOfLoadingPortId: 51,
+    });
+  });
+
   it('allows an arbitrary same-Service Type and Commodity combination for AN', async () => {
     const { validator } = subject({
       commodityTypeId: 31,

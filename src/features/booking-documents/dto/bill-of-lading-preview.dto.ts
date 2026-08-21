@@ -27,11 +27,15 @@ export class BillOfLadingPreviewDto {
   @IsOptional() @IsBoolean() notifyPartySameAsConsignee?: boolean;
 
   @PreviewText(300) placeOfReceipt?: string;
+  @IsOptional() @IsInt() @Min(1) placeOfReceiptPortId?: number | null;
   /** Vessel and voyage in one string (e.g. `SITC MINHE / 2615N`). */
   @PreviewText(300) oceanVessel?: string;
   @PreviewText(300) portOfLoading?: string;
+  @IsOptional() @IsInt() @Min(1) portOfLoadingPortId?: number | null;
   @PreviewText(300) portOfDischarge?: string;
+  @IsOptional() @IsInt() @Min(1) portOfDischargePortId?: number | null;
   @PreviewText(300) placeOfDelivery?: string;
+  @IsOptional() @IsInt() @Min(1) placeOfDeliveryPortId?: number | null;
 
   /**
    * AN service mode (e.g. `FCL/FCL - CY/CY`) — PDF marks column row 1.
@@ -73,6 +77,7 @@ export class BillOfLadingPreviewDto {
   @PreviewText(300) freightAmount?: string;
   @PreviewText(300) freightPayableAt?: string;
   @PreviewText(300) placeOfIssue?: string;
+  @IsOptional() @IsInt() @Min(1) placeOfIssuePortId?: number | null;
   @PreviewText(100) dateOfIssue?: string;
   @PreviewText(100) numberOfOriginals?: string;
 

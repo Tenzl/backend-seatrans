@@ -226,11 +226,24 @@ describe('BookingDocumentRecordService lifecycle', () => {
         agent: 'Agent',
         shipper: 'Shipper',
         consignee: 'Consignee',
+        hblNumber: 'HBL-101',
         vesselVoyage: 'Vessel / V1',
         eta: '2026-08-10',
+        portOfLoading: 'SGN',
         portOfDischarge: 'QNH',
+        serviceMode: 'FCL/FCL - CY/CY',
         descriptionOfGoods: 'Stone',
-        containers: [{ containerNo: 'CONT-1' }],
+        containers: [
+          {
+            type: "20'DC",
+            containerNo: 'CONT-1',
+            sealNo: 'SEAL-1',
+            grossWeight: '24000',
+            measurement: '28',
+            noOfPkgs: '10',
+            packageType: 'PKGS',
+          },
+        ],
       },
       8,
     );
@@ -353,6 +366,163 @@ describe('BookingDocumentRecordService lifecycle', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('keeps the Export workflow processing until both Booking and BL are completed', async () => {
+    userRepository.findOne.mockResolvedValueOnce({
+      id: 4,
+      fullName: 'Operator',
+      companyEmail: 'operator@seatrans.test',
+    });
+    const booking = await service.createRecord(
+      BookingDocumentType.BOOKING_CONFIRMATION,
+      {
+        bookingNumber: 'EXP-STATUS',
+        bookingFlow: BookingFlow.EXPORT,
+        date: '2026-08-21',
+        to: 'Customer',
+        vesselVoyage: 'VESSEL / V1',
+        etd: '2026-08-22',
+        eta: '2026-08-25',
+        portOfLoading: 'VNUIH',
+        portOfDischarge: 'JPTYO',
+        commodityType: 'PKGS',
+        commodityName: 'STONE',
+        grossWeight: '24000',
+        measurement: '28',
+        pic: 'Operator',
+        cargoVolumes: { "20'DC": 1 },
+      },
+      4,
+    );
+    expect(booking.status).toBe(BookingDocumentStatus.COMPLETED);
+    const bill = await service.createRecord(
+      BookingDocumentType.BILL_OF_LADING,
+      { fblNumber: 'BL-STATUS', bookingId: booking.id },
+      4,
+    );
+
+    await expect(service.getWorkflow(booking.id)).resolves.toMatchObject({
+      status: BookingDocumentStatus.PROCESSING,
+    });
+
+    await service.updateRecord(
+      BookingDocumentType.BILL_OF_LADING,
+      bill.id,
+      {
+        expectedVersion: bill.version,
+        fblNumber: 'BL-STATUS',
+        consignor: 'Shipper',
+        consignedToOrderOf: 'Consignee',
+        oceanVessel: 'VESSEL / V1',
+        portOfLoading: 'VNUIH',
+        portOfDischarge: 'JPTYO',
+        serviceMode: 'FCL/FCL - CY/CY',
+        shippingMark: 'N/M',
+        descriptionOfGoods: 'STONE',
+        placeOfIssue: 'QUY NHON',
+        dateOfIssue: '2026-08-21',
+        numberOfOriginals: 'THREE/3',
+        containers: [
+          {
+            type: "20'DC",
+            containerNo: 'CONT-1',
+            sealNo: 'SEAL-1',
+            grossWeight: '24000',
+            measurement: '28',
+            noOfPkgs: '10',
+            packageType: 'PKGS',
+          },
+        ],
+      },
+      4,
+    );
+
+    await expect(service.getWorkflow(booking.id)).resolves.toMatchObject({
+      status: BookingDocumentStatus.COMPLETED,
+    });
+  });
+
+  it('keeps the Import workflow processing until Booking, AN, and DO are completed', async () => {
+    userRepository.findOne.mockResolvedValueOnce({
+      id: 4,
+      fullName: 'Operator',
+      companyEmail: 'operator@seatrans.test',
+    });
+    const booking = await service.createRecord(
+      BookingDocumentType.BOOKING_CONFIRMATION,
+      {
+        bookingNumber: 'IMP-STATUS',
+        bookingFlow: BookingFlow.IMPORT,
+        date: '2026-08-21',
+        to: 'Customer',
+        vesselVoyage: 'VESSEL / V1',
+        etd: '2026-08-18',
+        eta: '2026-08-22',
+        portOfLoading: 'JPTYO',
+        portOfDischarge: 'VNUIH',
+        commodityType: 'PKGS',
+        commodityName: 'STONE',
+        grossWeight: '24000',
+        measurement: '28',
+        cargoVolumes: { "20'DC": 1 },
+      },
+      4,
+    );
+    const container = {
+      type: "20'DC",
+      containerNo: 'CONT-IMP-1',
+      sealNo: 'SEAL-IMP-1',
+      grossWeight: '24000',
+      measurement: '28',
+      noOfPkgs: '10',
+      packageType: 'PKGS',
+    };
+    await service.createRecord(
+      BookingDocumentType.ARRIVAL_NOTICE,
+      {
+        bookingId: booking.id,
+        anNumber: 'AN-STATUS',
+        date: '2026-08-21',
+        agent: 'Agent',
+        shipper: 'Shipper',
+        consignee: 'Consignee',
+        hblNumber: 'HBL-STATUS',
+        vesselVoyage: 'VESSEL / V1',
+        eta: '2026-08-22',
+        portOfLoading: 'JPTYO',
+        portOfDischarge: 'VNUIH',
+        serviceMode: 'FCL/FCL - CY/CY',
+        descriptionOfGoods: 'STONE',
+        containers: [container],
+      },
+      4,
+    );
+
+    await expect(service.getWorkflow(booking.id)).resolves.toMatchObject({
+      status: BookingDocumentStatus.PROCESSING,
+    });
+
+    await service.createRecord(
+      BookingDocumentType.DELIVERY_ORDER,
+      {
+        bookingId: booking.id,
+        doNumber: 'DO-STATUS',
+        date: '2026-08-21',
+        to: 'Terminal',
+        deliverTo: 'Consignee',
+        hblNumber: 'HBL-STATUS',
+        vesselVoyage: 'VESSEL / V1',
+        eta: '2026-08-22',
+        portOfLoading: 'JPTYO',
+        portOfDischarge: 'VNUIH',
+      },
+      4,
+    );
+
+    await expect(service.getWorkflow(booking.id)).resolves.toMatchObject({
+      status: BookingDocumentStatus.COMPLETED,
+    });
+  });
+
   it('import workflow requires AN before DO and rejects duplicate active steps', async () => {
     const booking = await service.createRecord(
       BookingDocumentType.BOOKING_CONFIRMATION,
@@ -392,12 +562,20 @@ describe('BookingDocumentRecordService lifecycle', () => {
       {
         bookingNumber: 'IMP-LOCK',
         bookingFlow: BookingFlow.IMPORT,
+        date: '2026-08-04',
         to: 'Client',
         vesselVoyage: 'Vessel / V1',
+        etd: '2026-08-05',
+        eta: '2026-08-10',
         portOfLoading: 'SGN',
         portOfDischarge: 'QNH',
+        commodityType: 'PKGS',
+        commodityName: 'Stone',
         commodity: 'Stone',
         cargoVolumes: { "20'DC": 1 },
+        grossWeight: '24000',
+        measurement: '28',
+        pic: 'Operator',
       },
       4,
     );

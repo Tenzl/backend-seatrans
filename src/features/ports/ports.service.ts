@@ -17,6 +17,7 @@ import { normalizeProvinceAreaCode } from '../provinces/province-area';
 import {
   normalizePortName,
   normalizePortOfCall,
+  normalizePortSubNames,
   normalizeProvinceId,
   toPortDto,
 } from './port-normalization';
@@ -102,8 +103,16 @@ export class PortsService {
       throw new ConflictException('Port already exists in this province scope');
     }
 
+    const [subName1, subName2] = this.resolveSubNames(
+      normalizedName,
+      dto.subName1,
+      dto.subName2,
+    );
+
     const port = this.portRepository.create({
       name: normalizedName,
+      subName1,
+      subName2,
       portOfCall: normalizePortOfCall(dto.portOfCall, normalizedName),
       province: province ?? null,
       zoneCode: dto.zoneCode?.trim() || null,
@@ -152,7 +161,15 @@ export class PortsService {
       throw new ConflictException('Port already exists in this province scope');
     }
 
+    const [subName1, subName2] = this.resolveSubNames(
+      normalizedName,
+      dto.subName1 === undefined ? port.subName1 : dto.subName1,
+      dto.subName2 === undefined ? port.subName2 : dto.subName2,
+    );
+
     port.name = normalizedName;
+    port.subName1 = subName1;
+    port.subName2 = subName2;
     port.portOfCall = normalizePortOfCall(dto.portOfCall, normalizedName);
     port.province = province ?? null;
     port.inCharge = inCharge;
@@ -214,6 +231,20 @@ export class PortsService {
   private async invalidateProvincesPublicCache(): Promise<void> {
     // Active provinces list excludes empty provinces; port CRUD can change that.
     await this.cache.deleteByPrefix(PUBLIC_PROVINCES_CACHE_PREFIX);
+  }
+
+  private resolveSubNames(
+    mainName: string,
+    subName1?: string | null,
+    subName2?: string | null,
+  ): [string | null, string | null] {
+    try {
+      return normalizePortSubNames(mainName, subName1, subName2);
+    } catch (error) {
+      throw new BadRequestException(
+        error instanceof Error ? error.message : 'Invalid sub name',
+      );
+    }
   }
 
   private async resolveProvince(provinceId?: number): Promise<Province | null> {

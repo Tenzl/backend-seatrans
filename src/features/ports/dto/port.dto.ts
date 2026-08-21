@@ -3,6 +3,8 @@ import type { PortType } from '../entities/port.entity';
 export class PortDto {
   id: number;
   name: string;
+  subName1: string | null;
+  subName2: string | null;
   portOfCall: string;
   provinceId: number | null;
   provinceName: string | null;

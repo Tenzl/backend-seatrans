@@ -3,6 +3,7 @@ import type { Port } from './entities/port.entity';
 import {
   normalizePortName,
   normalizePortOfCall,
+  normalizePortSubNames,
   normalizeProvinceId,
   toPortDto,
 } from './port-normalization';
@@ -20,6 +21,15 @@ describe('port normalization', () => {
       'CAI MEP',
     );
     expect(normalizePortOfCall(undefined, 'Port')).toBe('PORT');
+  });
+
+  it('normalizes at most two distinct sub names', () => {
+    expect(
+      normalizePortSubNames('QUY NHON PORT', '  Qui   Nhon ', 'qui nhon'),
+    ).toEqual(['Qui Nhon', null]);
+    expect(() =>
+      normalizePortSubNames('Quy Nhon', 'QUY NHON', undefined),
+    ).toThrow('Sub name must differ from the main name');
   });
 
   it('maps legacy non-positive province ids to no province', () => {
@@ -62,6 +72,8 @@ describe('port normalization', () => {
       provinceId: 4,
       provinceName: 'Bà Rịa – Vũng Tàu',
       provinceArea: 1,
+      subName1: 'QUI NHON',
+      subName2: 'QUY NHON',
     });
   });
 });
@@ -70,6 +82,8 @@ function createPort(overrides: Partial<Port> = {}): Port {
   return {
     id: 9,
     name: 'Cai Mep',
+    subName1: 'QUI NHON',
+    subName2: 'QUY NHON',
     portOfCall: 'CAI MEP',
     province: null,
     zoneCode: null,

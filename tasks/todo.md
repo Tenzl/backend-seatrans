@@ -1048,3 +1048,277 @@ and produce deploy/migration evidence.
       `package_types` after checksummed backups and a rollback rehearsal.
 - [x] Postflight: 101 Freight Forwarding Types, zero duplicates, zero
       `PALLETS`, no legacy table, unchanged cargo checksums.
+
+## Task 35: Preflight Booking-document relational IDs
+
+- [ ] Report per-table counts for every promoted ID.
+- [ ] Abort on non-integer, non-positive, orphaned or Service-invalid commodity IDs.
+- [ ] Capture payload/document checksums without writes.
+
+## Task 36: Expand relational ID columns
+
+- [ ] Add nullable integer columns without rewriting payloads.
+- [ ] Add partial indexes concurrently and NOT VALID FKs with explicit delete policy.
+- [ ] Guard target, checksum, backup reference and rerun state.
+
+## Task 37: Map TypeORM entities
+
+- [ ] Four record entities expose only their applicable scalar ID columns.
+- [ ] Entity metadata matches SQL names/types/nullability.
+- [ ] Backend focused lint and build pass.
+
+## Task 38: Backfill relational ID columns
+
+- [ ] Backfill exact positive-integer JSON IDs only.
+- [ ] Postflight proves column/payload equality and zero target orphans.
+- [ ] Data phase is idempotent and separately confirmed from expand.
+
+## Task 39: Cut runtime reads/writes to columns
+
+- [ ] Create/update/copy store canonical IDs in columns.
+- [ ] API responses reconstruct the unchanged camelCase ID contract.
+- [ ] Legacy records fall back to JSON only until backfill verification passes.
+
+## Task 40: Replace JSON identity usage queries
+
+- [ ] Partner deletion guards query relational columns.
+- [ ] Commodity/Type usage guards query relational columns.
+- [ ] Existing generated reporting/search columns remain unchanged.
+
+## Checkpoint relational runtime
+
+- [ ] Focused backend booking tests pass.
+- [ ] Dashboard five-form save/reload/prefill tests pass.
+- [ ] Read-only live preflight and postflight counts agree.
+
+## Task 41: Contract JSON identity keys
+
+- [ ] Require deployment, observation, backup and recovery references.
+- [ ] Remove only verified promoted keys from JSONB.
+- [ ] Preserve all text snapshots, cargo/container arrays and document checksums.
+
+## Task 42: Release verification and apply
+
+- [ ] Migration tests, backend full tests/build and scoped lint pass.
+- [ ] Dashboard tests/typecheck/build pass.
+- [ ] Human approves target and live apply evidence before completion.
+
+## Task 43: Probe the current authenticated FreightEK instruction tab
+
+**Description:** Inspect Shipment `S2608020` in the Chrome tab that is already
+logged in and freeze stable visible-DOM selectors for the Element UI container
+table. The implementation must read live input properties and must not use
+Playwright.
+
+**Acceptance criteria:**
+
+- [x] Extract every displayed container row and all 14 container fields from live values.
+- [x] Visible row count equals the FreightEK `Total` count without hidden/fixed duplicates.
+- [ ] Auth redirect, selector drift and empty-table states are distinguishable.
+
+**Verification:**
+
+- [ ] Compare extracted values manually with the rendered sample page.
+- [x] Prove copied outerHTML alone is rejected as an incomplete value source.
+- [x] Confirm no credential/token/cookie is read, exported or written to logs/tracked files.
+
+**Dependencies:** None
+
+**Files likely touched:**
+
+- `tools/freightek-container-import/chrome-extension/content.js`
+- `tools/freightek-container-import/test/content-extractor.test.mjs`
+- `tools/freightek-container-import/fixtures/instruction-table.html`
+
+**Estimated scope:** Medium (3 files)
+
+## Task 44: Scaffold the Manifest V3 extension and input manifest
+
+**Description:** Create the isolated tool folder, load the 310-row filtered
+workbook into a canonical Shipment ID → Booking No. manifest, and create an
+unpacked Chrome extension that runs in the existing logged-in Chrome profile.
+
+**Acceptance criteria:**
+
+- [x] Manifest has exactly 310 unique Shipment IDs and 310 canonical Booking No. values.
+- [x] URLs are generated only from validated Shipment IDs.
+- [x] Extension host permission is limited to FreightEK instruction pages.
+- [x] Credentials, cookies and local raw outputs cannot be committed accidentally.
+
+**Verification:**
+
+- [x] Unit tests cover duplicate, blank and malformed manifest identifiers.
+- [ ] Extension loads unpacked and recognizes the currently selected authenticated FreightEK tab.
+- [x] Repository secret scan finds no FreightEK cookie/token/password.
+
+**Dependencies:** Task 43
+
+**Files likely touched:**
+
+- `tools/freightek-container-import/package.json`
+- `tools/freightek-container-import/.gitignore`
+- `tools/freightek-container-import/src/manifest.mjs`
+- `tools/freightek-container-import/chrome-extension/manifest.json`
+- `tools/freightek-container-import/chrome-extension/popup.html`
+- `tools/freightek-container-import/chrome-extension/popup.js`
+- `tools/freightek-container-import/test/manifest.test.mjs`
+
+**Estimated scope:** Medium (7 files)
+
+## Task 45: Implement resumable container extraction
+
+**Description:** Reuse one selected FreightEK tab, replace the Shipment ID in its
+instruction URL, wait for the live table to become stable, extract it through a
+content script and persist progress/results for safe pause and resume. Use
+bounded retry and rate limiting; do not use Playwright or open one tab per ID.
+
+**Acceptance criteria:**
+
+- [x] Each successful record contains Shipment ID, URL, retrieval time and all live DOM rows.
+- [x] Resume skips only checksum-verified successes and retries explicit failures.
+- [ ] One expired session stops safely without corrupting completed output.
+- [x] Navigation changes only the Shipment ID path segment in the selected FreightEK tab.
+
+**Verification:**
+
+- [ ] Fixture tests cover DOM values, hidden duplicate rows, timeout and auth expiry.
+- [ ] Mocked Chrome API tests cover `tabs.update`, storage resume and pause/resume messages.
+- [ ] A three-Shipment pilot reruns idempotently.
+- [ ] Raw evidence checksum is stable for unchanged fixture data.
+
+**Dependencies:** Tasks 43–44
+
+**Files likely touched:**
+
+- `tools/freightek-container-import/chrome-extension/background.js`
+- `tools/freightek-container-import/chrome-extension/content.js`
+- `tools/freightek-container-import/chrome-extension/popup.js`
+- `tools/freightek-container-import/chrome-extension/lib/extract-table.js`
+- `tools/freightek-container-import/chrome-extension/lib/state.js`
+- `tools/freightek-container-import/test/collector.test.mjs`
+
+**Estimated scope:** Medium (6 files)
+
+## Task 46: Normalize and validate BL container mapping
+
+**Description:** Convert FreightEK rows into the current Seatrans container
+shape, retain unsupported fields in audit data and refuse ambiguous count/type
+or existing-value conflicts.
+
+**Acceptance criteria:**
+
+- [ ] Canonical output maps Type, Container No., Seal No., Gross Weight,
+      Measurement, Tare, Package type, No of Pkgs, Note and Method exactly.
+- [ ] Curly quotes/type aliases normalize deterministically without guessing unknown types.
+- [ ] Over Weight, Net Weight, Max Gross Weight and VGM remain lossless in audit output.
+
+**Verification:**
+
+- [ ] Unit tests cover type buckets, repeated types, nonblank container matching and mismatches.
+- [ ] Booking gross weight and protected BL fields are absent from the update patch.
+- [ ] Normalizing the same source twice produces the same checksum.
+
+**Dependencies:** Task 45
+
+**Files likely touched:**
+
+- `tools/freightek-container-import/src/normalize-container.mjs`
+- `tools/freightek-container-import/src/map-containers.mjs`
+- `tools/freightek-container-import/test/normalize-container.test.mjs`
+- `tools/freightek-container-import/test/map-containers.test.mjs`
+
+**Estimated scope:** Medium (4 files)
+
+## Task 47: Collect all 310 shipments and report exceptions
+
+**Description:** Run the extractor against the approved manifest and generate
+checksummed JSON/NDJSON/CSV summaries without connecting to the Seatrans
+database. The popup exports the completed collection through Chrome Downloads.
+
+**Acceptance criteria:**
+
+- [ ] All 310 Shipment IDs end in one explicit terminal classification.
+- [ ] Success totals reconcile source row counts; failures include actionable reasons.
+- [ ] Rerun changes only previously failed or source-changed Shipments.
+- [ ] Login redirect pauses the run and Resume continues at the same Shipment ID after re-login.
+
+**Verification:**
+
+- [ ] Success + failure + skipped equals 310.
+- [ ] Spot-check at least five Shipments including repeated container Types.
+- [ ] Human reviews the unsupported-field and mapping-conflict reports.
+
+**Dependencies:** Tasks 45–46
+
+**Files likely touched:**
+
+- `tools/freightek-container-import/src/report.mjs`
+- `tools/freightek-container-import/chrome-extension/lib/export-results.js`
+- `tools/freightek-container-import/README.md`
+- Local gitignored `output/*`
+
+**Estimated scope:** Small (3 tracked files plus local outputs)
+
+## Checkpoint FreightEK extraction
+
+- [ ] No database write has occurred.
+- [ ] All 310 Shipment IDs are accounted for.
+- [ ] Human approves handling of unsupported fields and conflicts.
+
+## Task 48: Build guarded database preflight and dry-run
+
+**Description:** Resolve each normalized Shipment mapping to one active Booking
+and one active BL, create a targeted checksummed backup and simulate exact
+container patches with row/version conflict checks.
+
+**Acceptance criteria:**
+
+- [ ] Every eligible Shipment resolves Shipment ID → canonical Booking No. → unique BL.
+- [ ] Dry-run refuses missing, duplicate, edited, locked, count/type-mismatched targets.
+- [ ] Backup contains full before-images for every candidate Booking/BL row.
+
+**Verification:**
+
+- [ ] Run against fixtures and a disposable database copy before the real target.
+- [ ] Read-only live preflight reports zero writes and protected checksums.
+- [ ] Recovery rehearsal restores the targeted before-images exactly.
+
+**Dependencies:** Task 47 and extraction checkpoint approval
+
+**Files likely touched:**
+
+- `tools/freightek-container-import/src/db-preflight.mjs`
+- `tools/freightek-container-import/src/backup.mjs`
+- `tools/freightek-container-import/src/migration-plan.mjs`
+- `tools/freightek-container-import/test/db-preflight.test.mjs`
+- `tools/freightek-container-import/test/recovery.test.mjs`
+
+**Estimated scope:** Medium (5 files)
+
+## Task 49: Apply approved BL container migration
+
+**Description:** Apply only conflict-free rows in a guarded transaction, update
+BL container payloads with optimistic-version/audit handling and verify all
+protected Booking/BL data after commit.
+
+**Acceptance criteria:**
+
+- [ ] Only `bill_of_lading_records.payload.containers`, version and update audit fields change.
+- [ ] Booking `grossWeight` and all unrelated BL payload fields remain byte-equivalent.
+- [ ] Migration ledger/checksums make reruns idempotent and auditable.
+
+**Verification:**
+
+- [ ] Explicit target DB, backup, input checksum and confirmation token are required.
+- [ ] Postflight container counts/types/values equal the approved extraction manifest.
+- [ ] Second dry-run reports zero pending changes.
+
+**Dependencies:** Task 48 and explicit human apply approval
+
+**Files likely touched:**
+
+- `tools/freightek-container-import/src/migrate.mjs`
+- `tools/freightek-container-import/src/postflight.mjs`
+- `tools/freightek-container-import/test/migrate.test.mjs`
+
+**Estimated scope:** Medium (3 files)

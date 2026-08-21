@@ -28,6 +28,17 @@ export abstract class BookingDocumentRecordBase {
   @Column({ type: 'jsonb' })
   payload!: Record<string, unknown>;
 
+  /** Presentation-only snapshot; payload remains during expand/dual-write. */
+  @Column({
+    name: 'presentation_payload',
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  presentationPayload!: Record<string, unknown>;
+
+  @Column({ name: 'presentation_schema_version', type: 'smallint', default: 1 })
+  presentationSchemaVersion!: number;
+
   @Column({
     type: 'varchar',
     length: 20,

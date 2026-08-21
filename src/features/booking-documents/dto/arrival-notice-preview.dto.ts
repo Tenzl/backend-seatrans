@@ -36,10 +36,15 @@ export class ArrivalNoticePreviewDto {
   @PreviewText(200) referenceNumber?: string;
   @PreviewText(200) billOfLadingType?: string;
   @PreviewText(300) placeOfReceipt?: string;
+  @IsOptional() @IsInt() @Min(1) placeOfReceiptPortId?: number | null;
   @PreviewText(300) portOfLoading?: string;
+  @IsOptional() @IsInt() @Min(1) portOfLoadingPortId?: number | null;
   @PreviewText(300) portOfDischarge?: string;
+  @IsOptional() @IsInt() @Min(1) portOfDischargePortId?: number | null;
   @PreviewText(300) placeOfDelivery?: string;
+  @IsOptional() @IsInt() @Min(1) placeOfDeliveryPortId?: number | null;
   @PreviewText(300) finalDestination?: string;
+  @IsOptional() @IsInt() @Min(1) finalDestinationPortId?: number | null;
   @PreviewText(200) serviceMode?: string;
   @PreviewText(2_000) note?: string;
   @PreviewText(2_000) marks?: string;

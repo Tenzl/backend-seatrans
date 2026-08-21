@@ -45,6 +45,74 @@ export class DeliveryOrderRecord extends BookingDocumentRecordBase {
   booking?: BookingRecord | null;
 
   @Column({
+    name: 'document_number_v2',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
+  documentNumberV2!: string | null;
+  @Column({ name: 'document_date', type: 'date', nullable: true })
+  documentDate!: string | null;
+  @Column({ name: 'consignee_party_id', type: 'int', nullable: true })
+  consigneePartyId!: number | null;
+  @Column({ name: 'notify_party_id', type: 'int', nullable: true })
+  notifyPartyId!: number | null;
+  @Column({
+    name: 'master_bill_number_v2',
+    type: 'varchar',
+    length: 200,
+    nullable: true,
+  })
+  masterBillNumberV2!: string | null;
+  @Column({
+    name: 'house_bill_number_v2',
+    type: 'varchar',
+    length: 200,
+    nullable: true,
+  })
+  houseBillNumberV2!: string | null;
+  @Column({
+    name: 'shipment_number_v2',
+    type: 'varchar',
+    length: 200,
+    nullable: true,
+  })
+  shipmentNumberV2!: string | null;
+  @Column({ name: 'place_of_receipt_port_id', type: 'int', nullable: true })
+  placeOfReceiptPortId!: number | null;
+  @Column({ name: 'port_of_loading_id', type: 'int', nullable: true })
+  portOfLoadingId!: number | null;
+  @Column({ name: 'port_of_discharge_id', type: 'int', nullable: true })
+  portOfDischargeId!: number | null;
+  @Column({ name: 'place_of_delivery_port_id', type: 'int', nullable: true })
+  placeOfDeliveryPortId!: number | null;
+  @Column({ name: 'final_destination_port_id', type: 'int', nullable: true })
+  finalDestinationPortId!: number | null;
+  @Column({
+    name: 'vessel_voyage_text',
+    type: 'varchar',
+    length: 300,
+    nullable: true,
+  })
+  vesselVoyageText!: string | null;
+  @Column({ name: 'etd', type: 'date', nullable: true }) etd!: string | null;
+  @Column({ name: 'eta', type: 'date', nullable: true }) eta!: string | null;
+  @Column({
+    name: 'service_mode',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
+  serviceMode!: string | null;
+  @Column({
+    name: 'cfs_terminal',
+    type: 'varchar',
+    length: 300,
+    nullable: true,
+  })
+  cfsTerminal!: string | null;
+
+  @Column({
     name: 'do_number',
     type: 'varchar',
     length: 100,
